@@ -33,6 +33,8 @@ local T = MiniTest.new_set({ hooks = {
     use({}, {})
   end,
   post_case = function()
+    status._reset() -- cancel timers
+    vim.wait(80, function() return false end, 10) -- let in-flight async writes finish before the dir goes
     vim.notify = orig_notify
     if env_xdg then vim.uv.os_setenv('XDG_RUNTIME_DIR', env_xdg) else vim.uv.os_unsetenv('XDG_RUNTIME_DIR') end
     status._reset()
