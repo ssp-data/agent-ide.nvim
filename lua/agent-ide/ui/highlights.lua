@@ -18,14 +18,16 @@ local GROUPS = {
   AgentIdeLevel4 = { fg = '#a277ff', ctermfg = 141, bold = true }, -- violet, bold: input required
   AgentIdeWaiting = { link = 'AgentIdeLevel4' },
   AgentIdeBusy = { link = 'AgentIdeLevel2' },
-  AgentIdeIdle = { link = 'AgentIdeLevel1' },
+  -- idle: a filled mark in a mid grey (green reads as running); parked is the hollow mark in the
+  -- dim comment colour, so the two differ in shape and brightness
+  AgentIdeIdle = { fg = '#8b95a7', ctermfg = 247 },
   AgentIdeParked = M.dim, -- dimmed
   AgentIdeDone = { link = 'AgentIdeLevel3' }, -- the result waits to be read
   AgentIdeFailed = { fg = '#f7768e', ctermfg = 204 }, -- red; its status level stays 3 (review)
   AgentIdeMissing = M.dim,
   AgentIdeAge = M.dim,
   AgentIdeSection = { link = 'Directory' },
-  AgentIdeAnswerMark = { link = 'AgentIdeIdle' }, -- the ● before Claude's own text in a transcript
+  AgentIdeAnswerMark = { link = 'AgentIdeLevel1' }, -- the ● before Claude's own text in a transcript (green)
   -- chat winbar: the model in italic (Normal's foreground), the permission mode as a badge; a
   -- mode other than the default one in a warning colour
   AgentIdeModel = function()

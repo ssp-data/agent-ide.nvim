@@ -538,6 +538,11 @@ T['highlight groups survive a colorscheme change; waiting is violet'] = function
   child.cmd('colorscheme default')
   eq(child.lua_get('vim.api.nvim_get_hl(0, { name = "AgentIdeWaiting", link = false }).fg'), 0xa277ff)
   eq(child.lua_get('vim.api.nvim_get_hl(0, { name = "AgentIdeBusy" }).link'), 'AgentIdeLevel2')
+  -- idle grey, filled; parked the dim comment colour, another shade; the answer mark green
+  eq(child.lua_get('vim.api.nvim_get_hl(0, { name = "AgentIdeIdle", link = false }).fg'), 0x8b95a7)
+  eq(child.lua_get('vim.api.nvim_get_hl(0, { name = "AgentIdeParked", link = false }).fg ~= 0x8b95a7'), true)
+  eq(child.lua_get('vim.api.nvim_get_hl(0, { name = "AgentIdeAnswerMark" }).link'), 'AgentIdeLevel1')
+  eq(child.lua_get('require("agent-ide.config").get().icons.idle ~= require("agent-ide.config").get().icons.parked'), true)
 end
 
 T['a relative project key never changes the tab cwd'] = function()

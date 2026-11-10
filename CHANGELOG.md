@@ -41,6 +41,7 @@ First public version.
 - Every drawer key is configurable under `keys.drawer` (a key, a list of keys, or `false`).
 - The legend toggle (`gL`, `<leader>aL`) is remembered across restarts (`prefs.json`).
 - The prompt window wraps long lines (`wrap`, `linebreak`).
+- The idle mark is a filled `●` in mid grey instead of green (green read as running); parked stays the hollow `○` in the dim comment colour.
 - **Background sessions**: every Claude the plugin starts runs under a keeper, a small detached headless Neovim that owns its pipes, so quitting Neovim (or a crash) leaves it running; queued prompts are handed over and sent at the end of each turn. A new Neovim lists such sessions as `background` (or `input` when one waits for you) and reattaches when you open or send to one: the transcript, the text that was streaming, open asks, model, mode and state come back as they were. An idle Claude with no Neovim attached is closed after `keeper.idle_minutes` (30). The quit guard no longer asks. `keeper = { enabled = false }` keeps Claude a child of Neovim.
 - **Queue panel** (`Q` in the chat): the session's prompts as a timeline, sent, running and queued; `x` takes a queued prompt back into the prompt buffer, `<CR>` jumps to a sent one in the transcript.
 - A soft chime when a session needs you (`sound = { waiting = true, chime = 'two', cmd = nil }`; five to choose from: two, soft, bell, rising, pop; `:AgentsChime <name>` plays one; played through pw-play, paplay, aplay or afplay).
