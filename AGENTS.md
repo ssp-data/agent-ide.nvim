@@ -18,6 +18,7 @@ A Neovim plugin that manages Claude Code sessions from inside Neovim: a drawer w
 | `plugin/agent-ide.lua` | user commands |
 | `lua/agent-ide/init.lua`, `config.lua` | setup, defaults, global keys |
 | `lua/agent-ide/prefs.lua` | `prefs.json`: the model last used (what a new session starts with), the legend toggle |
+| `lua/agent-ide/sound.lua` | the chime when a session needs you (`chime.wav` in the cache folder, a system player) |
 | `lua/agent-ide/claude/` | starting Claude Code, stream parsing, version guard |
 | `lua/agent-ide/session/` | session object, states, prompt queue, actions |
 | `lua/agent-ide/transcript/` | parsing transcripts into events, rendering events into lines and folds |

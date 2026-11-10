@@ -82,6 +82,9 @@ defaults = function()
     trash = { keep_days = nil },
     -- prompt buffer: `/` opens the command menu, `@` opens the file picker
     chat = { auto_slash = true, at_picker = true },
+    -- a soft chime when a session needs you (waiting); cmd: the player (nil: pw-play, paplay,
+    -- aplay or afplay, whichever exists), the chime's WAV path is appended
+    sound = { waiting = true, cmd = nil },
     -- 'nerd' (needs a Nerd Font in the terminal) or 'plain'; `icons` overrides single entries
     -- of that set (see ui/icons.lua for the keys); an empty string hides an icon
     icons_style = 'nerd',
