@@ -49,6 +49,7 @@ local bufs = {}
 
 local MAX_WALK = 5000
 M.MAX_WALK = MAX_WALK
+M.PICK_TIMEOUT_MS = 5000 -- a file list that has not arrived by then is given up
 local HINT = 'Agent-IDE: commands are known after the first answer in a session'
 local hinted = false
 
@@ -170,12 +171,12 @@ end
 
 ---Files below `root` found by a bounded asynchronous walk (never `.git` or `node_modules`).
 local function walk(root, cb)
-  local files, pending, finished = {}, 0, false
+  local files, pending, finished, truncated = {}, 0, false, false
   local function finish()
     if finished then return end
     finished = true
     table.sort(files)
-    cb(files, #files >= M.MAX_WALK)
+    cb(files, truncated)
   end
   local function scan(rel)
     pending = pending + 1
@@ -187,9 +188,12 @@ local function walk(root, cb)
           if not name then break end
           local path = rel == '' and name or (rel .. '/' .. name)
           if kind == 'directory' then
-            if name ~= '.git' and name ~= 'node_modules' and #files < M.MAX_WALK then scan(path) end
+            -- past the cap directories are still read, but only to find out whether more files exist
+            if name ~= '.git' and name ~= 'node_modules' and not truncated then scan(path) end
           elseif #files < M.MAX_WALK then
             files[#files + 1] = path
+          else
+            truncated = true
           end
         end
       end
@@ -234,14 +238,21 @@ local pick_ns = api.nvim_create_namespace('agent-ide.prompt.pick')
 function M.pick(buf, typed)
   local st = bufs[buf]
   if not st or st.picking then return end
-  st.picking = true
+  local token = {}
+  st.picking = token
   local win = api.nvim_get_current_win()
   local row, col = unpack(api.nvim_win_get_cursor(win))
   -- follows edits made while the file list is being read
   local mark = api.nvim_buf_set_extmark(buf, pick_ns, row - 1, col, { right_gravity = false })
+  local dead = false
+  local timer = vim.defer_fn(function()
+    if st.picking ~= token then return end
+    dead, st.picking = true, nil
+    if api.nvim_buf_is_valid(buf) then pcall(api.nvim_buf_del_extmark, buf, pick_ns, mark) end
+  end, M.PICK_TIMEOUT_MS)
 
   local function place(fn)
-    st.picking = false
+    if st.picking == token then st.picking = nil end
     if not api.nvim_buf_is_valid(buf) then return end
     local pos = api.nvim_buf_get_extmark_by_id(buf, pick_ns, mark, {})
     api.nvim_buf_del_extmark(buf, pick_ns, mark)
@@ -259,6 +270,8 @@ function M.pick(buf, typed)
 
   local cwd = st.s.cwd or vim.fn.getcwd(-1, 0)
   M.list_files(cwd, function(files, truncated)
+    if dead then return end
+    if timer:is_active() then timer:stop() end
     -- the list arrived late: only a prompt that is still being used gets the picker
     if not api.nvim_buf_is_valid(buf) or api.nvim_get_current_buf() ~= buf then return cancel() end
     if #files == 0 then
@@ -304,6 +317,10 @@ end
 function M.setup_buf(buf, s)
   bufs[buf] = { s = s }
   api.nvim_create_autocmd('BufWipeout', { buffer = buf, once = true, callback = function() bufs[buf] = nil end })
+  -- leaving the prompt gives up a picker that never answered
+  api.nvim_create_autocmd('BufLeave', { buffer = buf, callback = function()
+    if bufs[buf] then bufs[buf].picking = nil end
+  end })
   vim.bo[buf].completefunc = "v:lua.require'agent-ide.ui.prompt'.complete"
   local keys, opts = chat_keys(), chat_opts()
   local function map(modes, lhs, fn, desc)

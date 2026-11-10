@@ -320,6 +320,52 @@ T['the file list is capped (also from git) and says so; a missing session cwd us
   wait_for(function() return child.lua_get('_G.offered') ~= vim.NIL end, 'picker from the tab cwd')
 end
 
+T['a picker that never answers is given up after the timeout or when the prompt is left'] = function()
+  start()
+  child.lua([[
+    _G.calls = 0
+    local prompt = require('agent-ide.ui.prompt')
+    prompt.PICK_TIMEOUT_MS = 100
+    prompt.list_files = function() _G.calls = _G.calls + 1 end
+  ]])
+  child.type_keys('i', '@')
+  eq(child.lua_get('_G.calls'), 1)
+  child.type_keys('@') -- loading: plain @
+  eq(lines_of('prompt'), { '@' })
+  eq(child.lua_get('_G.calls'), 1)
+  vim.wait(300)
+  child.type_keys(' ', '@') -- the timeout reset it
+  wait_for(function() return child.lua_get('_G.calls') == 2 end, 'second picker')
+  -- leaving the prompt resets as well
+  vim.wait(300)
+  child.lua('require("agent-ide.ui.prompt").PICK_TIMEOUT_MS = 60000')
+  child.type_keys('<Esc>', 'o', ' ', '@')
+  eq(child.lua_get('_G.calls'), 3)
+  child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.chat")._windows().transcript)')
+  child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.chat")._windows().prompt)')
+  child.type_keys('A', ' ', '@')
+  eq(child.lua_get('_G.calls'), 4)
+end
+
+T['truncated only when more files exist than the cap'] = function()
+  start()
+  local function run(max)
+    return child.lua_get([[(function(dir, max)
+      local out
+      local prompt = require('agent-ide.ui.prompt')
+      prompt.MAX_WALK = max
+      prompt.list_files(dir, function(files, truncated) out = { #files, truncated } end)
+      vim.wait(5000, function() return out ~= nil end, 20)
+      return out
+    end)(...)]], { tmp .. '/plain', max })
+  end
+  vim.fn.mkdir(tmp .. '/plain/d', 'p')
+  for _, f in ipairs({ 'a', 'b', 'd/c' }) do vim.fn.writefile({ '' }, tmp .. '/plain/' .. f) end
+  eq(run(3), { 3, false })
+  eq(run(2), { 2, true })
+  eq(run(10), { 3, false })
+end
+
 T['<leader>af attaches from normal mode; cancel changes nothing'] = function()
   start()
   stub_select(2)
@@ -520,6 +566,34 @@ T['text object boundaries: turn 0 content, an answer ending in a fold, streaming
   to_transcript(1)
   child.type_keys('yar')
   eq(reg(), { '## Claude', '', 'ans', '' })
+end
+
+T['a streaming answer after a tool call, a thinking event or the prompt ends on its last streamed line'] = function()
+  local cases = {
+    { 'tool', { { kind = 'prompt', text = 'q' }, { kind = 'tool_call', id = 't', name = 'Bash', input = { command = 'ls' } },
+      { kind = 'tool_result', id = 't', text = 'out', is_error = false } } },
+    { 'thinking', { { kind = 'prompt', text = 'q' }, { kind = 'thinking', text = 'hmm' } } },
+    { 'prompt only', { { kind = 'prompt', text = 'q' } } },
+  }
+  for _, case in ipairs(cases) do
+    start()
+    set_events(case[2])
+    child.lua([[
+      local s = require('agent-ide.session').all()[1]
+      s.streaming = 'live one\nlive two'
+      s:_emit('delta')
+    ]])
+    local lines = lines_of('transcript')
+    eq({ case[1], lines[#lines] }, { case[1], 'live two' })
+    to_transcript(1)
+    child.type_keys('yir')
+    local got = reg()
+    eq({ case[1], got[#got - 1], got[#got] }, { case[1], 'live one', 'live two' })
+    to_transcript(1)
+    child.type_keys('yar')
+    got = reg()
+    eq({ case[1], got[1], got[#got] }, { case[1], '## Claude', 'live two' })
+  end
 end
 
 T['a streaming answer is selectable before its text event exists'] = function()

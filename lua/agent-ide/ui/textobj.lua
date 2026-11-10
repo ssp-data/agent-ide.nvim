@@ -8,11 +8,20 @@ local M = {}
 
 local NOTICE = 'Agent-IDE: no Claude answer here'
 
----Streaming lines the view shows below the events of the last turn (the answer so far, without
----the trailing blank line `render` adds to a finished text).
-local function stream_lines(s)
+---Lines the view shows below the events of the last turn while Claude streams, derived the way
+---`transcript.live`'s `View:stream_lines` does: whatever `render` puts between the turn's lines
+---and an appended text (the `## Claude` header after a prompt), then the streaming text's lines
+---without the trailing blank line `render` adds to a finished text.
+---@param s table Session
+---@param turn table[] events of the last turn
+---@param turn_n integer rendered line count of `turn`
+local function stream_lines(s, turn, turn_n)
   if s.streaming == '' then return 0 end
-  return #render.render({ { kind = 'text', text = s.streaming } }).lines - 1
+  local with = vim.list_slice(turn)
+  with[#with + 1] = { kind = 'text', text = '' }
+  local text_n = #render.render({ { kind = 'text', text = '' } }).lines
+  local header_n = #render.render(with).lines - text_n - turn_n
+  return header_n + #render.render({ { kind = 'text', text = s.streaming } }).lines - 1
 end
 
 ---Answers in the transcript of `s`, oldest first: `{ header, last }` buffer lines (1-based).
@@ -39,12 +48,11 @@ function M.answers(buf, s)
     local n = #render.render(turn).lines
     if render.starts_turn(turn[1]) then
       local is_last = k == #turns
-      local extra = is_last and stream_lines(s) or 0
+      local extra = is_last and stream_lines(s, turn, n) or 0
       if #turn > 1 or extra > 0 then
         local prompt_n = #render.render({ turn[1] }).lines
         local header = offset + prompt_n + 1
         local last = offset + n + extra
-        if #turn == 1 then last = last + 2 end -- the `## Claude` header and its blank line
         if last <= count and api.nvim_buf_get_lines(buf, header - 1, header, false)[1] == '## Claude' then
           out[#out + 1] = { header = header, last = last }
         end
