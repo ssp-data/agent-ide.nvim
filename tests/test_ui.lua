@@ -25,7 +25,7 @@ local function start(projects_dir)
     projects_dir = projects_dir or FIXTURES,
     helper = { enabled = false },
     live = { interval_ms = 50, cmd = { 'echo', LIVE_JSON } },
-    icons = ICONS,
+    icons_style = 'plain', icons = ICONS,
   } })
 end
 
@@ -74,7 +74,7 @@ end
 -- Toggle, expand `project`, open the session titled `title`; waits for the history to load.
 local function open_session(project, title)
   child.lua('require("agent-ide").toggle()')
-  drawer_cursor_to('> P ' .. project .. '  ')
+  drawer_cursor_to('> P ' .. project .. ' ')
   child.type_keys('<CR>')
   drawer_cursor_to(title)
   child.type_keys('<CR>')
@@ -152,16 +152,82 @@ end
 T['drawer lists fixture projects with live state'] = function()
   start()
   child.lua('require("agent-ide").toggle()')
-  wait_drawer_line('^> P alpha  W ')
+  -- the fixture folders do not exist; alpha waits in another Claude (live)
+  wait_drawer_line('^> P alpha %(folder missing%) +W input %(1%) %S+$')
   local lines = drawer_lines()
   eq(has_line(lines, '-nocwd', true) ~= nil, true)
-  eq(lines[has_line(lines, '-nocwd', true)]:find('(gone)', 1, true) ~= nil, true)
+  eq(lines[has_line(lines, '-nocwd', true)]:find('(folder missing)', 1, true) ~= nil, true)
+  for _, l in ipairs(lines) do eq(vim.fn.strdisplaywidth(l) <= 44, true) end
+end
+
+T['header line: drawer keys as hints; the cursor starts below it; <CR> on it does nothing'] = function()
+  start()
+  child.lua('require("agent-ide").toggle()')
+  wait_drawer_line('> P alpha ', true)
+  local lines = drawer_lines()
+  eq(lines[1], 'Agents      R refresh · glg lazygit · ? help')
+  eq(child.lua_get('require("agent-ide.ui.drawer").state().nodes[1]'), { type = 'header' })
+  local s = child.lua_get('require("agent-ide.ui.drawer").state()')
+  eq(child.lua_get('vim.api.nvim_win_get_cursor(...)', { s.win }), { 2, 0 })
+  child.lua('vim.api.nvim_set_current_win(...); vim.api.nvim_win_set_cursor(0, { 1, 0 })', { s.win })
+  child.type_keys('<CR>')
+  eq(drawer_lines(), lines)
+  eq(child.lua_get('vim.api.nvim_win_get_cursor(0)'), { 1, 0 })
+  -- a re-render keeps the cursor on the header
+  child.lua('require("agent-ide.ui.drawer").refresh()')
+  eq(child.lua_get('vim.api.nvim_win_get_cursor(0)'), { 1, 0 })
+end
+
+T['the right-aligned columns follow a drawer resize'] = function()
+  start()
+  child.lua('require("agent-ide").toggle()')
+  wait_drawer_line('> P alpha ', true)
+  local function widest()
+    local n = 0
+    for _, l in ipairs(drawer_lines()) do n = math.max(n, vim.fn.strdisplaywidth(l)) end
+    return n
+  end
+  eq(widest(), 44)
+  child.lua('vim.api.nvim_win_set_width(require("agent-ide.ui.drawer").state().win, 60)')
+  wait_for(function() return widest() == 60 end, 'lines at width 60')
+  child.lua('vim.api.nvim_win_set_width(require("agent-ide.ui.drawer").state().win, 24)')
+  wait_for(function() return widest() <= 24 end, 'lines at width 24')
+  -- the project rows keep their state and age whole
+  -- the waiting project keeps its state word and age whole; its name gave up the room
+  local lines = drawer_lines()
+  if not has_line(lines, '^> P … +W input %(1%) %S+$') then error(vim.inspect(lines)) end
+end
+
+T['a fold column the user set does not push the right part out of the drawer'] = function()
+  start()
+  child.lua('vim.o.foldcolumn = "2"')
+  child.lua('require("agent-ide").toggle()')
+  wait_drawer_line('W input (1)', true)
+  local n = 0
+  for _, l in ipairs(drawer_lines()) do n = math.max(n, vim.fn.strdisplaywidth(l)) end
+  eq(n, 42)
+end
+
+T['the drawer on the left: the same aligned rows; reopening keeps the cursor row'] = function()
+  start()
+  child.lua('require("agent-ide").setup(vim.tbl_extend("force", require("agent-ide.config").get(), { drawer = { side = "left", width = 30 } }))')
+  child.lua('require("agent-ide").toggle()')
+  wait_drawer_line('W input (1)', true)
+  eq(child.lua_get('vim.fn.win_id2win(require("agent-ide.ui.drawer").state().win)'), 1)
+  for _, l in ipairs(drawer_lines()) do
+    if l:find('^> P ') then eq(vim.fn.strdisplaywidth(l), 30) end
+  end
+  child.lua('local s = require("agent-ide.ui.drawer").state(); vim.api.nvim_set_current_win(s.win); vim.api.nvim_win_set_cursor(s.win, { 4, 0 })')
+  child.lua('require("agent-ide").toggle()') -- close the drawer
+  child.lua('require("agent-ide").toggle()') -- and open it again
+  local row = child.lua_get('vim.api.nvim_win_get_cursor(require("agent-ide.ui.drawer").state().win)[1]')
+  eq(row ~= 1, true) -- never on the header
 end
 
 T['enter on project expands; enter on session opens its history in the chat view'] = function()
   start()
   child.lua('require("agent-ide").toggle()')
-  drawer_cursor_to('> P alpha  ')
+  drawer_cursor_to('> P alpha ')
   child.type_keys('<CR>')
   wait_drawer_line('Sessions (', true)
   drawer_cursor_to('Alpha basics')
@@ -260,7 +326,7 @@ T['history of a vanished transcript says so'] = function()
   vim.fn.writefile(vim.fn.readfile(ALPHA), copy)
   start(tmp)
   child.lua('require("agent-ide").toggle()')
-  drawer_cursor_to('> P alpha  ')
+  drawer_cursor_to('> P alpha ')
   child.type_keys('<CR>')
   drawer_cursor_to('Alpha basics')
   vim.fn.delete(copy)
@@ -273,7 +339,7 @@ end
 T['gp outside tmux reports a reason'] = function()
   start()
   child.lua('require("agent-ide").toggle()')
-  drawer_cursor_to('> P alpha  W ')
+  drawer_cursor_to('> P alpha ')
   child.type_keys('<CR>')
   drawer_cursor_to('Alpha basics')
   child.type_keys('gp')
@@ -285,7 +351,7 @@ end
 T['gp on a session without live state says it is not running'] = function()
   start()
   child.lua('require("agent-ide").toggle()')
-  drawer_cursor_to('> P notes  ')
+  drawer_cursor_to('> P notes ')
   child.type_keys('<CR>')
   drawer_cursor_to('Meeting notes summary')
   child.type_keys('gp')
@@ -340,7 +406,7 @@ end
 T['ages are re-rendered on every live poll'] = function()
   start()
   child.lua('require("agent-ide").toggle()')
-  wait_drawer_line('^> P alpha  W ')
+  wait_drawer_line('^> P alpha .* W input %(1%) ')
   -- jump the clock 500 days; the live map does not change, the age must still update
   child.lua([[
     _G.fake_now = os.time() + 500 * 86400
@@ -351,7 +417,7 @@ T['ages are re-rendered on every live poll'] = function()
       if p.name == 'alpha' then return require('agent-ide.ui.tree').ago(p.activity, _G.fake_now) end
     end
   end)()]])
-  wait_drawer_line('> P alpha  W ' .. want, true)
+  wait_drawer_line('^> P alpha .* W input %(1%) ' .. want .. '$')
 end
 
 T['missing projects dir: no warning, helper stays, hint shown'] = function()
@@ -363,7 +429,7 @@ T['missing projects dir: no warning, helper stays, hint shown'] = function()
     vim.notify = function(msg, level) table.insert(_G.notes, { msg, level }) end
     require('agent-ide').setup(...)
     require('agent-ide').toggle()
-  ]], { { projects_dir = missing, live = { interval_ms = 50, cmd = { 'echo', '[]' } }, icons = ICONS } })
+  ]], { { projects_dir = missing, live = { interval_ms = 50, cmd = { 'echo', '[]' } }, icons_style = 'plain', icons = ICONS } })
   wait_drawer_line('No Claude sessions found in ' .. missing, true)
   vim.wait(300)
   eq(child.lua_get('_G.notes'), {})

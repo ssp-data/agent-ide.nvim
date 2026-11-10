@@ -48,11 +48,11 @@ end
 T['collapsed project: branch suffix only off the default branch'] = function()
   local p = project('/x/r')
   cache._set('/x/r', 'head', BRANCH)
-  eq(lines(p, {}), { '> P p  . now  feat' })
+  eq(lines(p, {}), { '> P p  feat  . now' })
   cache._set('/x/r', 'head', vim.tbl_extend('force', BRANCH, { branch = 'main', on_default = true }))
   eq(lines(p, {}), { '> P p  . now' })
   cache._set('/x/r', 'head', vim.tbl_extend('force', BRANCH, { branch = 'abc1234', detached = true }))
-  eq(lines(p, {}), { '> P p  . now  abc1234' })
+  eq(lines(p, {}), { '> P p  abc1234  . now' })
 end
 
 T['non-git and missing projects show no git rows'] = function()
@@ -84,11 +84,38 @@ T['expanded project: section labels with counts, collapsed by default; loading r
     '      R old.lua → new.lua  +0 −0',
     '      A img.png  bin',
     '      M sub  submodule',
-    '      ? ü.txt  +2 −0',
+    '      ? ü.txt  +2',
     '      ? nested/  dir',
     '  v Commits on branch (1)',
-    '      > aaaa two  2 files  now',
+    '      > aaaa two  now',
   })
+end
+
+T['at the drawer width: stats and commit ages right-aligned, long paths cut, a side of 0 left out'] = function()
+  local p = project('/x/r')
+  cache._set('/x/r', 'head', BRANCH)
+  cache._set('/x/r', 'base', BRANCH)
+  cache._set('/x/r', 'changes', {
+    { status = 'M', path = 'imap/client.go', added = 18, removed = 3 },
+    { status = 'D', path = 'imap/poll_legacy.go', added = 0, removed = 41 },
+    { status = 'A', path = 'a/very/long/path/to/some/deeply/nested/file.go', added = 74, removed = 0 },
+  })
+  cache._set('/x/r', 'commits', { { hash = 'a1b2c3d', short = 'a1b2c3d', subject = 'feat: IMAP IDLE loop', date = -480, files = 2 } })
+  local t = tree.build({ p }, parked, { ['/x/r'] = true, ['/x/r/git/changes'] = true, ['/x/r/git/commits'] = true }, 0, icons,
+    nil, nil, gs.rows, { width = 40 })
+  eq(vim.list_slice(t.lines, 5, 9), {
+    '      M imap/client.go            +18 −3',
+    '      D imap/poll_legacy.go          −41',
+    '      A a/very/long/path/to/some/d…  +74',
+    '  v Commits on branch (1)',
+    '      > a1b2c3d feat: IMAP IDLE loop  8m',
+  })
+  for _, i in ipairs({ 5, 6, 7, 9 }) do eq(vim.fn.strdisplaywidth(t.lines[i]), 40) end
+  local groups = {}
+  for _, h in ipairs(t.hl) do
+    if h.line == 5 or h.line == 6 then groups[#groups + 1] = t.lines[h.line]:sub(h.col_start + 1, h.col_end) .. '=' .. h.group end
+  end
+  eq(groups, { 'M=AgentIdeGitModified', '+18=AgentIdeGitAdd', '−3=AgentIdeGitDel', 'D=AgentIdeGitDeleted', '−41=AgentIdeGitDel' })
 end
 
 T['an untracked folder (nested repository) is listed but cannot be opened'] = function()
@@ -121,8 +148,8 @@ T['commit expands to its files; nodes carry ids, folds and open handlers'] = fun
   eq(t.lines[7], '          loading…')
   cache._set('/x/r', 'files:aaaa', { { status = 'M', path = 'f.lua', added = 1, removed = 0 } })
   t = tree.build({ p }, parked, exp, 0, icons, nil, nil, gs.rows)
-  eq(t.lines[6], '      v aaaa two  1 file  now')
-  eq(t.lines[7], '          M f.lua  +1 −0')
+  eq(t.lines[6], '      v aaaa two  now')
+  eq(t.lines[7], '          M f.lua  +1')
   local commit, file = t.nodes[6], t.nodes[7]
   eq({ commit.fold.key, commit.fold.default, commit.id ~= file.id, type(file.open), file.fold.focus }, {
     '/x/r/git/commit/aaaa', false, true, 'function', commit.id })
@@ -137,7 +164,7 @@ T['at most 500 files are listed, then a line with the rest'] = function()
   cache._set('/x/r', 'changes', files)
   local l = lines(p, { ['/x/r'] = true, ['/x/r/git/changes'] = true })
   eq(l[4], '  v Changes vs origin/main (620)')
-  eq(l[4 + 500], '      A f500  +1 −0')
+  eq(l[4 + 500], '      A f500  +1')
   eq(l[4 + 501], '      … 120 more')
 end
 

@@ -50,7 +50,7 @@ local function start(keys)
       paste = { ['+'] = function() return _G.clip or {} end, ['*'] = function() return {} end } }
     require('agent-ide').setup({ projects_dir = tmp .. '/projects', helper = { enabled = false },
       live = { interval_ms = 100000, cmd = { 'echo', '[]' } }, claude = { cmd = { 'false' } },
-      icons = { open = 'v', closed = '>', project = 'P' },
+      icons_style = 'plain', icons = { open = 'v', closed = '>', project = 'P' },
       prompts = { command_dirs = { tmp .. '/commands' }, skill_dirs = {}, library_dir = tmp .. '/library', saved_dir = tmp .. '/saved' },
       keys = keys })
     require('agent-ide').toggle()
@@ -192,16 +192,18 @@ end
 T['the row keys keep their meaning elsewhere in the drawer'] = function()
   start()
   drawer_cursor_to('> P repo  ')
+  local row = drawer_lines()[has_line(drawer_lines(), '> P repo  ')]
+  eq(row:match('^> P repo +· now$') ~= nil, true)
   child.lua('vim.fn.setreg(\'"\', "before")')
   child.type_keys('yy')
-  eq(child.lua_get('vim.fn.getreg(\'"\')'), '> P repo  · now\n')
+  eq(child.lua_get('vim.fn.getreg(\'"\')'), row .. '\n')
   -- typed in one chunk: the motion stays after the operator; a register prefix is kept
   drawer_cursor_to('Prompts')
   child.type_keys('yj')
-  eq(child.lua_get('vim.fn.getreg(\'"\')'), '> ✎ Prompts\n> P repo  · now\n')
+  eq(child.lua_get('vim.fn.getreg(\'"\')'), '> ✎ Prompts\n' .. row .. '\n')
   drawer_cursor_to('> P repo  ')
   child.type_keys('"ayy')
-  eq(child.lua_get('vim.fn.getreg("a")'), '> P repo  · now\n')
+  eq(child.lua_get('vim.fn.getreg("a")'), row .. '\n')
 end
 
 T["the drawer's own keys win a clash with a row key, also in the help"] = function()

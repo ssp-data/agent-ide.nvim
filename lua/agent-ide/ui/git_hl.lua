@@ -4,12 +4,13 @@ local M = {}
 local GROUPS = {
   AgentIdeBranch = { link = 'Comment' },
   AgentIdeGitHash = { link = 'Identifier' },
-  AgentIdeGitAdd = { link = 'Added' },
-  AgentIdeGitDel = { link = 'Removed' },
-  AgentIdeGitAdded = { link = 'Added' },
-  AgentIdeGitModified = { link = 'Changed' },
-  AgentIdeGitDeleted = { link = 'Removed' },
-  AgentIdeGitRenamed = { link = 'Changed' },
+  -- drawer rows: added green, deleted red, modified yellow (the drawer's state colours)
+  AgentIdeGitAdd = { fg = '#9ece6a', ctermfg = 114 },
+  AgentIdeGitDel = { fg = '#f7768e', ctermfg = 204 },
+  AgentIdeGitAdded = { link = 'AgentIdeGitAdd' },
+  AgentIdeGitModified = { fg = '#e0af68', ctermfg = 179 },
+  AgentIdeGitDeleted = { link = 'AgentIdeGitDel' },
+  AgentIdeGitRenamed = { link = 'AgentIdeGitModified' },
   AgentIdeGitUntracked = { link = 'Comment' },
 }
 

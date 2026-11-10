@@ -3,6 +3,7 @@
 -- a `Saved prompts (n)` section. Entries load on first expansion (see prompts/cache.lua).
 local cache = require('agent-ide.prompts.cache')
 local config = require('agent-ide.config')
+local prefix = require('agent-ide.ui.icons').prefix
 
 local M = {}
 
@@ -68,33 +69,28 @@ local function is_open(expanded, key, default)
   return v == true
 end
 
--- Display parts of an entry are cached per entry table and drawer width.
-local function entry_pieces(e, indent, width)
-  local c = e._rows
-  if c and c.width == width and c.indent == indent then return c.pieces end
+local NO_RIGHT = {}
+local PROJECT_TAG = { { 'project', HL_DIM } }
+
+-- Display parts of an entry (cached per entry table, indent and icon): the kind's icon and the
+-- label, the description dimmed (cut to the drawer width, dropped when no room is left), and a
+-- right-aligned `project` tag for a project's own command or skill.
+local row_cache = setmetatable({}, { __mode = 'k' }) -- entry -> its display parts
+local function entry_pieces(e, indent, icons)
+  local icon = icons[e.kind]
+  local c = row_cache[e]
+  if c and c.indent == indent and c.icon == icon then return c.pieces, c.right end
   local label = (e.insert or e.title):gsub('[\r\n]', ' ')
-  local pieces = { { indent .. label } }
-  local used = vim.fn.strdisplaywidth(indent .. label)
-  if e.scope == 'project' then
-    pieces[#pieces + 1] = { '  project', HL_DIM }
-    used = used + 9
-  end
-  local room = (width or 44) - used - 3
-  if e.description and room > 3 then
-    local d = e.description
-    if vim.fn.strdisplaywidth(d) > room then
-      d = vim.fn.strcharpart(d, 0, room - 1)
-      while vim.fn.strdisplaywidth(d) > room - 1 do d = vim.fn.strcharpart(d, 0, vim.fn.strchars(d) - 1) end
-      d = d .. '…'
-    end
-    pieces[#pieces + 1] = { '  ' .. d, HL_DIM }
-  end
-  e._rows = { width = width, indent = indent, pieces = pieces }
-  return pieces
+  local pieces = { { indent .. prefix(icon) .. label } }
+  if e.description then pieces[2] = { '  ' .. e.description:gsub('[\r\n\t]', ' '), HL_DIM, fit = 'drop' } end
+  local right = e.scope == 'project' and PROJECT_TAG or NO_RIGHT
+  row_cache[e] = { indent = indent, icon = icon, pieces = pieces, right = right }
+  return pieces, right
 end
 
 local function entry_row(out, e, indent, ctx, parent, project)
-  out[#out + 1] = { pieces = entry_pieces(e, indent, ctx.width), node = { type = 'prompt', id = 'prompt:' .. e.path,
+  local pieces, right = entry_pieces(e, indent, ctx.icons)
+  out[#out + 1] = { pieces = pieces, right = right, node = { type = 'prompt', id = 'prompt:' .. e.path,
     entry = e, project = project, open = use, keys = row_handlers(),
     fold = { key = parent.key, default = parent.default, focus = parent.id } } }
 end
@@ -128,7 +124,7 @@ local function library_rows(out, list, ctx, parent)
         open_groups[path] = open
         if shown_parent then
           local ind = '    ' .. string.rep('  ', depth)
-          out[#out + 1] = fold_row({ { ind .. (open and ctx.icons.open or ctx.icons.closed) .. ' ' .. part, HL_SECTION },
+          out[#out + 1] = fold_row({ { ind .. (open and ctx.icons.open or ctx.icons.closed) .. ' ' .. prefix(ctx.icons.group) .. part, HL_SECTION },
             { ' (' .. counts[path] .. ')', HL_DIM } }, id, key, false)
         end
       end
@@ -152,7 +148,7 @@ function M.top(ctx)
   local open = is_open(ctx.expanded, 'prompts', false)
   cache.visible = { global = open, saved = {} } -- top() runs first on every render
   local icon = ctx.icons.prompts or '✎'
-  local out = { fold_row({ { (open and ctx.icons.open or ctx.icons.closed) .. ' ' .. icon .. ' ' }, { 'Prompts', 'AgentIdeProject' } },
+  local out = { fold_row({ { (open and ctx.icons.open or ctx.icons.closed) .. ' ' .. prefix(icon) }, { 'Prompts', 'AgentIdeProject' } },
     'prompts', 'prompts', false) }
   if not open then return out end
   local all = cache.global()
@@ -168,10 +164,11 @@ function M.top(ctx)
     out[#out + 1] = hint('    ', save_hint())
     return out
   end
+  -- `name` is also the icon key (`skills`, `library`)
   local function section(name, label, list, default)
     local key, id = 'prompts/' .. name, 'prompts#' .. name
     local o = is_open(ctx.expanded, key, default)
-    out[#out + 1] = fold_row({ { '  ' .. (o and ctx.icons.open or ctx.icons.closed) .. ' ' .. label, HL_SECTION },
+    out[#out + 1] = fold_row({ { '  ' .. (o and ctx.icons.open or ctx.icons.closed) .. ' ' .. prefix(ctx.icons[name]) .. label, HL_SECTION },
       { ' (' .. #list .. ')', HL_DIM } }, id, key, default)
     return o, { key = key, default = default, id = id }
   end
@@ -200,7 +197,7 @@ function M.rows(project, ctx)
   local key, id = project.key .. '/saved', project.key .. '#saved'
   local o = is_open(ctx.expanded, key, false)
   if o then cache.visible.saved[cache.folder(project)] = true end
-  local out = { fold_row({ { '  ' .. (o and ctx.icons.open or ctx.icons.closed) .. ' Saved prompts', HL_SECTION },
+  local out = { fold_row({ { '  ' .. (o and ctx.icons.open or ctx.icons.closed) .. ' ' .. prefix(ctx.icons.saved_prompts) .. 'Saved prompts', HL_SECTION },
     { ' (' .. #list .. ')', HL_DIM } }, id, key, false, project) }
   if o then
     local parent = { key = key, default = false, id = id }

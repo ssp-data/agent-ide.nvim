@@ -27,14 +27,36 @@ You might ask why not a terminal-based TUI, now that Herdr, Rex, and others are 
 
 ## Status
 
-Parts 1 to 5 of 6: the drawer and the history view, chat with Claude Code from Neovim, reusable prompts, git review (what an agent changed, with a diff view), search, and the Omarchy indicator (see `omarchy/io.github.sspaeti.agent-ide/README.md`). Other agents are planned and not available yet.
+Parts 1 to 5 of 6 and search are done: the drawer and the history view, chat with Claude Code from Neovim, reusable prompts, git review (what an agent changed, with a diff view), the Omarchy indicator (see `omarchy/io.github.sspaeti.agent-ide/README.md`), and search across all sessions. Other agents (part 6) are planned and not available yet.
 
-## Requirements
+## Prerequisites
 
-- Neovim 0.12 or newer
-- Claude Code, logged in with a subscription (the plugin reads the transcripts it writes to `~/.claude/projects`, asks `claude agents --json` which sessions are running, and runs `claude -p` for the chat; tested with Claude Code 2.1.306)
-- Optional: `cargo` to build the Rust helper (faster scanning and file watching)
-- Optional: `tmux` for jumping to the pane of a running session and for continuing a chat in native Claude
+| What | Needed | What for |
+|---|---|---|
+| Neovim 0.12 or newer | required | |
+| Claude Code, logged in with a subscription | required | The plugin reads the transcripts Claude Code writes to `~/.claude/projects`, asks `claude agents --json` which sessions are running, and runs `claude -p` for the chat (and `claude --resume` in a tmux pane for native Claude). Tested with Claude Code 2.1.306 |
+| `git` | recommended | The `Changes` and `Commits` sections and the diff view. Grouping sessions by repository reads the `.git` folders and works without it |
+| A [Nerd Font](https://www.nerdfonts.com) in the terminal | recommended | The default icons (`icons_style = 'nerd'`). Without one, set `icons_style = 'plain'` |
+| Extended keys in the terminal (and in tmux) | recommended | `<C-CR>` sends the prompt only when the terminal, and tmux if you use it, pass `<C-CR>` on to Neovim; see [Settings you may need](#settings-you-may-need). `<leader><CR>` sends without it |
+| Treesitter parsers `markdown` and `markdown_inline` | recommended | Highlighting in the transcript, which is a `markdown` buffer, when treesitter highlighting is on for markdown (Neovim bundles both parsers; keep them if a plugin manages your parsers) |
+| A markdown render plugin | optional | Nicer answers in the transcript; any plugin that renders `markdown` buffers works |
+| lualine, or any statusline | optional | The footer with the state of all sessions and the quota (see [Footer](#footer)) |
+| `cargo` | optional | Builds the Rust helper: fast scanning, file watching and fuzzy, typo-tolerant search. Without it a Lua backend scans on a timer and search is limited to titles and prompts, exact words only |
+| `tmux` | optional | `gp` jumps to the pane of a session running elsewhere (the drawer then shows its pane, `tmux 2.1`), and `<leader>at` continues a chat in native Claude in a tmux pane |
+| `lazygit` | optional | `glg` in the drawer and the diff view |
+| A `vim.ui.select` provider such as Snacks or Telescope | optional | Nicer pickers (permissions, model, prompts); the built-in one works |
+| A clipboard provider | optional | Copying a search hit (`<C-y>`) and yanking a prompt (`y`) also to the `+` register |
+
+### Settings you may need
+
+For `<C-CR>` inside tmux, add to `~/.tmux.conf` (and restart the tmux server):
+
+```tmux
+set -s extended-keys on
+set -as terminal-features 'xterm*:extkeys'
+```
+
+For the footer in lualine, see [Footer](#footer). After updating the plugin, run `make helper` in the plugin folder (or let your plugin manager run its build step) so the helper matches the Lua code; until then the plugin says so and uses its Lua backend.
 
 ## Install
 
@@ -101,12 +123,28 @@ require('agent-ide').setup({
     project_dirs = true, -- also <project>/.claude/commands and /skills of the chat's project
   },
   chat = { auto_slash = true, at_picker = true }, -- `/` opens the command menu, `@` the file picker
-  icons = { open = '▾', closed = '▸', project = '', waiting = '◐', busy = '●', idle = '○', parked = '·',
-    done = '✔', failed = '✖', new = '+', prompts = '✎' },
+  icons_style = 'nerd', -- 'nerd' (needs a Nerd Font) or 'plain' (characters of any monospace font)
+  icons = {}, -- override single icons of that set, for example { busy = '●', project = '' }; '' hides one
 })
 ```
 
+Icon keys: `open`, `closed` (fold arrows), `agents` (drawer header), `prompts`, `project`, `new`; sections `sessions`, `saved_prompts`, `changes`, `commits`, `skills`, `library`, `group`, `worktree`; session states `waiting`, `busy`, `idle`, `parked`, `done`, `failed`; prompt rows `command`, `skill`, `template`, `saved`. The plain set is `▾ ▸` for folds, `◐ ● ○ · ✔ ✖` for waiting, busy, idle, parked, done and failed, `✎` for Prompts, `+` for a new session and `⎇` for a worktree, and no icon for the rest.
+
 `:Agents` (or the toggle key) opens the Agents tab with the drawer. Inside the Agents tab it closes or reopens the drawer; from any other tab it switches to the Agents tab.
+
+## Drawer
+
+The first line names the drawer's main keys. Each row shows its state icon and title on the left and, aligned to the right edge, what needs you and how old it is; a title too long for the drawer is cut with `…`, the right part never.
+
+| Row | Right part |
+|---|---|
+| Session waiting for you | `permission: <tool>`, `question` or `plan to approve` (in another Claude: `input`) |
+| Session done or failed while you were elsewhere | `done, unread`; `failed`, with the start of the error when there is one |
+| Session running in another Claude | `tmux <window>.<pane>` when Neovim runs inside tmux and the session in one of its panes, else `elsewhere`; handed to native Claude: `native` |
+| Project | the state icon of its most urgent session; `input (n)` while sessions wait, `review (n)` for done or failed ones; then the age of its newest session |
+| Changed file, commit | `+added −removed`, the commit's age |
+
+Ages read `now`, `5m`, `3h`, `12d`, then months (`14mo`) and years (`2y`). Colours: waiting violet (bold), busy yellow, idle green, done orange, failed red, parked and ages dimmed; the groups are `AgentIdeWaiting`, `AgentIdeBusy`, `AgentIdeIdle`, `AgentIdeDone`, `AgentIdeFailed`, `AgentIdeParked`, `AgentIdeAge` and `AgentIdeSection`, and a colorscheme can set them. A project whose folder is gone says `(folder missing)`; a session started in a sub-folder of its project shows `<subfolder>/ · <title>`.
 
 ## Keys
 
@@ -232,7 +270,7 @@ With a lazy-loaded plugin, a component that does not load it:
 
 Each git project in the drawer has two more sections below its sessions: `Changes vs <base>` (everything on the branch since it left the default branch, uncommitted and untracked files included; on the default branch, uncommitted changes against `HEAD`) and `Commits on branch` (`Recent commits` on the default branch), each commit expanding to its files. The project row shows the branch when it is not the default branch. The lists refresh when a session of the project finishes a turn, on `R`, and when you come back to the drawer after more than 5 s.
 
-`<CR>` on a file opens a side-by-side diff in the main window, built on Neovim's own diff mode. For branch changes the right side is your real, editable file. In the chat, `gd` (or `<leader>gd`) on an `Edit` or `Write` fold opens the diff of that file. Opening a diff sets the Agents tab's directory to that work tree (`tcd`, like opening a chat), so your own lazygit or picker keys work on it. Sessions in a linked worktree get a row per work tree (`⎇ <branch> · <folder>`) with its own Changes and Commits.
+`<CR>` on a file opens a side-by-side diff in the main window, built on Neovim's own diff mode. For branch changes the right side is your real, editable file. In the chat, `gd` (or `<leader>gd`) on an `Edit` or `Write` fold opens the diff of that file. Opening a diff sets the Agents tab's directory to that work tree (`tcd`, like opening a chat), so your own lazygit or picker keys work on it. Sessions in a linked worktree get a row per work tree (worktree icon, `<branch> · <folder>`) with its own Changes and Commits.
 
 | Key (diff view) | Action |
 |---|---|
@@ -323,7 +361,9 @@ Both files are as private as the transcripts they come from: the folder is creat
 3. Prompts (done)
 4. Git review: changes, commits, diff view (done)
 5. Omarchy indicator (done)
-6. Other agents
+6. Other agents (planned)
+
+Search across all sessions is done as well.
 
 ## Development
 

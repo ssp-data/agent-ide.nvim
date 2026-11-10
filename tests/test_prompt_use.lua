@@ -48,7 +48,7 @@ local function start(chat, extra)
     end
     local opts = vim.tbl_deep_extend('force', { projects_dir = tmp .. '/projects', helper = { enabled = false },
       live = { interval_ms = 100000, cmd = { 'echo', '[]' } }, claude = { cmd = { 'false' } },
-      icons = { open = 'v', closed = '>', project = 'P' },
+      icons_style = 'plain', icons = { open = 'v', closed = '>', project = 'P' },
       prompts = { command_dirs = { tmp .. '/commands' }, skill_dirs = { tmp .. '/skills' },
         library_dir = tmp .. '/library', saved_dir = tmp .. '/saved' } }, extra or {})
     require('agent-ide').setup(opts)

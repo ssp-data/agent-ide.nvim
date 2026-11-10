@@ -7,13 +7,13 @@ local GROUPS = {
   AgentIdeLevel1 = { fg = '#9ece6a', ctermfg = 114 }, -- green
   AgentIdeLevel2 = { fg = '#e0af68', ctermfg = 179 }, -- yellow
   AgentIdeLevel3 = { fg = '#ff9e64', ctermfg = 215 }, -- orange
-  AgentIdeLevel4 = { fg = '#a277ff', ctermfg = 141 }, -- violet
+  AgentIdeLevel4 = { fg = '#a277ff', ctermfg = 141, bold = true }, -- violet, bold: input required
   AgentIdeWaiting = { link = 'AgentIdeLevel4' },
   AgentIdeBusy = { link = 'AgentIdeLevel2' },
   AgentIdeIdle = { link = 'AgentIdeLevel1' },
   AgentIdeParked = { link = 'Comment' }, -- dimmed
   AgentIdeDone = { link = 'AgentIdeLevel3' }, -- the result waits to be read
-  AgentIdeFailed = { link = 'AgentIdeLevel3' },
+  AgentIdeFailed = { fg = '#f7768e', ctermfg = 204 }, -- red; its status level stays 3 (review)
   AgentIdeMissing = { link = 'Comment' },
   AgentIdeAge = { link = 'Comment' },
   AgentIdeSection = { link = 'Directory' },

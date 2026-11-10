@@ -13,6 +13,7 @@ local T = MiniTest.new_set({ hooks = {
         prompts = { command_dirs = {}, skill_dirs = {}, library_dir = vim.fn.tempname(), saved_dir = vim.fn.tempname() } })
       local cache = require('agent-ide.git_cache')
       local projects = {}
+      _G.projects = projects -- a case may add more
       -- every scan groups into these projects
       require('agent-ide.project').group = function() return projects end
       for i = 1, 30 do
@@ -29,7 +30,7 @@ local T = MiniTest.new_set({ hooks = {
         cache._set(root, 'commits', { { hash = 'c', short = 'c', subject = 's', date = 0, files = 1 } })
       end
       require('agent-ide').toggle()
-      assert(vim.wait(3000, function() return #require('agent-ide.ui.drawer').state().nodes == 31 end, 10))
+      assert(vim.wait(3000, function() return #require('agent-ide.ui.drawer').state().nodes == 32 end, 10))
       _G.best = function(fn)
         local best = math.huge
         for _ = 1, ]] .. RUNS .. [[ do
@@ -53,7 +54,7 @@ end
 T['re-render with 30 collapsed git projects under 5 ms'] = function()
   local ms = child.lua_get('_G.best(require("agent-ide.ui.drawer").refresh)')
   local n = child.lua_get('#vim.api.nvim_buf_get_lines(require("agent-ide.ui.drawer").state().buf, 0, -1, false)')
-  eq(n, 31) -- the Prompts node and 30 projects
+  eq(n, 32) -- the header, the Prompts node and 30 projects
   check('re-render, 30 collapsed projects', ms, 5)
 end
 
@@ -69,8 +70,46 @@ T['re-render with 30 expanded git projects, sections collapsed, under 5 ms'] = f
     end
   ]])
   local n = child.lua_get('#vim.api.nvim_buf_get_lines(require("agent-ide.ui.drawer").state().buf, 0, -1, false)')
-  eq(n, 1 + 30 * (1 + 1 + 1 + 5 + 2))
+  eq(n, 2 + 30 * (1 + 1 + 1 + 5 + 2))
   check('re-render, 30 expanded projects', child.lua_get('_G.best(require("agent-ide.ui.drawer").refresh)'), 5)
+end
+
+T['re-render with 60 projects and 300 visible aligned rows (multi-byte titles) under 5 ms'] = function()
+  child.lua([[
+    local cache = require('agent-ide.git_cache')
+    for i = 31, 60 do
+      local root = '/synthetic/repo' .. i
+      local sessions = {}
+      for k = 1, 4 do
+        sessions[k] = { id = i .. '-' .. k, activity = 1000 - k * 4000,
+          title = ({ 'Übersetzung prüfen für Bäume', '日本語のタイトル', 'Party 🎉 time with a rather long title', 'plain' })[k] }
+      end
+      _G.projects[i] = { key = root, root = root, name = 'repo' .. i, is_git = true, missing = false, activity = 900,
+        sessions = sessions }
+      local b = { branch = 'feat' .. i, detached = false, head = 'h', default_name = 'main', default_ref = 'main',
+        ref = 'main', on_default = false, merge_base = 'm', mode = 'branch', rev = 'm', label = 'main' }
+      cache._set(root, 'head', b)
+      cache._set(root, 'base', b)
+      cache._set(root, 'changes', {})
+      cache._set(root, 'commits', {})
+    end
+    local d = require('agent-ide.ui.drawer')
+    d.refresh()
+    local s = d.state()
+    vim.api.nvim_set_current_win(s.win)
+    for i = 31, 60 do -- expand the 30 new projects
+      for row, node in ipairs(d.state().nodes) do
+        if node.type == 'project' and node.project == _G.projects[i] then vim.api.nvim_win_set_cursor(s.win, { row, 0 }); break end
+      end
+      vim.api.nvim_feedkeys(vim.keycode('<CR>'), 'x', false)
+    end
+  ]])
+  local lines = child.lua_get('vim.api.nvim_buf_get_lines(require("agent-ide.ui.drawer").state().buf, 0, -1, false)')
+  eq(#lines, 2 + 60 + 30 * (1 + 1 + 4 + 2))
+  for _, l in ipairs(lines) do
+    if l:find('Übersetzung', 1, true) or l:find('日本語', 1, true) or l:find('🎉', 1, true) then eq(vim.fn.strdisplaywidth(l), 44) end
+  end
+  check('re-render, 60 projects, 302 rows', child.lua_get('_G.best(require("agent-ide.ui.drawer").refresh)'), 5)
 end
 
 T['300 changed files on screen within 150 ms of the data arriving'] = function()
@@ -84,7 +123,7 @@ T['300 changed files on screen within 150 ms of the data arriving'] = function()
     -- expand the project and its Changes section while the data is still unknown
     s.projects[1].root = root
     vim.api.nvim_set_current_win(s.win)
-    vim.api.nvim_win_set_cursor(s.win, { 2, 0 }) -- line 1: the Prompts node
+    vim.api.nvim_win_set_cursor(s.win, { 3, 0 }) -- line 1: the header, 2: the Prompts node
     vim.api.nvim_feedkeys(vim.keycode('<CR>'), 'x', false)
     for i, node in ipairs(drawer.state().nodes) do
       if node.id == root .. '#changes' then vim.api.nvim_win_set_cursor(s.win, { i, 0 }) end

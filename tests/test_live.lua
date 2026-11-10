@@ -125,6 +125,44 @@ T['start: on_poll runs after every poll, on_change only on change'] = function()
   eq(live.active(), false)
 end
 
+T['pane labels: one ps and one list-panes, cached per pid; nothing outside tmux'] = function()
+  local saved_env, saved_system = vim.env.TMUX, vim.system
+  tmux._reset_labels()
+  vim.env.TMUX = '/tmp/fake,1,0'
+  local cmds = {}
+  vim.system = function(cmd, _, cb)
+    cmds[#cmds + 1] = cmd
+    if cmd[1] == 'ps' then
+      cb({ code = 1, stdout = '  42 pts/9\n  43 ?\n' }) -- 44 is gone: ps says nothing about it
+    else
+      cb({ code = 0, stdout = '/dev/pts/3 1.0\n/dev/pts/9 2.1\n' })
+    end
+    return {}
+  end
+  local changes = 0
+  local ok, err = pcall(function()
+    tmux.refresh_labels({ 42, 43, 44 }, function() changes = changes + 1 end)
+    vim.wait(500, function() return changes > 0 end)
+    eq(cmds[1], { 'ps', '-o', 'pid=,tty=', '-p', '42,43,44' })
+    eq(cmds[2], { 'tmux', 'list-panes', '-a', '-F', '#{pane_tty} #{window_index}.#{pane_index}' })
+    eq({ tmux.pane_label(42), tmux.pane_label(43), tmux.pane_label(44) }, { '2.1', nil, nil })
+    -- the same answer again: no change reported
+    tmux.refresh_labels({ 42 }, function() changes = changes + 1 end)
+    vim.wait(100)
+    eq(changes, 1)
+    vim.env.TMUX = nil
+    tmux.refresh_labels({ 42 }, function() changes = changes + 1 end)
+    eq({ changes, tmux.pane_label(42), #cmds }, { 2, nil, 4 })
+  end)
+  vim.system, vim.env.TMUX = saved_system, saved_env
+  tmux._reset_labels()
+  if not ok then error(err, 0) end
+end
+
+T['parse_ps'] = function()
+  eq(tmux.parse_ps('  1 pts/0\n 22 ??\n333 ttys001\n\n'), { [1] = 'pts/0', [333] = 'ttys001' })
+end
+
 T['jump_to_pid: not in tmux'] = function()
   local saved = vim.env.TMUX
   vim.env.TMUX = nil

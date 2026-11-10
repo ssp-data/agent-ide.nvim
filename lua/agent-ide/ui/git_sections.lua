@@ -2,6 +2,7 @@
 -- `Commits on branch` (`Recent commits` on the default branch), the branch as a dim suffix on
 -- the project row, and the refresh triggers (a session's turn ends, `R`, drawer focus).
 local cache = require('agent-ide.git_cache')
+local prefix = require('agent-ide.ui.icons').prefix
 
 local M = {}
 
@@ -12,7 +13,8 @@ local STATUS_HL = { M = 'AgentIdeGitModified', A = 'AgentIdeGitAdded', D = 'Agen
 
 local function drawer() return require('agent-ide.ui.drawer') end
 
----Pieces of the stats of a file: `+a −d`, `bin` or `submodule`.
+---Pieces of the stats of a file: `+a −d` (a side that is 0 is left out unless both are),
+---`bin`, `submodule` or `dir`.
 ---@param f table
 ---@return table[]
 function M.stats(f)
@@ -20,18 +22,21 @@ function M.stats(f)
   if f.dir then return { { 'dir', 'AgentIdeAge' } } end
   if f.binary then return { { 'bin', 'AgentIdeAge' } } end
   if not f.added then return {} end
-  return { { '+' .. f.added, 'AgentIdeGitAdd' }, { ' ' }, { '−' .. (f.removed or 0), 'AgentIdeGitDel' } }
+  local added, removed = f.added, f.removed or 0
+  local out = {}
+  if added > 0 or removed == 0 then out[#out + 1] = { '+' .. added, 'AgentIdeGitAdd' } end
+  if removed > 0 or added == 0 then
+    if #out > 0 then out[#out + 1] = { ' ' } end
+    out[#out + 1] = { '−' .. removed, 'AgentIdeGitDel' }
+  end
+  return out
 end
 
+-- A file row: status and path on the left, the stats right-aligned.
 local function file_row(indent, f, node)
   local name = f.old_path and (f.old_path .. ' → ' .. f.path) or f.path
-  local pieces = { { indent }, { f.status, STATUS_HL[f.status] }, { ' ' .. name:gsub('[\r\n]', ' ') } }
-  local stats = M.stats(f)
-  if #stats > 0 then
-    pieces[#pieces + 1] = { '  ' }
-    vim.list_extend(pieces, stats)
-  end
-  return { pieces = pieces, node = node }
+  local pieces = { { indent }, { f.status, STATUS_HL[f.status] }, { ' ' }, { (name:gsub('[\r\n]', ' ')), nil, fit = true } }
+  return { pieces = pieces, right = M.stats(f), node = node }
 end
 
 local function hint(indent, text, project)
@@ -98,18 +103,20 @@ local function files_rows(out, w, list, indent, parent, mode, commit)
   end
 end
 
-local function fold_row(out, w, ctx, name, text, group)
+local function fold_row(out, w, ctx, name, text, group, icon)
   local key = w.root .. '/git/' .. name
   local open = is_open(ctx.expanded, key)
   local node = { type = 'git_section', project = w.project, root = w.root, id = w.root .. '#' .. name,
     fold = { key = key, default = false } }
   node.fold.focus = node.id
-  out[#out + 1] = { pieces = { { w.indent .. (open and ctx.icons.open or ctx.icons.closed) .. ' ' .. text, group } }, node = node }
+  out[#out + 1] = { pieces = { { w.indent .. (open and ctx.icons.open or ctx.icons.closed) .. ' ' .. prefix(icon) .. text, group } },
+    node = node }
   return open, node
 end
 
+-- `name` is also the icon key (`changes`, `commits`).
 local function section(out, w, ctx, name, label, count)
-  return fold_row(out, w, ctx, name, label .. (count and (' (' .. count .. ')') or ''), 'AgentIdeSection')
+  return fold_row(out, w, ctx, name, label .. (count and (' (' .. count .. ')') or ''), 'AgentIdeSection', ctx.icons[name])
 end
 
 local function age(date, now) return require('agent-ide.ui.tree').ago(date, now) end
@@ -129,9 +136,9 @@ local function commit_rows(out, w, ctx, commits)
     out[#out + 1] = { node = node, pieces = {
       { ind .. (open and ctx.icons.open or ctx.icons.closed) .. ' ' },
       { c.short, 'AgentIdeGitHash' },
-      { ' ' .. c.subject:gsub('[\r\n]', ' ') .. '  ' },
-      { c.files .. (c.files == 1 and ' file' or ' files') .. '  ' .. age(c.date, ctx.now), 'AgentIdeAge' },
-    } }
+      { ' ' },
+      { (c.subject:gsub('[\r\n]', ' ')), nil, fit = true },
+    }, right = { { age(c.date, ctx.now), 'AgentIdeAge' } } }
     if open then
       local files = cache.commit_files(w.root, c.hash)
       if not files then
@@ -192,8 +199,8 @@ function M.rows(project, ctx)
   for _, root in ipairs(list) do
     local h = cache.head(root)
     local w = { root = root, project = project, indent = '  ' }
-    local text = '⎇ ' .. (h and h.branch or '…') .. ' · ' .. vim.fs.basename(root)
-    local open = fold_row(out, w, ctx, 'tree', text, 'AgentIdeSection')
+    local text = (h and h.branch or '…') .. ' · ' .. vim.fs.basename(root)
+    local open = fold_row(out, w, ctx, 'tree', text, 'AgentIdeSection', ctx.icons.worktree or '⎇')
     if open then tree_rows(out, { root = root, project = project, indent = '    ' }, ctx) end
   end
   return out, suffix

@@ -1,5 +1,6 @@
--- What the drawer shows about sessions, apart from its window: the state of a session, what a
--- waiting one waits for, and new sessions no scan has listed yet.
+-- What the drawer shows about sessions, apart from its window: the state of a session, its
+-- state word (what a waiting one waits for, why one failed, where it runs), and new sessions
+-- no scan has listed yet.
 local live = require('agent-ide.live')
 local session = require('agent-ide.session')
 
@@ -26,16 +27,64 @@ function M.state_of(id)
   return live.state_of(live.get(), id)
 end
 
----Tool a waiting Session of this Neovim waits for (its oldest open ask), for its drawer row.
----@param id string
----@return string|nil
-function M.waits_for(id)
-  local s = session.get(id)
-  local p = s and s.state == 'waiting' and s.pending_permissions[1]
-  return p and (tostring(p.tool_name):gsub('[\r\n]', ' ')) or nil
+local function first_line(text) return (text or ''):match('^%s*([^\r\n]*)') end
+
+---Pids of the sessions running in another Claude (their tmux panes label the drawer rows).
+---@return integer[]
+function M.elsewhere_pids()
+  local pids = {}
+  for id, e in pairs(live.get()) do
+    local s = session.get(id)
+    if e.pid and (not s or s:_elsewhere()) then pids[#pids + 1] = e.pid end
+  end
+  table.sort(pids)
+  return pids
 end
 
-local function first_line(text) return (text or ''):match('^%s*([^\r\n]*)') end
+local FAIL_REASON_MAX = 20
+
+-- First line of the last error event of `s`, at most 20 characters.
+local function fail_reason(s)
+  for i = #s.events, 1, -1 do
+    local ev = s.events[i]
+    if ev.kind == 'meta' and ev.label == 'error' then
+      local r = vim.trim(first_line(ev.text))
+      if r == '' then return nil end
+      return require('agent-ide.ui.layout').truncate(r, FAIL_REASON_MAX)
+    end
+  end
+end
+
+local WAIT_WORD = { AskUserQuestion = 'question', ExitPlanMode = 'plan to approve' }
+
+---The state word of a session's drawer row, `{ text, hl_group }`, or nil:
+---waiting: `permission: <tool>`, `question`, `plan to approve` (another Claude: `input`);
+---done: `done, unread`; failed: `failed[: reason]`; handed to native Claude: `native`;
+---running in another Claude: `tmux <window>.<pane>` (pane known) or `elsewhere`.
+---@param id string
+---@param state string as shown (see `state_of`)
+---@return table|nil
+function M.note_of(id, state)
+  local s = session.get(id)
+  local handoff = package.loaded['agent-ide.ui.handoff']
+  if s and handoff and handoff.away(s) then return { 'native', 'AgentIdeAge' } end
+  local e = live.get()[id]
+  local elsewhere = e ~= nil and (s == nil or s:_elsewhere())
+  if state == 'waiting' then
+    local p = not elsewhere and s and s.state == 'waiting' and s.pending_permissions[1]
+    if not p then return { 'input', 'AgentIdeWaiting' } end
+    local tool = tostring(p.tool_name)
+    return { WAIT_WORD[tool] or ('permission: ' .. tool), 'AgentIdeWaiting' }
+  elseif state == 'done' then
+    return { 'done, unread', 'AgentIdeDone' }
+  elseif state == 'failed' then
+    local r = s and fail_reason(s)
+    return { r and ('failed: ' .. r) or 'failed', 'AgentIdeFailed' }
+  elseif elsewhere and (state == 'busy' or state == 'idle') then
+    local pane = e.pid and require('agent-ide.tmux').pane_label(e.pid)
+    return { pane and ('tmux ' .. pane) or 'elsewhere', 'AgentIdeAge' }
+  end
+end
 
 ---Projects with the unsaved new sessions (once they have a prompt) added to their project.
 ---A session a scan lists is dropped from `unsaved`, so it never shows twice.
