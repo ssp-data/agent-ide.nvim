@@ -83,9 +83,10 @@ defaults = function()
     trash = { keep_days = nil },
     -- prompt buffer: `/` opens the command menu, `@` opens the file picker
     chat = { auto_slash = true, at_picker = true },
-    -- a soft chime when a session needs you (waiting); cmd: the player (nil: pw-play, paplay,
-    -- aplay or afplay, whichever exists), the chime's WAV path is appended
-    sound = { waiting = true, cmd = nil },
+    -- a soft chime when a session needs you (waiting); chime: two, soft, bell, rising or pop
+    -- (`:AgentsChime <name>` plays one); cmd: the player (nil: pw-play, paplay, aplay or afplay,
+    -- whichever exists), the chime's WAV path is appended
+    sound = { waiting = true, chime = 'two', cmd = nil },
     -- keeper: Claude runs under a small detached process of the plugin's, so quitting Neovim
     -- leaves it running and a new Neovim reattaches; idle_minutes: an idle Claude with no Neovim
     -- attached is closed after that long (false: never). enabled = false: a child of Neovim

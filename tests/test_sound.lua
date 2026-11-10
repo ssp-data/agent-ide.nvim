@@ -11,7 +11,7 @@ local T = MiniTest.new_set({ hooks = {
     tmp = vim.fn.tempname()
     vim.fn.mkdir(tmp, 'p')
     log = tmp .. '/played'
-    vim.fn.delete(sound._file())
+    for _, n in ipairs(sound.NAMES) do vim.fn.delete(sound._file(n)) end
     sound._reset()
     session._reset()
     -- a fake player: logs the file it was given
@@ -20,7 +20,7 @@ local T = MiniTest.new_set({ hooks = {
   end,
   post_case = function()
     vim.fn.delete(tmp, 'rf')
-    vim.fn.delete(sound._file())
+    for _, n in ipairs(sound.NAMES) do vim.fn.delete(sound._file(n)) end
     session._reset()
     config.setup({})
   end,
@@ -44,18 +44,18 @@ T['the WAV is a valid 16-bit mono RIFF file, written once as 0600 in a 0700 fold
   eq(wav:sub(37, 40), 'data')
   eq(#wav, 44 + #pcm)
   eq(#pcm % 2, 0)
-  eq(#pcm > 22050 * 2 * 0.4 and #pcm < 22050 * 2 * 0.5, true) -- about 0.44 s
+  eq(#pcm > 22050 * 2 * 0.4 and #pcm < 22050 * 2 * 0.5, true) -- about 0.44 s (the default, two)
   -- channels 1, rate 22050, bits 16
   eq({ wav:byte(23), wav:byte(24) }, { 1, 0 })
   eq({ wav:byte(25), wav:byte(26), wav:byte(27), wav:byte(28) }, { 22050 % 256, math.floor(22050 / 256), 0, 0 })
   eq({ wav:byte(35), wav:byte(36) }, { 16, 0 })
   sound.play(true)
   local p = wait_played(1)
-  eq(p[1], sound._file())
-  local st = vim.uv.fs_stat(sound._file())
+  eq(p[1], sound._file('two'))
+  local st = vim.uv.fs_stat(sound._file('two'))
   eq(bit.band(st.mode, 511), 384)
-  eq(bit.band(vim.uv.fs_stat(vim.fs.dirname(sound._file())).mode, 511), 448)
-  eq(vim.fn.readfile(sound._file(), 'b')[1]:sub(1, 4), 'RIFF')
+  eq(bit.band(vim.uv.fs_stat(vim.fs.dirname(sound._file('two'))).mode, 511), 448)
+  eq(vim.fn.readfile(sound._file('two'), 'b')[1]:sub(1, 4), 'RIFF')
 end
 
 T['a session turning waiting chimes once; a second within 2 s does not; off with sound.waiting = false'] = function()
@@ -103,6 +103,35 @@ T['without a player: one notice, nothing played; the default picks an installed 
   eq(sound.player(), { 'paplay' })
   vim.fn.executable = exe
   eq(played(), {})
+end
+
+T['five chimes: each has its own samples and file; the configured one plays; :AgentsChime plays any; an unknown name warns'] = function()
+  eq(sound.NAMES, { 'two', 'soft', 'bell', 'rising', 'pop' })
+  local seen = {}
+  for _, n in ipairs(sound.NAMES) do
+    local pcm = sound.samples(n)
+    eq(#pcm > 1000, true)
+    eq(seen[pcm], nil)
+    seen[pcm] = true
+  end
+  config.get().sound.chime = 'bell'
+  sound.play(true)
+  eq(wait_played(1)[1], sound._file('bell'))
+  eq(vim.fn.filereadable(sound._file('bell')), 1)
+  eq(vim.fn.filereadable(sound._file('two')), 0)
+  sound.command('pop')
+  eq(wait_played(2)[2], sound._file('pop'))
+  local notes = {}
+  local orig = vim.notify
+  vim.notify = function(m) notes[#notes + 1] = m end
+  sound.command('nope')
+  config.get().sound.chime = 'nope'
+  sound.play(true)
+  vim.notify = orig
+  eq(#wait_played(3), 3)
+  eq(played()[3], sound._file('two')) -- the default stands in
+  eq(notes[1]:find('no chime named nope', 1, true) ~= nil, true)
+  eq(#notes, 2)
 end
 
 return T

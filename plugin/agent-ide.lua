@@ -24,6 +24,12 @@ vim.api.nvim_create_user_command('AgentsTrash', function(o)
   require('agent-ide.ui.delete').command(o.args)
 end, { nargs = '?', complete = function() return { 'empty' } end, desc = 'Agent-IDE: restore or purge deleted sessions' })
 
+vim.api.nvim_create_user_command('AgentsChime', function(o) require('agent-ide.sound').command(o.args) end,
+  { nargs = '?', desc = 'Agent-IDE: play a chime to hear it (two, soft, bell, rising, pop)',
+    complete = function(lead)
+      return vim.tbl_filter(function(w) return vim.startswith(w, lead) end, require('agent-ide.sound').NAMES)
+    end })
+
 -- AGENT_IDE_WATCHDOG=1 nvim: log where Lua is when Neovim freezes (util/watchdog.lua)
 if vim.env.AGENT_IDE_WATCHDOG and vim.env.AGENT_IDE_WATCHDOG ~= '' and vim.env.AGENT_IDE_WATCHDOG ~= '0' then
   require('agent-ide.util.watchdog').start(tonumber(vim.env.AGENT_IDE_WATCHDOG) or 5)
