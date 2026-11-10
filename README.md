@@ -56,7 +56,7 @@ require('agent-ide').setup({
 | `R` | Rescan sessions and refresh running state |
 | `gp` | Jump to the tmux pane of a running session |
 | `q` | Close the drawer |
-| `gl` | Open lazygit for the project's repository |
+| `glg` | Open lazygit for the row's repository (a worktree row or session: that worktree) |
 
 The history buffer is markdown with folds for tool calls, results and thinking. Anything the viewer does not understand is shown as a fold marked `unknown`, never dropped, and truncated output says how many lines are hidden.
 
@@ -64,19 +64,20 @@ The history buffer is markdown with folds for tool calls, results and thinking. 
 
 Each git project in the drawer has two more sections below its sessions: `Changes vs <base>` (everything on the branch since it left the default branch, uncommitted and untracked files included; on the default branch, uncommitted changes against `HEAD`) and `Commits on branch` (`Recent commits` on the default branch), each commit expanding to its files. The project row shows the branch when it is not the default branch. The lists refresh when a session of the project finishes a turn, on `R`, and when you come back to the drawer after more than 5 s.
 
-`<CR>` on a file opens a side-by-side diff in the main window, built on Neovim's own diff mode. For branch changes the right side is your real, editable file. In the chat, `gd` on an `Edit` or `Write` fold opens the diff of that file.
+`<CR>` on a file opens a side-by-side diff in the main window, built on Neovim's own diff mode. For branch changes the right side is your real, editable file. In the chat, `gd` (or `<leader>gd`) on an `Edit` or `Write` fold opens the diff of that file. Opening a diff sets the Agents tab's directory to that work tree (`tcd`, like opening a chat), so your own lazygit or picker keys work on it. Sessions in a linked worktree get a row per work tree (`⎇ <branch> · <folder>`) with its own Changes and Commits.
 
 | Key (diff view) | Action |
 |---|---|
-| `]f` / `[f` | Next / previous changed file |
-| `gb` | Flip this file between the whole branch and one commit (pick which) |
-| `gB` | Back to the whole-branch diff |
+| `]f`, `<leader>gj` / `[f`, `<leader>gk` | Next / previous changed file |
+| `gb`, `<leader>gt` | This file in one commit only (pick which); again: back to the whole branch |
+| `gB`, `<leader>gB` | Back to the whole-branch diff |
+| `R` | Reload the list and the base side |
 | `]c` / `[c` | Next / previous hunk (Neovim) |
-| `gl` | lazygit for this repository |
-| `q` | Close the diff, back to what was shown before |
+| `glg` | lazygit for this repository |
+| `q`, `<leader>gq` | Close the diff, back to what was shown before (`:q` on either side too) |
 | `?` | Help |
 
-The keys are under `keys.diff` in the configuration. Git is only read (`git --no-optional-locks`, never a command that writes); acting is left to lazygit.
+The keys are under `keys.diff` (and `keys.chat.diff`) in the configuration; each value is a key, a list of keys, or `false`. Git is only read (`git --no-optional-locks`, never a command that writes); acting is left to lazygit.
 
 ## How it works
 

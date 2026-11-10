@@ -67,6 +67,7 @@ local HELP = {
   { 'prev_file', 'previous changed file' },
   { 'flip', 'this file: whole branch <-> one commit (pick the commit)' },
   { 'branch', 'back to the whole-branch diff' },
+  { 'refresh', 'refresh the file list and the base side' },
   { 'lazygit', 'lazygit for this repository' },
   { 'close', 'close the diff, back to what was shown before' },
   { 'help', 'this help' },
@@ -76,7 +77,8 @@ function M.help()
   local keys = M.keys()
   local rows = {}
   for _, h in ipairs(HELP) do
-    if keys[h[1]] then rows[#rows + 1] = { key = keys[h[1]], desc = h[2] } end
+    local list = scratch.keys(keys[h[1]])
+    if #list > 0 then rows[#rows + 1] = { key = table.concat(list, ' / '), desc = h[2] } end
   end
   rows[#rows + 1] = { key = ']c / [c', desc = 'next / previous hunk (Neovim)' }
   rows[#rows + 1] = { key = 'do / dp', desc = 'diff get / put (Neovim; right side is your file)' }
@@ -93,6 +95,7 @@ function M.map(buf, view)
   scratch.map(buf, keys.flip, function() M.flip(view) end, 'flip branch / commit')
   scratch.map(buf, keys.branch, function() M.to_branch(view) end, 'branch diff')
   scratch.map(buf, keys.close, view.close, 'close diff')
+  scratch.map(buf, keys.refresh, view.refresh, 'refresh diff')
   scratch.map(buf, keys.help, M.help, 'diff help')
   scratch.map(buf, keys.lazygit, function()
     local d = view.state()

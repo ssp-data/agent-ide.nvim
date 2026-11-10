@@ -113,11 +113,13 @@ local function view()
     local api = vim.api
     local function side(w)
       local b = api.nvim_win_get_buf(w)
-      return { name = api.nvim_buf_get_name(b), ft = vim.bo[b].filetype, diff = vim.wo[w].diff, winbar = vim.wo[w].winbar,
+      return { name = api.nvim_buf_get_name(b), ft = vim.bo[b].filetype, diff = vim.wo[w].diff,
+        -- what the winbar shows: the view's label expression evaluated
+        winbar = vim.wo[w].winbar:find("diff'.bar(", 1, true) and require('agent-ide.ui.diff').bar(w) or vim.wo[w].winbar,
         modifiable = vim.bo[b].modifiable, buftype = vim.bo[b].buftype, lines = api.nvim_buf_get_lines(b, 0, -1, false) }
     end
     -- what is on screen: the file last shown (a load may be on its way)
-    return { mode = d.mode, index = d.index, n = #d.list, path = d.shown and d.shown.path, left = side(d.left), right = side(d.right) }
+    return { mode = d.mode, shown_mode = d.shown_mode, index = d.index, n = #d.list, path = d.shown and d.shown.path, left = side(d.left), right = side(d.right) }
   end)()]])
 end
 
@@ -144,6 +146,8 @@ local function real_buf_opts(path)
     vim.api.nvim_win_set_buf(0, b)
     local r = { diff = vim.wo.diff, scb = vim.wo.scrollbind, crb = vim.wo.cursorbind, fdm = vim.wo.foldmethod,
       maps = vim.fn.maparg(']f', 'n') }
+    local bar = vim.api.nvim_get_option_value('winbar', { scope = 'local', win = 0 })
+    r.bar = bar ~= '' and bar or vim.go.winbar
     vim.cmd('tabclose')
     return r
   end)(...)]], { path })
@@ -227,7 +231,7 @@ T[']f / [f walk the list; added, binary, deleted and untracked files'] = functio
   child.type_keys('[f')
   wait_for(function() return view().path == 'new.lua' end, 'back to new.lua')
   -- the real buffers that were shown are left clean
-  eq(real_buf_opts(repo .. '/a.lua'), { diff = false, scb = false, crb = false, fdm = 'manual', maps = '' })
+  eq(real_buf_opts(repo .. '/a.lua'), { diff = false, scb = false, crb = false, fdm = 'manual', maps = '', bar = '' })
 end
 
 T['gb picks a commit of this file, gB goes back to the branch view'] = function()
@@ -257,6 +261,7 @@ T['q returns to the chat that was open; keys and diff options are gone from the 
     vim.fn.bufload(vim.api.nvim_get_current_buf())
     vim.keymap.set('n', 'q', function() _G.mine = true end, { buffer = true })
   end)]], { repo .. '/a.lua' })
+  child.lua('vim.go.winbar = "GLOBAL"')
   child.lua('require("agent-ide").toggle()')
   press_on('P r  ')
   press_on('Work on it')
@@ -274,11 +279,21 @@ T['q returns to the chat that was open; keys and diff options are gone from the 
   child.lua([[vim.api.nvim_buf_call(vim.fn.bufnr(...), function() vim.cmd('normal q') end)]], { repo .. '/a.lua' })
   eq(child.lua_get('_G.mine'), true) -- the user's own buffer-local q is back
   local o = real_buf_opts(repo .. '/a.lua')
-  eq({ o.diff, o.scb, o.maps }, { false, false, '' })
+  eq({ o.diff, o.scb, o.maps, o.bar }, { false, false, '', 'GLOBAL' }) -- the view's winbar did not stick
+  -- :q on the left (base) window closes the view the same way
+  press_on('M a.lua')
+  wait_for(function() local v = view(); return v ~= vim.NIL and v.right.diff end, 'diff again')
+  child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.diff").state().left); vim.cmd("quit")')
+  wait_for(function() return view() == vim.NIL end, 'closed by :q on the left')
+  wait_for(function() return child.lua_get('require("agent-ide.ui.chat")._windows().prompt ~= nil') end, 'chat back after :q')
+  eq(child.lua_get('vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().transcript))'),
+    'agent-ide://chat/' .. ID)
+  eq(real_buf_opts(repo .. '/a.lua').bar, 'GLOBAL')
 end
 
 T['opening a chat or another diff replaces the view cleanly; repeated opens keep two windows'] = function()
   start()
+  child.lua('vim.go.winbar = "GLOBAL"')
   open_file('M a.lua')
   for _ = 1, 3 do
     press_on('A new.lua')
@@ -292,19 +307,63 @@ T['opening a chat or another diff replaces the view cleanly; repeated opens keep
   eq(child.lua_get('#vim.api.nvim_tabpage_list_wins(0)'), 3) -- transcript, prompt, drawer
   eq(child.lua_get('vim.tbl_contains(vim.tbl_map(function(w) return vim.wo[w].diff end, vim.api.nvim_tabpage_list_wins(0)), true)'), false)
   local o = real_buf_opts(repo .. '/a.lua')
-  eq({ o.diff, o.scb, o.crb }, { false, false, false })
+  eq({ o.diff, o.scb, o.crb, o.bar }, { false, false, false, 'GLOBAL' })
   -- no scratch buffer is left behind
   eq(child.lua_get('#vim.tbl_filter(function(b) return vim.api.nvim_buf_get_name(b):find("agent-ide://git/", 1, true) ~= nil end, vim.api.nvim_list_bufs())'), 0)
 end
 
 T['closing the Agents tab with a diff open; the real file shown again has no diff'] = function()
   start()
+  child.lua('vim.go.winbar = "GLOBAL"')
   open_file('M a.lua')
   child.lua('vim.cmd("tabclose")')
   wait_for(function() return view() == vim.NIL end, 'view gone')
   eq(child.lua_get('vim.fn.tabpagenr("$")'), 1)
   child.lua('vim.cmd.edit(vim.fn.fnameescape(...))', { repo .. '/a.lua' })
   eq(child.lua_get('{ vim.wo.diff, vim.wo.scrollbind, vim.wo.cursorbind }'), { false, false, false })
+  eq(child.lua_get('vim.api.nvim_get_option_value("winbar", { scope = "local", win = 0 })'), '')
+end
+
+T['the base side is read like the working file: CRLF, latin1, BOM; a final newline note'] = function()
+  -- main gains the files (in a side checkout: the main one has uncommitted work), feat merges it
+  local side = tmp .. '/side'
+  R.git(repo, { 'worktree', 'add', '-q', side, 'main' })
+  R.write(side, 'crlf.txt', 'a\r\nb\r\nc\r\n')
+  R.write(side, 'latin.txt', 'caf\233\n')
+  R.write(side, 'bom.txt', '\239\187\191hello\n')
+  R.write(side, 'eol.txt', 'x\n')
+  R.commit(side, 'encodings')
+  R.git(repo, { 'worktree', 'remove', side })
+  R.git(repo, { 'merge', '-q', '--no-edit', 'main' })
+  R.write(repo, 'crlf.txt', 'a\r\nB\r\nc\r\n')
+  R.commit(repo, 'crlf edit')
+  R.write(repo, 'latin.txt', 'caf\233 au lait\n')
+  R.write(repo, 'bom.txt', '\239\187\191hello\nworld\n')
+  R.write(repo, 'eol.txt', 'x')
+  start()
+  child.lua('require("agent-ide").toggle()')
+  press_on('P r  ')
+  press_on('Changes vs main (')
+  local function open(row, path)
+    press_on(row)
+    wait_for(function() local v = view(); return v ~= vim.NIL and v.path == path end, path)
+    return view()
+  end
+  local v = open('M crlf.txt', 'crlf.txt')
+  eq({ v.left.lines, v.right.lines }, { { 'a', 'b', 'c' }, { 'a', 'B', 'c' } })
+  eq(child.lua_get('vim.bo[vim.fn.bufnr(...)].fileformat', { repo .. '/crlf.txt' }), 'dos')
+  v = open('M latin.txt', 'latin.txt')
+  eq({ v.left.lines, v.right.lines }, { { 'café' }, { 'café au lait' } })
+  v = open('M bom.txt', 'bom.txt')
+  eq(v.left.lines, { 'hello' })
+  v = open('M eol.txt', 'eol.txt')
+  eq(v.right.winbar:find('final newline differs', 1, true) ~= nil, true)
+  -- a commit whose sides are both CRLF: no false differences either
+  open('M crlf.txt', 'crlf.txt')
+  child.type_keys('gb')
+  wait_for(function() return view().shown_mode == 'commit' end, 'commit view')
+  v = view()
+  eq({ v.left.lines, v.right.lines }, { { 'a', 'b', 'c' }, { 'a', 'B', 'c' } })
 end
 
 T[':bd on the scratch side, then the right window; an unsaved real file is never wiped'] = function()
@@ -498,7 +557,8 @@ T['gd on an Edit or Write fold in the chat opens the branch diff of that file'] 
       { type = 'tool_use', id = 't1', name = 'Edit', input = { file_path = repo .. '/a.lua', old_string = 'a', new_string = 'b' } },
     } } }),
     vim.json.encode({ type = 'assistant', uuid = 'z3', cwd = repo, message = { role = 'assistant', content = {
-      { type = 'tool_use', id = 't2', name = 'Write', input = { file_path = repo .. '/new.lua', content = 'return 1' } },
+      { type = 'tool_use', id = 't2', name = 'Write', input = { file_path = repo .. '/new.lua',
+        content = 'return 1\n▸ Edit: ' .. repo .. '/a.lua' } },
     } } }),
     vim.json.encode({ type = 'assistant', uuid = 'z4', cwd = repo, message = { role = 'assistant', content = {
       { type = 'tool_use', id = 't3', name = 'Bash', input = { command = 'ls' } },
@@ -522,6 +582,10 @@ T['gd on an Edit or Write fold in the chat opens the branch diff of that file'] 
   end
   gd_at(tline('▸ Bash: ls'))
   eq(child.lua_get('_G.notes[#_G.notes]'), 'Agent-IDE: no Edit or Write of a file here')
+  gd_at(tline('│ ▸ Edit: ')) -- a look-alike line inside the Write body: the Write's file
+  wait_for(function() local v = view(); return v ~= vim.NIL and v.path == 'new.lua' end, 'diff of new.lua from the body')
+  child.type_keys('q')
+  wait_for(function() return view() == vim.NIL end, 'closed')
   gd_at(tline('▸ Write: '))
   wait_for(function() local v = view(); return v ~= vim.NIL and v.path == 'new.lua' end, 'diff of new.lua')
   child.type_keys('q')
@@ -529,6 +593,63 @@ T['gd on an Edit or Write fold in the chat opens the branch diff of that file'] 
   gd_at(tline('▸ Edit: '))
   wait_for(function() local v = view(); return v ~= vim.NIL and v.path == 'a.lua' end, 'diff of a.lua')
   eq({ view().index, view().n }, { 1, 5 })
+end
+
+T['keys: every default is a list with a <leader>g twin that never takes one of the user\'s keys'] = function()
+  start()
+  local keys = child.lua_get('require("agent-ide.config").get().keys')
+  local taken = {}
+  for _, c in ipairs({ 'p', 'P', 'f', 'h', 'b', 'i', 'I', 'c', 'o', 'w', 's' }) do taken['<leader>g' .. c] = true end
+  local all = {}
+  for _, v in pairs(keys.diff) do vim.list_extend(all, type(v) == 'table' and v or { v }) end
+  vim.list_extend(all, keys.chat.diff)
+  for _, k in ipairs(all) do
+    if taken[k] then error('default key takes a user key: ' .. k) end
+    eq(k == ']c' or k == '[c', false)
+  end
+  eq(keys.diff.next_file, { ']f', '<leader>gj' })
+  eq(keys.diff.flip, { 'gb', '<leader>gt' })
+  eq(keys.diff.lazygit, 'glg')
+  eq(keys.chat.diff, { 'gd', '<leader>gd' })
+end
+
+T['every key of a list works; the user\'s own mappings on those keys are back afterwards'] = function()
+  start()
+  child.lua('vim.g.mapleader = " "')
+  child.lua([[
+    vim.keymap.set('n', '<leader>gt', function() _G.global_gt = true end)
+    vim.api.nvim_buf_call(vim.fn.bufadd(...), function()
+      vim.fn.bufload(vim.api.nvim_get_current_buf())
+      vim.keymap.set('n', '<leader>gj', function() _G.local_gj = true end, { buffer = true })
+    end)
+  ]], { repo .. '/a.lua' })
+  open_file('M a.lua')
+  child.type_keys(' gj')
+  wait_for(function() return view().path == 'bin.dat' end, '<leader>gj')
+  child.type_keys(' gk')
+  wait_for(function() return view().path == 'a.lua' end, '<leader>gk')
+  child.type_keys(' gq')
+  wait_for(function() return view() == vim.NIL end, '<leader>gq')
+  child.lua([[vim.api.nvim_buf_call(vim.fn.bufnr(...), function()
+    vim.api.nvim_feedkeys(vim.keycode('<leader>gj'), 'x', false)
+    vim.api.nvim_feedkeys(vim.keycode('<leader>gt'), 'x', false)
+  end)]], { repo .. '/a.lua' })
+  eq(child.lua_get('{ _G.local_gj, _G.global_gt }'), { true, true })
+  eq(child.lua_get('vim.fn.maparg("]f", "n")'), '')
+end
+
+T['R in the diff view reloads the list; opening a diff sets the tab directory to its work tree'] = function()
+  local elsewhere = tmp .. '/elsewhere'
+  vim.fn.mkdir(elsewhere, 'p')
+  start()
+  child.lua('vim.cmd.cd(vim.fn.fnameescape(...))', { elsewhere })
+  open_file('M a.lua')
+  local agents = child.lua_get('vim.api.nvim_tabpage_get_number(require("agent-ide.ui.drawer").state().tab)')
+  eq(child.lua_get('vim.fn.getcwd(-1, ...)', { agents }), repo)
+  eq(child.lua_get('vim.fn.getcwd(-1, -1)'), elsewhere) -- the global directory never changes
+  R.write(repo, 'z.txt', { 'z' })
+  child.type_keys('R')
+  wait_for(function() return view().n == 6 end, 'R refresh')
 end
 
 return T

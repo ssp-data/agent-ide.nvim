@@ -32,7 +32,9 @@ function M.help()
   local keys = M.keys()
   local rows = {}
   for _, h in ipairs(HELP) do
-    if keys[h[1]] then rows[#rows + 1] = { key = keys[h[1]], desc = h[2] } end
+    local k = keys[h[1]]
+    if type(k) == 'table' then k = #k > 0 and table.concat(k, ' / ') or nil end -- a list of keys
+    if k then rows[#rows + 1] = { key = k, desc = h[2] } end
   end
   local all = config.get().keys
   if type(all) == 'table' and all.next_waiting then

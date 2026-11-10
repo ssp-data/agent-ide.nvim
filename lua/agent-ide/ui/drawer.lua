@@ -51,7 +51,8 @@ local function render(focus)
   if not S.buf then return end
   local cfg = config.get()
   local t = tree.build(model.with_unsaved(S.projects), model.state_of, S.expanded, os.time(), cfg.icons, cfg.projects_dir,
-    model.waits_for, sections.collect)
+    model.waits_for, sections.collect,
+    { top = sections.collect_top, width = S.win and api.nvim_win_get_width(S.win) or cfg.drawer.width })
   local row = S.win and api.nvim_win_get_cursor(S.win)[1]
   focus = focus or (row and node_key(S.nodes[row]))
   vim.bo[S.buf].modifiable = true
@@ -164,7 +165,8 @@ function actions.open()
     model.add_unsaved(s.id, p.key)
     require('agent-ide.ui.chat').open(s, p)
   elseif node.open then
-    node.open(node)
+    local ok, err = pcall(node.open, node)
+    if not ok then vim.notify('Agent-IDE: ' .. tostring(err), vim.log.levels.ERROR) end
   else
     toggle_node(node)
   end
