@@ -69,18 +69,19 @@ end
 
 local function alive(pid) return vim.uv.kill(pid, 0) == 0 end
 
--- `sessions`: { { id, status, pid, pane = '%5', label = '2.1', tty = 'pts/5', victim = true } }:
--- the live list, the process tree (pid -> pane shell 500+n -> 1), the panes and their labels.
+-- `sessions`: { { id, status, pid, pane = '%5', label = '2.1', tty = 'pts/5', victim = true,
+-- fg = false, cwd } }: the live list, the process list (`ps -A`: pid, parent shell 500+n, its group,
+-- the terminal's foreground group, tty, `claude`), the ttys (`ps -p`), the panes and their labels.
 local function world(sessions)
   local live, ps_all, ps_tty, panes, labels = {}, {}, {}, {}, {}
   for n, s in ipairs(sessions) do
     live[#live + 1] = { sessionId = s.id, status = s.status, pid = s.pid, cwd = s.cwd or '/x/repo' }
     if s.pane then
       local shell = 500 + n
-      ps_all[#ps_all + 1] = s.pid .. ' ' .. shell
-      ps_all[#ps_all + 1] = shell .. ' 1'
+      ps_all[#ps_all + 1] = ('%d %d %d %d %s claude'):format(s.pid, shell, s.pid, s.fg == false and 999 or s.pid, s.tty)
+      ps_all[#ps_all + 1] = ('%d 1 %d %d %s zsh'):format(shell, shell, s.fg == false and 999 or s.pid, s.tty)
       ps_tty[#ps_tty + 1] = s.pid .. ' ' .. s.tty
-      panes[#panes + 1] = s.pane .. ' ' .. shell .. ' ' .. s.label
+      panes[#panes + 1] = ('%s %d /dev/%s 0 0 %s'):format(s.pane, shell, s.tty, s.label)
       labels[#labels + 1] = '/dev/' .. s.tty .. ' ' .. s.label
       if s.victim then vim.fn.writefile({ tostring(s.pid) }, dir .. '/victim-' .. s.pane) end
     end
@@ -183,25 +184,60 @@ local function confirms() return child.lua_get('_G.confirms') end
 
 -- Pure ----------------------------------------------------------------------------------------
 
-T['pane_of: the pane whose process is the pid or an ancestor of it'] = function()
-  local parents = close.parse_parents('  42   7\n   7   1\n 99 1\n')
-  local panes = close.parse_panes('%3 7 2.1\n%4 99 3.0\nnot a pane\n')
-  eq(panes, { { id = '%3', pid = 7, label = '2.1' }, { id = '%4', pid = 99, label = '3.0' } })
-  eq(close.pane_of(42, parents, panes).id, '%3')
-  eq(close.pane_of(99, parents, panes).id, '%4')
-  eq(close.pane_of(43, parents, panes), nil) -- not running
-  eq(close.pane_of(42, parents, { { id = '%4', pid = 99, label = '3.0' } }), nil)
+local V = require('agent-ide.ui.tmux_verify')
+
+T['verify: the Claude must be the foreground program of a pane\'s terminal, the pane in no mode'] = function()
+  local procs = V.parse_ps(table.concat({
+    '  42   7  42  42 pts/5    claude',
+    '  43   7  43  99 pts/5    claude', -- suspended or a background job: another group in front
+    '  44   8  44  44 pts/9    claude', -- on a terminal no pane has (a Neovim :terminal)
+    '  45   7  45  45 pts/6    vim',
+    '  46   1  46  -1 ?        claude', -- no terminal (started by another program without one)
+    '  47   7  47  47 pts/7    /usr/local/bin/node',
+    '  48   7  48  48 pts/8    claude',
+    '  49   7  49  49 pts/10   claude',
+  }, '\n'))
+  eq(procs[42], { pgid = 42, tpgid = 42, tty = 'pts/5', comm = 'claude' })
+  local panes = V.parse_panes(table.concat({
+    '%5 7 /dev/pts/5 0 0 2.1', '%6 7 /dev/pts/6 0 0 2.2', '%7 7 /dev/pts/7 0 0 2.3',
+    '%8 7 /dev/pts/8 1 0 2.4', '%10 7 /dev/pts/10 0 1 3.0', 'not a pane',
+  }, '\n'))
+  eq(panes[1], { id = '%5', pid = 7, tty = 'pts/5', in_mode = false, sync = false, label = '2.1' })
+  eq(V.verify(42, procs, panes).id, '%5')
+  eq(V.verify(47, procs, panes).id, '%7') -- node (an npm install)
+  local function why(pid) return select(2, V.verify(pid, procs, panes)) end
+  eq(why(43), 'it is not in the foreground of its pane')
+  eq(why(44), 'no tmux pane shows it')
+  eq(why(45), 'that process is not Claude')
+  eq(why(46), 'it has no terminal')
+  eq(why(48), 'its pane is in copy mode')
+  eq(why(49), 'its window synchronizes panes')
+  eq(why(50), 'it no longer runs')
+end
+
+T['a process of another user counts as running (EPERM), only ESRCH as gone'] = function()
+  eq(close._exists(1), true) -- init: not ours to signal, but it runs
+  eq(close._exists(vim.uv.os_getpid()), true)
+  eq(close._exists(4194303 + 1000), false)
 end
 
 -- X on a drawer row ------------------------------------------------------------------------
 
-local function idle_world(status, victim)
+local function idle_world(status, victim, extra)
   local pid = claude_proc()
-  world({ { id = A, status = status or 'idle', pid = pid, pane = '%5', label = '2.1', tty = 'pts/5', victim = victim ~= false } })
+  world({ vim.tbl_extend('force', { id = A, status = status or 'idle', pid = pid, pane = '%5', label = '2.1', tty = 'pts/5',
+    victim = victim ~= false }, extra or {}) })
   return pid
 end
 
-T['X on an idle session in a pane: confirm (default No), Ctrl-C twice into its pane id, closed'] = function()
+local LOST = ' Text typed in its input box is lost.'
+
+-- The drawer's live map has caught up with Claude `pid` of session A.
+local function wait_pid(pid)
+  wait_for(function() return child.lua_get('(require("agent-ide.live").get()[...] or {}).pid', { A }) == pid end, 'live pid')
+end
+
+T['X on an idle session in a pane: confirm (default No), fresh check, Ctrl-C twice into its pane id, closed'] = function()
   local pid = idle_world()
   start()
   show_drawer()
@@ -209,16 +245,18 @@ T['X on an idle session in a pane: confirm (default No), Ctrl-C twice into its p
   drawer_cursor_to('Alpha task')
   child.lua('_G.answers = { 1 }')
   child.type_keys('X')
+  -- the confirm comes at once, on the key
+  eq(#confirms(), 1)
   wait_for(function() return last_note() == 'Agent-IDE: closed "Alpha task"' end, 'closed notice')
   local c = confirms()
   eq(#c, 1)
-  eq(c[1], { msg = 'Close Claude "Alpha task" in tmux pane 2.1 (idle)?', choices = '&Close\n&Cancel', default = 2 })
+  eq(c[1], { msg = 'Close Claude "Alpha task" in tmux pane 2.1 (idle)?' .. LOST, choices = '&Close\n&Cancel', default = 2 })
   eq(sent(), { { 'send-keys', '-t', '%5', 'C-c' }, { 'send-keys', '-t', '%5', 'C-c' } })
   eq(alive(pid), false)
-  -- the lookup right before acting: the process tree and the panes with their ids
+  -- the verification right before acting: the panes with their ttys, modes and sync
   local i = 0
   for n, call in ipairs(calls()) do if call[1] == 'send-keys' and i == 0 then i = n end end
-  eq(calls()[i - 1], { 'list-panes', '-a', '-F', '#{pane_id} #{pane_pid} #{window_index}.#{pane_index}' })
+  eq(calls()[i - 1], V.PANES and vim.list_slice(V.PANES, 2))
 end
 
 T['X: No sends nothing; a working or waiting session asks again'] = function()
@@ -229,7 +267,7 @@ T['X: No sends nothing; a working or waiting session asks again'] = function()
   drawer_cursor_to('Alpha task')
   child.lua('_G.answers = { 2 }')
   child.type_keys('X')
-  wait_for(function() return #confirms() == 1 end, 'confirm')
+  eq(#confirms(), 1)
   vim.wait(100)
   eq(sent(), {})
   eq(alive(pid), true)
@@ -240,12 +278,11 @@ T['X: No sends nothing; a working or waiting session asks again'] = function()
   wait_for(function() return row_with('B Alpha task', 'tmux 2.1') end, 'busy row with its pane')
   drawer_cursor_to('Alpha task')
   child.type_keys('X')
-  wait_for(function() return #confirms() == 2 end, 'two confirms')
-  vim.wait(100)
   local c = confirms()
   eq(#c, 2)
-  eq(c[1].msg:find('(working)', 1, true) ~= nil, true)
+  eq(c[1].msg, 'Close Claude "Alpha task" in tmux pane 2.1 (working)?' .. LOST)
   eq(c[2], { msg = 'It is working; close anyway?', choices = '&Close anyway\n&Cancel', default = 2 })
+  vim.wait(100)
   eq(sent(), {})
   -- waiting for input, both Yes: closed
   child.lua('_G.confirms = {}; _G.answers = { 1, 1 }')
@@ -258,7 +295,7 @@ T['X: No sends nothing; a working or waiting session asks again'] = function()
   wait_for(function() return not alive(p2) end, 'ended')
 end
 
-T['X while the pane label is not known yet (a new pid, between polls): looks it up, then asks'] = function()
+T['X while the pane label is not known yet (a new pid, between polls): asks, then checks'] = function()
   idle_world()
   start()
   show_drawer()
@@ -266,42 +303,57 @@ T['X while the pane label is not known yet (a new pid, between polls): looks it 
   -- the drawer's label cache knows nothing about this pid at the moment X is pressed
   child.lua('require("agent-ide.tmux").pane_label = function() return nil end')
   drawer_cursor_to('Alpha task')
-  child.lua('_G.answers = { 2 }')
+  child.lua('_G.answers = { 1 }')
   child.type_keys('X')
-  wait_for(function() return #confirms() == 1 end, 'confirm after the fresh lookup')
-  eq(confirms()[1].msg, 'Close Claude "Alpha task" in tmux pane 2.1 (idle)?')
-  eq(sent(), {})
-  -- the fresh lookup finds no pane: it says so (never silently nothing)
+  eq(confirms()[1].msg, 'Close Claude "Alpha task" in its tmux pane (idle)?' .. LOST)
+  wait_for(function() return last_note() == 'Agent-IDE: closed "Alpha task"' end, 'closed')
+  -- the check finds no pane: it says so (never silently nothing)
+  wait_pid(idle_world())
   vim.fn.writefile({}, dir .. '/panes')
-  child.lua('_G.notes = {}; _G.confirms = {}')
+  child.lua('_G.notes = {}; _G.confirms = {}; _G.answers = { 1 }')
   child.type_keys('X')
   wait_for(function() return #notes() > 0 end, 'notice')
-  eq(last_note(), 'Agent-IDE: cannot reach that session (no tmux pane known here); gp jumps to it')
-  eq(confirms(), {})
-  eq(sent(), {})
+  eq(last_note(), 'Agent-IDE: "Alpha task": nothing sent; no tmux pane shows it')
+  eq(#confirms(), 1)
 end
 
-T['X: the pane gone, or the pid no longer below it, by the time it acts: nothing sent'] = function()
-  idle_world()
+T['X: refused when, after the confirm, the pane or the Claude is no longer fit for keys'] = function()
   start()
   show_drawer()
-  wait_for(function() return has_line(drawer_lines(), 'tmux 2.1') ~= nil end, 'pane label')
-  drawer_cursor_to('Alpha task')
-  -- the pane closes while the confirm is open
-  child.lua('_G.answers = { 1 }; _G.hook = function() vim.fn.writefile({}, vim.env.FAKE_DIR .. "/panes"); _G.hook = nil end')
-  child.type_keys('X')
-  wait_for(function() return last_note():find('is gone or runs something else; nothing sent', 1, true) ~= nil end, 'notice')
-  eq(sent(), {})
-  -- the pane is there, but now runs another program: the Claude is not its descendant
-  local pid = idle_world()
-  wait_for(function() return has_line(drawer_lines(), 'tmux 2.1') ~= nil end, 'pane label')
-  drawer_cursor_to('Alpha task')
-  child.lua([[_G.notes = {}; _G.answers = { 1 }; _G.hook = function()
-    vim.fn.writefile({ ']] .. pid .. [[ 900', '900 1', '501 1' }, vim.env.FAKE_DIR .. '/ps_all'); _G.hook = nil end]])
-  child.type_keys('X')
-  wait_for(function() return last_note():find('nothing sent', 1, true) ~= nil end, 'notice 2')
-  eq(sent(), {})
-  eq(alive(pid), true)
+  -- each change runs inside the confirm (in the child): files of the fake world, `D` its folder
+  local cases = {
+    { 'the pane closes', [[vim.fn.writefile({}, D .. '/panes')]], 'no tmux pane shows it' },
+    { 'suspended behind another program', [[local l = vim.fn.readfile(D .. '/ps_all')
+      l[1] = l[1]:gsub('^(%d+ %d+ %d+) %d+', '%1 999'); vim.fn.writefile(l, D .. '/ps_all')]],
+      'it is not in the foreground of its pane' },
+    { 'copy mode', [[vim.fn.writefile({ (vim.fn.readfile(D .. '/panes')[1]:gsub(' 0 0 ', ' 1 0 ')) }, D .. '/panes')]],
+      'its pane is in copy mode' },
+    { 'synchronized', [[vim.fn.writefile({ (vim.fn.readfile(D .. '/panes')[1]:gsub(' 0 0 ', ' 0 1 ')) }, D .. '/panes')]],
+      'its window synchronizes panes' },
+    { 'not Claude', [[local l = vim.fn.readfile(D .. '/ps_all'); l[1] = l[1]:gsub('claude$', 'nvim')
+      vim.fn.writefile(l, D .. '/ps_all')]], 'that process is not Claude' },
+    { 'a :terminal inside the pane', [[local l = vim.fn.readfile(D .. '/ps_all'); l[1] = l[1]:gsub('pts/5', 'pts/44')
+      vim.fn.writefile(l, D .. '/ps_all')]], 'no tmux pane shows it' },
+    { 'another process now', [[local e = vim.json.decode(vim.fn.readfile(D .. '/live.json')[1])
+      e[1].pid = e[1].pid + 100000; vim.fn.writefile({ vim.json.encode(e) }, D .. '/live.json')]], 'it no longer runs' },
+    { 'it started working', [[local e = vim.json.decode(vim.fn.readfile(D .. '/live.json')[1])
+      e[1].status = 'busy'; vim.fn.writefile({ vim.json.encode(e) }, D .. '/live.json')]], 'it started working' },
+  }
+  for _, c in ipairs(cases) do
+    local pid = idle_world()
+    vim.fn.delete(dir .. '/log')
+    wait_pid(pid)
+    wait_for(function() return row_with('I Alpha task', 'tmux 2.1') end, 'idle row with its pane: ' .. c[1])
+    drawer_cursor_to('Alpha task')
+    child.lua([[_G.notes = {}; _G.confirms = {}; _G.answers = { 1 }
+      local code = ...
+      _G.hook = function() _G.hook = nil; local D = vim.env.FAKE_DIR; assert(loadstring('local D = ...; ' .. code))(D) end]], { c[2] })
+    child.type_keys('X')
+    wait_for(function() return #notes() > 0 end, 'notice: ' .. c[1])
+    eq({ c[1], last_note() }, { c[1], 'Agent-IDE: "Alpha task": nothing sent; ' .. c[3] })
+    eq(sent(), {})
+    eq(alive(pid), true)
+  end
 end
 
 T['X: still running after the wait: a notice, nothing more'] = function()
@@ -317,24 +369,14 @@ T['X: still running after the wait: a notice, nothing more'] = function()
   eq(alive(pid), true)
 end
 
-T['X: outside tmux, pane unknown, owned here, not running: a notice, nothing sent'] = function()
+T['X: outside tmux, owned here, not running: a notice, nothing sent'] = function()
   idle_world()
   start({ in_tmux = false })
   show_drawer()
   wait_for(function() return has_line(drawer_lines(), 'elsewhere') ~= nil end, 'elsewhere row')
   drawer_cursor_to('Alpha task')
   child.type_keys('X')
-  eq(last_note(), 'Agent-IDE: cannot reach that session (no tmux pane known here); gp jumps to it')
-  -- in tmux, but the pane is unknown
-  world({ { id = A, status = 'idle', pid = claude_proc() } })
-  start()
-  show_drawer()
-  wait_for(function() return has_line(drawer_lines(), 'elsewhere') ~= nil end, 'elsewhere row')
-  drawer_cursor_to('Alpha task')
-  child.lua('_G.notes = {}')
-  child.type_keys('X')
-  wait_for(function() return #notes() > 0 end, 'notice after the fresh lookup')
-  eq(last_note(), 'Agent-IDE: cannot reach that session (no tmux pane known here); gp jumps to it')
+  eq(last_note(), 'Agent-IDE: cannot reach that session (not in tmux); gp jumps to it')
   -- a session this Neovim runs; one that runs nowhere
   child.lua('require("agent-ide.session").open({ id = ..., cwd = "/x/repo" }).owned = true', { A })
   child.type_keys('X')
@@ -346,26 +388,34 @@ T['X: outside tmux, pane unknown, owned here, not running: a notice, nothing sen
   eq(sent(), {})
 end
 
+local LOSTS = ' Text typed in their input boxes is lost.'
+
 -- :AgentsCloseIdle ---------------------------------------------------------------------------
 
-T[':AgentsCloseIdle: one confirm with the count, Ctrl-C twice into each idle pane; a predicate limits it'] = function()
+local function three()
   local pa, pb, pc = claude_proc(), claude_proc(), claude_proc()
   world({
     { id = A, status = 'idle', pid = pa, pane = '%5', label = '2.1', tty = 'pts/5', victim = true },
     { id = B, status = 'idle', pid = pb, pane = '%6', label = '2.2', tty = 'pts/6', victim = true },
     { id = C, status = 'busy', pid = pc, pane = '%7', label = '3.0', tty = 'pts/7', victim = true },
   })
+  return pa, pb, pc
+end
+
+T[':AgentsCloseIdle: one confirm first (count when known), Ctrl-C twice into each idle pane; a predicate limits it'] = function()
+  local pa, pb, pc = three()
   start()
   child.lua('_G.answers = { 1 }')
   child.cmd('AgentsCloseIdle')
+  -- no current live map (nothing polls): asked without a number, at once
+  eq(confirms(), { { msg = 'Close the idle Claude sessions in tmux panes?' .. LOSTS, choices = '&Close\n&Cancel', default = 2 } })
   wait_for(function() return last_note():find('closed', 1, true) ~= nil end, 'summary')
   eq(last_note(), 'Agent-IDE: closed 2 of 2')
-  eq(confirms(), { { msg = 'Close 2 idle Claude session(s) in tmux panes?', choices = '&Close\n&Cancel', default = 2 } })
   local keys = vim.tbl_map(function(c) return table.concat(c, ' ') end, sent())
   table.sort(keys)
   eq(keys, { 'send-keys -t %5 C-c', 'send-keys -t %5 C-c', 'send-keys -t %6 C-c', 'send-keys -t %6 C-c' })
   eq({ alive(pa), alive(pb), alive(pc) }, { false, false, true })
-  -- a predicate: only B; No sends nothing
+  -- with the drawer polling, the count; a predicate: only B; No sends nothing
   vim.fn.delete(dir .. '/log')
   pa, pb = claude_proc(), claude_proc()
   world({
@@ -374,15 +424,43 @@ T[':AgentsCloseIdle: one confirm with the count, Ctrl-C twice into each idle pan
   })
   vim.fn.delete(dir .. '/sent-%5')
   vim.fn.delete(dir .. '/sent-%6')
+  show_drawer()
+  wait_for(function() return row_with('I Alpha task', 'tmux 2.1') and row_with('I Beta task', 'tmux 2.2') end, 'rows')
   child.lua('_G.confirms = {}; _G.answers = { 2 }')
   child.cmd('AgentsCloseIdle')
-  wait_for(function() return #confirms() == 1 end, 'confirm')
+  eq(confirms()[1].msg, 'Close 2 idle Claude session(s) in tmux panes?' .. LOSTS)
   vim.wait(100)
   eq(sent(), {})
   child.lua('_G.confirms = {}; _G.answers = { 1 }')
   child.lua('local only = ...; require("agent-ide.ui.tmux_close").close_idle(function(id) return id == only end)', { B })
+  eq(confirms()[1].msg, 'Close 1 idle Claude session(s) in tmux panes?' .. LOSTS)
   wait_for(function() return last_note() == 'Agent-IDE: closed 1 of 1' end, 'summary 2')
-  eq(confirms()[1].msg, 'Close 1 idle Claude session(s) in tmux panes?')
+  eq(sent(), { { 'send-keys', '-t', '%6', 'C-c' }, { 'send-keys', '-t', '%6', 'C-c' } })
+  eq({ alive(pa), alive(pb) }, { true, false })
+end
+
+T[':AgentsCloseIdle: a session that started working after the confirm, or failed checks, is skipped and counted'] = function()
+  local pa, pb = claude_proc(), claude_proc()
+  world({
+    { id = A, status = 'idle', pid = pa, pane = '%5', label = '2.1', tty = 'pts/5', victim = true },
+    { id = B, status = 'idle', pid = pb, pane = '%6', label = '2.2', tty = 'pts/6', victim = true },
+    { id = C, status = 'idle', pid = claude_proc(), pane = '%7', label = '3.0', tty = 'pts/7', victim = true, fg = false },
+  })
+  start()
+  show_drawer()
+  wait_for(function() return row_with('I Gamma task', 'tmux 3.0') end, 'rows')
+  -- A starts working while the confirm is open
+  child.lua([[local id = ...; _G.answers = { 1 }; _G.hook = function()
+    _G.hook = nil
+    local f = vim.env.FAKE_DIR .. '/live.json'
+    local e = vim.json.decode(vim.fn.readfile(f)[1])
+    for _, x in ipairs(e) do if x.sessionId == id then x.status = 'busy' end end
+    vim.fn.writefile({ vim.json.encode(e) }, f)
+  end]], { A })
+  child.cmd('AgentsCloseIdle')
+  eq(confirms()[1].msg, 'Close 3 idle Claude session(s) in tmux panes?' .. LOSTS)
+  wait_for(function() return last_note():find('closed', 1, true) ~= nil end, 'summary')
+  eq(last_note(), 'Agent-IDE: closed 1 of 3; 1 skipped (it is not in the foreground of its pane); 1 skipped (no longer idle)')
   eq(sent(), { { 'send-keys', '-t', '%6', 'C-c' }, { 'send-keys', '-t', '%6', 'C-c' } })
   eq({ alive(pa), alive(pb) }, { true, false })
 end
@@ -397,34 +475,35 @@ T[':AgentsCloseIdle in project scope: only that project\'s idle sessions, said i
   child.lua('require("agent-ide.scope").set("project", { key = "/x/repo", name = "repo" })')
   child.lua('_G.answers = { 1 }')
   child.cmd('AgentsCloseIdle')
+  eq(confirms()[1].msg, 'Close the idle Claude sessions of repo in tmux panes?' .. LOSTS)
   wait_for(function() return last_note():find('closed', 1, true) ~= nil end, 'summary')
   eq(last_note(), 'Agent-IDE: closed 1 of 1')
-  eq(confirms()[1].msg, 'Close 1 idle Claude session(s) of repo in tmux panes?')
   eq(sent(), { { 'send-keys', '-t', '%5', 'C-c' }, { 'send-keys', '-t', '%5', 'C-c' } })
   eq({ alive(pa), alive(pb) }, { false, true })
   -- nothing idle left in the project: the notice names it
   world({ { id = B, status = 'idle', pid = pb, pane = '%6', label = '2.2', tty = 'pts/6', victim = true, cwd = '/x/other' } })
-  child.lua('_G.notes = {}; _G.confirms = {}')
+  vim.wait(300) -- the map of the last query is no longer current
+  child.lua('_G.notes = {}; _G.confirms = {}; _G.answers = { 1 }')
   child.cmd('AgentsCloseIdle')
   wait_for(function() return #notes() > 0 end, 'notice')
   eq(last_note(), 'Agent-IDE: no idle Claude sessions of repo in tmux panes')
-  eq(confirms(), {})
   -- the bang: every project
-  child.lua('_G.notes = {}; _G.answers = { 1 }')
+  child.lua('_G.notes = {}; _G.confirms = {}; _G.answers = { 1 }')
   child.cmd('AgentsCloseIdle!')
+  eq(confirms()[1].msg, 'Close 1 idle Claude session(s) in tmux panes?' .. LOSTS)
   wait_for(function() return last_note():find('closed', 1, true) ~= nil end, 'summary 2')
-  eq(confirms()[1].msg, 'Close 1 idle Claude session(s) in tmux panes?')
   eq(alive(pb), false)
 end
 
-T[':AgentsCloseIdle: outside tmux, or nothing idle in a pane: a notice, no confirm'] = function()
+T[':AgentsCloseIdle: outside tmux, or nothing idle known: a notice, no confirm'] = function()
   idle_world('busy')
   start({ in_tmux = false })
   child.cmd('AgentsCloseIdle')
   eq(last_note(), 'Agent-IDE: not in tmux; nothing to close')
   start()
+  show_drawer()
+  wait_for(function() return row_with('B Alpha task') end, 'busy row')
   child.cmd('AgentsCloseIdle')
-  wait_for(function() return #notes() > 0 end, 'notice')
   eq(last_note(), 'Agent-IDE: no idle Claude sessions in tmux panes')
   eq(confirms(), {})
   eq(sent(), {})
