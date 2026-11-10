@@ -42,7 +42,12 @@ end
 ---the select for its oldest ask; a session waiting in another Claude is jumped to in tmux.
 function M.next_waiting()
   local list = M.needing()
-  if #list == 0 then return vim.notify('Agent-IDE: nothing needs you', vim.log.levels.INFO) end
+  if #list == 0 then
+    local scope = require('agent-ide.scope')
+    local others = scope.project() and require('agent-ide.ui.drawer_model').others_needing(scope.matches) or 0
+    local msg = others > 0 and ('nothing in this project; %d in other projects (gs)'):format(others) or 'nothing needs you'
+    return vim.notify('Agent-IDE: ' .. msg, vim.log.levels.INFO)
+  end
   local pick = list[1]
   local cur = chat().current()
   if cur and pick.s == cur and permission.in_chat(cur) and list[2] then pick = list[2] end
