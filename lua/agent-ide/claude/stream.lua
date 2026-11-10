@@ -1,0 +1,244 @@
+-- Stream decoder: turns the objects `claude -p --output-format stream-json` prints into a
+-- small set of Actions (see docs/protocol.md, "Decoder mapping"). Pure: no I/O, no timers.
+-- Nothing is dropped silently: an object that is not understood becomes an `unknown` action.
+local parse = require('agent-ide.transcript.parse')
+
+local M = {}
+
+-- `default` is what Claude calls the mode the plugin calls `manual`.
+local function mode_name(m)
+  if type(m) ~= 'string' then return nil end
+  return m == 'default' and 'manual' or m
+end
+
+local function str(v) return type(v) == 'string' and v or nil end
+
+-- Stream events that carry nothing the plugin shows: the full message follows anyway.
+local QUIET_STREAM = {
+  message_start = true, content_block_stop = true, message_delta = true, message_stop = true,
+}
+local QUIET_DELTA = { input_json_delta = true, thinking_delta = true, signature_delta = true }
+-- System subtypes that carry nothing to show (a running estimate, an announcement).
+local QUIET_SYSTEM = { thinking_tokens = true }
+
+local Decoder = {}
+Decoder.__index = Decoder
+
+function M.new()
+  -- streamed: a text delta of the current content block has been delivered.
+  -- tool_ids: ids of tool_use blocks already reported.
+  return setmetatable({ streamed = false, tool_ids = {} }, Decoder)
+end
+
+local function unknown(label, raw)
+  return { type = 'unknown', label = label, raw = raw }
+end
+
+local function label_of(obj)
+  if type(obj) ~= 'table' or type(obj.type) ~= 'string' then return '?' end
+  local sub_t = obj.subtype
+  if obj.type == 'stream_event' and type(obj.event) == 'table' then sub_t = obj.event.type end
+  if obj.type == 'control_request' and type(obj.request) == 'table' then sub_t = obj.request.subtype end
+  if type(sub_t) == 'string' and sub_t ~= '' then return obj.type .. '/' .. sub_t end
+  return obj.type
+end
+
+local function event_actions(evs, sidechain, streamed)
+  local out = {}
+  for _, ev in ipairs(evs) do
+    if sidechain then ev.sidechain = true end
+    local a = { type = 'event', event = ev }
+    if streamed and ev.kind == 'text' then a.streamed = true end
+    out[#out + 1] = a
+  end
+  return out
+end
+
+function Decoder:system(obj, raw)
+  local st = obj.subtype
+  if st == 'init' then
+    return { {
+      type = 'init',
+      session_id = str(obj.session_id),
+      model = str(obj.model),
+      mode = mode_name(obj.permissionMode),
+      slash_commands = type(obj.slash_commands) == 'table' and obj.slash_commands or {},
+      version = str(obj.claude_code_version),
+    } }
+  elseif st == 'status' then
+    local a = { type = 'status', mode = mode_name(obj.permissionMode) }
+    if obj.status == 'requesting' then a.busy = true end
+    return { a }
+  elseif st == 'hook_started' or st == 'hook_response' then
+    local failed = obj.outcome == 'error'
+      or (type(obj.exit_code) == 'number' and obj.exit_code ~= 0)
+      or obj.error ~= nil
+    if not failed then return {} end
+    local detail = raw
+    for _, v in ipairs({ obj.stderr, obj.output, obj.error }) do
+      if type(v) == 'string' and v ~= '' then detail = v; break end
+    end
+    local name = str(obj.hook_name) or 'hook'
+    return { { type = 'event', event = { kind = 'meta', label = 'hook', text = name .. ': ' .. detail } } }
+  elseif QUIET_SYSTEM[st] then
+    return {}
+  end
+  return { unknown(label_of(obj), raw) }
+end
+
+function Decoder:stream_event(obj, raw)
+  local ev = obj.event
+  if type(ev) ~= 'table' then return { unknown(label_of(obj), raw) } end
+  local et = ev.type
+  if et == 'content_block_start' then
+    self.streamed = false
+    return {}
+  elseif et == 'content_block_delta' then
+    local d = ev.delta
+    local dt = type(d) == 'table' and d.type or nil
+    if dt == 'text_delta' and type(d.text) == 'string' then
+      -- Subagent messages arrive whole; their deltas would interleave with the main text.
+      if obj.parent_tool_use_id ~= nil then return {} end
+      self.streamed = true
+      return { { type = 'delta', text = d.text } }
+    elseif QUIET_DELTA[dt] then
+      return {}
+    end
+    return { unknown('stream_event/content_block_delta/' .. tostring(dt), raw) }
+  elseif QUIET_STREAM[et] then
+    return {}
+  end
+  return { unknown(label_of(obj), raw) }
+end
+
+function Decoder:assistant(obj, raw)
+  if type(obj.message) ~= 'table' then return { unknown('assistant', raw) } end
+  local sidechain = obj.parent_tool_use_id ~= nil
+  local evs = parse.message_events({ type = 'assistant', message = obj.message }, raw)
+  if obj.local_command_run ~= nil then
+    -- Output of a local slash command (e.g. /context), sent as a synthetic message.
+    for i, ev in ipairs(evs) do
+      if ev.kind == 'text' then evs[i] = { kind = 'meta', label = 'command output', text = ev.text } end
+    end
+  end
+  local kept = {}
+  for _, ev in ipairs(evs) do
+    if ev.kind == 'tool_call' and type(ev.id) == 'string' then
+      if not self.tool_ids[ev.id] then
+        self.tool_ids[ev.id] = true
+        kept[#kept + 1] = ev
+      end
+    else
+      kept[#kept + 1] = ev
+    end
+  end
+  local streamed = self.streamed and not sidechain
+  if streamed then self.streamed = false end
+  return event_actions(kept, sidechain, streamed)
+end
+
+local function replay_text(content)
+  if type(content) == 'string' then return content end
+  local parts = {}
+  for _, b in ipairs(content) do
+    if type(b) == 'table' and b.type == 'text' and type(b.text) == 'string' then parts[#parts + 1] = b.text end
+  end
+  return table.concat(parts, '\n')
+end
+
+function Decoder:user(obj, raw)
+  local msg = obj.message
+  if type(msg) ~= 'table' or (type(msg.content) ~= 'string' and type(msg.content) ~= 'table') then
+    return { unknown('user', raw) }
+  end
+  local c = msg.content
+  local command_out = type(c) == 'string' and c:match('^%s*<local%-command%-stdout>') ~= nil
+  if obj.isReplay == true and not command_out then
+    return { { type = 'echo', text = replay_text(c) } }
+  end
+  -- Everything else in a user message comes from Claude itself (tool results, command
+  -- output, interrupt markers), never from the person typing: no `prompt` events.
+  local evs = parse.message_events({ type = 'user', isMeta = true, message = msg }, raw)
+  return event_actions(evs, obj.parent_tool_use_id ~= nil, false)
+end
+
+function Decoder:control_request(obj, raw)
+  local r = obj.request
+  if type(r) == 'table' and r.subtype == 'can_use_tool' then
+    return { {
+      type = 'permission',
+      request_id = obj.request_id,
+      tool_name = r.tool_name,
+      input = type(r.input) == 'table' and r.input or {},
+      description = r.description,
+      suggestions = r.permission_suggestions,
+    } }
+  end
+  return { unknown(label_of(obj), raw) }
+end
+
+function Decoder:control_response(obj, raw)
+  local r = obj.response
+  if type(r) ~= 'table' then return { unknown('control_response', raw) } end
+  if r.subtype == 'success' then
+    return { { type = 'control_ok', request_id = r.request_id, response = r.response } }
+  elseif r.subtype == 'error' then
+    return { { type = 'control_error', request_id = r.request_id, error = r.error } }
+  end
+  return { unknown(label_of(obj), raw) }
+end
+
+function Decoder:rate_limit_event(obj, raw)
+  local info = obj.rate_limit_info
+  local uw = type(info) == 'table' and info.unifiedWindows or nil
+  if type(uw) ~= 'table' then return { unknown('rate_limit_event', raw) } end
+  local windows = {}
+  for name, w in pairs(uw) do
+    if type(w) == 'table' then
+      windows[name] = { utilization = w.utilization, resets_at = w.resetsAt }
+    end
+  end
+  return { { type = 'quota', windows = windows } }
+end
+
+function Decoder:result(obj)
+  self.streamed = false
+  local text = str(obj.result)
+  if not text and type(obj.errors) == 'table' then
+    local parts = {}
+    for _, e in ipairs(obj.errors) do
+      if type(e) == 'string' then parts[#parts + 1] = e end
+    end
+    if #parts > 0 then text = table.concat(parts, '\n') end
+  end
+  return { { type = 'result', is_error = obj.is_error == true, text = text } }
+end
+
+local HANDLERS = {
+  system = Decoder.system,
+  stream_event = Decoder.stream_event,
+  assistant = Decoder.assistant,
+  user = Decoder.user,
+  control_request = Decoder.control_request,
+  control_response = Decoder.control_response,
+  rate_limit_event = Decoder.rate_limit_event,
+  result = Decoder.result,
+}
+
+---Actions for one decoded stream object. Never raises.
+---@param obj any decoded JSON (decode with `parse.DECODE_OPTS`)
+---@param raw string|nil original line, kept in `unknown` actions
+---@return table[] actions
+function Decoder:feed(obj, raw)
+  if type(raw) ~= 'string' then
+    local ok, s = pcall(vim.json.encode, obj)
+    raw = ok and s or tostring(obj)
+  end
+  local handler = type(obj) == 'table' and HANDLERS[obj.type] or nil
+  if not handler then return { unknown(label_of(obj), raw) } end
+  local ok, out = pcall(handler, self, obj, raw)
+  if not ok or type(out) ~= 'table' then return { unknown(label_of(obj), raw) } end
+  return out
+end
+
+return M

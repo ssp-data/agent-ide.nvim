@@ -233,6 +233,13 @@ local function conversation_events(rec, line)
   return events
 end
 
+---Events of one `user` or `assistant` message: the same block rules as transcript records.
+---Also used by the stream decoder, whose messages carry the same content blocks.
+---@param rec { type: 'user'|'assistant', isMeta: boolean|nil, message: table|nil }
+---@param line string original JSON text (raw of unknown blocks is cut from it)
+---@return table[] events
+M.message_events = conversation_events
+
 ---Events of one line, and whether the line failed to decode.
 ---@param line string
 ---@return table[] events, boolean invalid
