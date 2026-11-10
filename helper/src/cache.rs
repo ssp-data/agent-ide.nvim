@@ -96,6 +96,31 @@ impl Cache {
         let Ok(bytes) = serde_json::to_vec(&stored) else { return };
         if crate::private::write(file, &bytes) {
             self.dirty = false;
+            if let Some(dir) = file.parent() {
+                remove_old_versions(dir);
+            }
+        }
+    }
+}
+
+/// True for `index-v<digits>.json` of another format version than `FILE_NAME`.
+pub fn is_old_version(name: &str) -> bool {
+    name != FILE_NAME
+        && name
+            .strip_prefix("index-v")
+            .and_then(|r| r.strip_suffix(".json"))
+            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Removes cache files of earlier format versions (`index-v<n>.json`) from `dir`, the helper's
+/// own cache folder; nothing else there and nothing below it is touched. Best effort.
+fn remove_old_versions(dir: &Path) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for entry in rd.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if is_old_version(name) && entry.file_type().is_ok_and(|t| t.is_file()) {
+            let _ = std::fs::remove_file(entry.path());
         }
     }
 }

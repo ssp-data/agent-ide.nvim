@@ -86,6 +86,7 @@ local function start(steps, opts)
     vim.env.FAKE_TMUX_SPLIT_CODE = split_code
     vim.env.PATH = tmux_dir .. '/bin:' .. vim.env.PATH
     vim.env.TMUX = in_tmux and '/tmp/fake-tmux,1,0' or nil
+    vim.env.TMUX_PANE = in_tmux and '%1' or nil -- the pane of this Neovim
     _G.notes = {}
     vim.notify = function(msg, level) table.insert(_G.notes, { msg = msg, level = level }) end
     require('agent-ide').setup(setup)
@@ -180,10 +181,11 @@ T['in tmux: parks, opens a pane with claude --resume, refuses sends, reloads whe
   -- listening before the pane can signal, on a channel of this hand-off only
   eq(calls[1][1], 'wait-for')
   eq(chan:match('^agent%-ide%-' .. FIXTURE_ID:gsub('%-', '%%-') .. '%-1%-%d+$') ~= nil, true)
-  eq(vim.list_slice(calls[2], 1, 7), { 'split-window', '-h', '-P', '-F', '#{pane_id}', '-c', repo })
+  -- beside this Neovim's pane, whichever pane is active when the call runs
+  eq(vim.list_slice(calls[2], 1, 9), { 'split-window', '-h', '-t', '%1', '-P', '-F', '#{pane_id}', '-c', repo })
   -- `sh -c` with a script without single quotes (any default-shell passes it on unchanged) that
   -- signals the channel on every exit, also when the pane is killed
-  local cmd = calls[2][8]
+  local cmd = calls[2][10]
   local script = cmd:match("^sh %-c '(.*)'$")
   eq(script ~= nil and not script:find("'", 1, true), true)
   eq(vim.startswith(script, 'trap "tmux wait-for -S ' .. chan .. '" EXIT; trap "exit 129" HUP TERM INT; env -u ANTHROPIC_API_KEY "'), true)
