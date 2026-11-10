@@ -1,4 +1,4 @@
-# agents-ide.nvim — Design
+# Agent-IDE.nvim — Design
 
 Date: 2026-11-10
 Status: approved 2026-11-10
@@ -212,7 +212,7 @@ Shown in three places:
 - **Neovim footer**: while the plugin is loaded, the lualine component takes the status color and a short text, e.g. `input required (2)`. One key jumps to the next session that needs him.
 - **Omarchy bar**: a small Omarchy plugin (same form as his others in `~/git/general/dotfiles/omarchy/.config/omarchy/plugins`: `manifest.json`, `Panel.qml`, `Model.js`), modelled on Omarchy's built-in agents overview. It shows the color and the count, so he sees it from any workspace even when Neovim is not visible.
 
-So the Omarchy plugin and anything else outside Neovim can read it, the Neovim plugin writes the combined status to a small JSON file under `$XDG_RUNTIME_DIR/agents-ide/` whenever it changes: overall level, counts, and per session project, title, state and reason. The indicator also counts sessions running in tmux panes (from `claude agents --json`), so the picture is complete when Neovim is closed.
+So the Omarchy plugin and anything else outside Neovim can read it, the Neovim plugin writes the combined status to a small JSON file under `$XDG_RUNTIME_DIR/agent-ide/` whenever it changes: overall level, counts, and per session project, title, state and reason. The indicator also counts sessions running in tmux panes (from `claude agents --json`), so the picture is complete when Neovim is closed.
 
 ## 8. Fidelity (anti-goals 1 and 2)
 
@@ -274,7 +274,7 @@ The spike file is throwaway and is deleted when part 1 lands.
 - **Audience**: built for Simon first, published on GitHub later (his stated intent). So: no hard-coded personal paths (all are settings with his values as his config), tmux features degrade cleanly when not in tmux, Linux and macOS in mind. The release pipeline for prebuilt binaries is not part of part 1; part 1 ships with `cargo build` plus the Lua fallback.
 - **Working directory**: the plugin never changes Neovim's global working directory. The Agents tab gets a tab-local working directory (`:tcd`) of the project in focus, so pickers, the `@` attach picker and LSP inside that tab see the right root. Every plugin feature also carries its project root explicitly. A setting turns the `:tcd` off.
 - **Process lifetime**: a Claude process started by the plugin lives until he parks the session (a key in drawer and chat), or quits Neovim. Hiding windows or buffers never ends it. No idle timeout by default (setting available). Parking a busy session asks first.
-- **Per-project saved prompts** live in the plugin's data directory (`stdpath('data')/agents-ide/prompts/<project>/`), never inside the project repo, so they do not show up as changes. File name is a slug of the first line. An unsent prompt buffer maps to one file: repeated `:w` updates it. After sending, the buffer is a new, unnamed prompt again.
+- **Per-project saved prompts** live in the plugin's data directory (`stdpath('data')/agent-ide/prompts/<project>/`), never inside the project repo, so they do not show up as changes. File name is a slug of the first line. An unsent prompt buffer maps to one file: repeated `:w` updates it. After sending, the buffer is a new, unnamed prompt again.
 
 ## 13. Left to the builder
 
