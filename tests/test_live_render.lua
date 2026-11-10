@@ -344,6 +344,110 @@ T['updates add no undo history'] = function()
   eq(vim.fn.undotree(buf).seq_last, 0)
 end
 
+---While streaming, the buffer reads as the final render of the answer, minus its trailing blank.
+local function expect_streaming(buf, s)
+  local evs = vim.list_extend(vim.list_slice(s.events), { { kind = 'text', text = s.streaming } })
+  local want = render.render(evs).lines
+  want[#want] = nil
+  eq(api.nvim_buf_get_lines(buf, 0, -1, false), want)
+end
+
+for name, before in pairs({
+  thinking = { { kind = 'prompt', text = 'q' }, { kind = 'thinking', text = 'hmm' } },
+  tool_result = { { kind = 'prompt', text = 'q' }, { kind = 'tool_call', id = 'a', name = 'Bash', input = { command = 'ls' } },
+    { kind = 'tool_result', id = 'a', text = 'out', is_error = false } },
+  prompt = { { kind = 'prompt', text = 'q' } },
+  turn0 = { { kind = 'meta', label = 'm', text = 't' } },
+}) do
+  T['streaming after ' .. name .. ' keeps the invariant at every step'] = function()
+    local s, buf = stub(), new_buf()
+    local view = live_render.attach(buf, s)
+    for _, ev in ipairs(before) do
+      push(s, ev)
+      view:sync('events')
+      expect_full(buf, s)
+    end
+    for _, d in ipairs({ 'Hel', 'lo\nwor', 'ld\n' }) do
+      s.streaming = s.streaming .. d
+      view:sync('delta')
+      expect_streaming(buf, s)
+    end
+    push(s, { kind = 'text', text = s.streaming })
+    s.streaming = ''
+    view:sync('events')
+    expect_full(buf, s)
+  end
+end
+
+T['empty session shows one empty line; the first event replaces it'] = function()
+  local s, buf = stub(), new_buf()
+  local view = live_render.attach(buf, s)
+  eq(api.nvim_buf_get_lines(buf, 0, -1, false), { '' })
+  eq(levels_of(buf), {})
+  push(s, { kind = 'text', text = 'first' })
+  view:sync('events')
+  eq(api.nvim_buf_get_lines(buf, 0, -1, false), { 'first', '' })
+  expect_full(buf, s)
+end
+
+-- Through a child Neovim's main loop, which moves a cursor inside a closed fold to the fold start.
+local child = MiniTest.new_child_neovim()
+T['follow'] = MiniTest.new_set({ hooks = { post_case = function() child.stop() end } })
+T['follow']['window keeps following when a closed tool fold ends the buffer'] = function()
+  child.restart({ '-u', 'tests/minimal_init.lua' })
+  child.lua([[
+    local api = vim.api
+    _G.s = { events = {}, turn_start = 1, streaming = '', pending_permissions = {} }
+    local buf = api.nvim_create_buf(false, true)
+    _G.view = require('agent-ide.transcript.live').attach(buf, _G.s)
+    api.nvim_set_current_buf(buf)
+    vim.cmd('resize 6')
+    _G.step = function(evs, streaming)
+      for _, ev in ipairs(evs) do table.insert(_G.s.events, ev) end
+      if #evs > 0 then _G.view:sync('events') end
+      if streaming then _G.s.streaming = streaming; _G.view:sync('delta') end
+    end
+    _G.bottom = function()
+      local w = vim.fn.line('w$')
+      return { math.max(w, vim.fn.foldclosedend(w)), api.nvim_buf_line_count(0) }
+    end
+  ]])
+  local function settle()
+    child.type_keys('<Esc>')
+    child.cmd('redraw')
+  end
+  local function at_end(what)
+    settle()
+    local b = child.lua_get('_G.bottom()')
+    if b[1] ~= b[2] then error(('%s: last visible line %d, buffer has %d'):format(what, b[1], b[2])) end
+  end
+  child.lua([[_G.step({ { kind = 'prompt', text = 'question' }, { kind = 'text', text = 'a\nb\nc\nd\ne\nf\ng' } })]])
+  child.lua('vim.api.nvim_win_set_cursor(0, { vim.api.nvim_buf_line_count(0), 0 })')
+  at_end('answer')
+  -- the user opens and closes a fold by hand, so Neovim would create later folds open
+  child.lua([[_G.step({ { kind = 'meta', label = 'm', text = 'x' }, { kind = 'text', text = 'h\ni' } })]])
+  child.lua('vim.api.nvim_win_set_cursor(0, { vim.fn.search("^▸ m", "nw"), 0 })')
+  child.type_keys('za', 'za', 'G')
+  at_end('after za')
+  child.lua([[_G.step({ { kind = 'prompt', text = 'next' } })]])
+  at_end('prompt')
+  child.lua([[_G.step({ { kind = 'tool_call', id = 't', name = 'Bash', input = { command = 'ls' } } })]])
+  at_end('tool call')
+  child.lua([[_G.step({ { kind = 'tool_result', id = 't', text = 'r1\nr2\nr3', is_error = false } })]])
+  at_end('tool result')
+  local fold_start = child.lua_get('vim.fn.foldclosed(vim.api.nvim_buf_line_count(0))')
+  eq(fold_start > 0, true)
+  -- what Neovim's foldAdjustCursor may do: the cursor goes to the start of the closed fold
+  child.lua('vim.api.nvim_win_set_cursor(0, { ..., 0 })', { fold_start })
+  at_end('cursor at fold start')
+  for i, d in ipairs({ 'Hel', 'Hello\nwor', 'Hello\nworld\nmore' }) do
+    child.lua(('_G.step({}, %q)'):format(d))
+    at_end('delta ' .. i)
+  end
+  child.lua([[_G.s.streaming = ''; _G.step({ { kind = 'text', text = 'Hello\nworld\nmore' } })]])
+  at_end('text event')
+end
+
 local function best_of(n, fn)
   local best = math.huge
   for _ = 1, n do

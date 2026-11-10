@@ -9,9 +9,6 @@ local M = {}
 local View = {}
 View.__index = View
 
--- Lines `render` puts before an answer that is the first output after a prompt.
-local ANSWER_HEADER = { '## Claude', '' }
-
 local function render_range(events, first, last, lines, levels)
   if last < first then return end
   local out = render.render(vim.list_slice(events, first, last))
@@ -31,18 +28,33 @@ function View:write(row, old, old_lv, new, new_lv)
   for i = start + 1, #levels do levels[i] = nil end
   for i = k, #new do levels[row + i] = new_lv[i] end
   history.set_folds(buf, levels)
-
-  local count = api.nvim_buf_line_count(buf)
-  local follow = {}
-  for _, win in ipairs(vim.fn.win_findbuf(buf)) do
-    if api.nvim_win_get_cursor(win)[1] == count then follow[#follow + 1] = win end
-  end
   vim.bo[buf].modifiable = true
   local empty = start == 0 and k > #new
   api.nvim_buf_set_lines(buf, start, -1, false, empty and { '' } or vim.list_slice(new, k))
   vim.bo[buf].modifiable = false
-  local last = api.nvim_buf_line_count(buf)
-  for _, win in ipairs(follow) do api.nvim_win_set_cursor(win, { last, 0 }) end
+end
+
+---Windows showing the buffer whose cursor is on its last line, or on a closed fold that
+---contains the last line (Neovim may move a cursor inside a closed fold to the fold start).
+function View:followers()
+  local buf = self.buf
+  local count = api.nvim_buf_line_count(buf)
+  local out = {}
+  for _, win in ipairs(vim.fn.win_findbuf(buf)) do
+    local row = api.nvim_win_get_cursor(win)[1]
+    if row == count or api.nvim_win_call(win, function() return vim.fn.foldclosedend(row) end) == count then
+      out[#out + 1] = win
+    end
+  end
+  return out
+end
+
+---Put the cursor of each window in `wins` on the buffer's last line.
+function View:follow(wins)
+  local last = api.nvim_buf_line_count(self.buf)
+  for _, win in ipairs(wins) do
+    if api.nvim_win_is_valid(win) then api.nvim_win_set_cursor(win, { last, 0 }) end
+  end
 end
 
 ---Lines of the streaming answer as they will read once it is a `text` event, without the
@@ -51,12 +63,16 @@ function View:stream_lines()
   local s = self.s
   if s.streaming == '' then return {} end
   if self.header == nil then
-    -- whether an answer here gets a header: render the turn with an empty text appended
+    -- the lines `render` puts between the turn and an answer appended to it (the `## Claude`
+    -- header after a prompt): render the turn with an empty text appended and take what lies
+    -- between the turn's own lines and the empty text's lines
     local turn = vim.list_slice(s.events, self.start, #s.events)
     turn[#turn + 1] = { kind = 'text', text = '' }
-    self.header = #render.render(turn).lines - #self.turn == 4
+    local with = render.render(turn).lines
+    local text_n = #render.render({ { kind = 'text', text = '' } }).lines
+    self.header = vim.list_slice(with, #self.turn + 1, #with - text_n)
   end
-  local lines = self.header and vim.list_slice(ANSWER_HEADER) or {}
+  local lines = vim.list_slice(self.header)
   local body = render.render({ { kind = 'text', text = s.streaming } }).lines
   body[#body] = nil
   return vim.list_extend(lines, body)
@@ -88,8 +104,10 @@ function View:sync_events()
   self.stream = self:stream_lines()
   vim.list_extend(lines, self.stream)
   vim.list_extend(levels, zeros(#self.stream))
+  local follow = self:followers()
   self:write(self.offset, old, old_lv, lines, levels)
   self:close_new_folds(self.offset, old_lv, levels)
+  self:follow(follow)
   self.offset = self.offset + done
 end
 
@@ -120,7 +138,9 @@ end
 
 function View:sync_delta()
   local new = self:stream_lines()
+  local follow = self:followers()
   self:write(self.offset + #self.turn, self.stream, zeros(#self.stream), new, zeros(#new))
+  self:follow(follow)
   self.stream = new
 end
 
@@ -150,6 +170,8 @@ function View:detach()
 end
 
 ---Show session `s` in `buf` and keep it in sync through `view:sync`.
+---`sync('events')` assumes `s.events` only grew (the last turn may change); after replacing
+---`s.events` (a reload from disk) callers must use `sync('reset')`.
 ---@param buf integer
 ---@param s table Session (`events`, `turn_start`, `streaming`)
 ---@return table view
