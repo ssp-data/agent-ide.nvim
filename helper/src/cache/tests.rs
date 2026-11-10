@@ -46,7 +46,7 @@ fn garbage_cache_file_is_ignored_and_rewritten() {
     let root = tmp("garbage");
     let cache_dir = root.join("cache");
     std::fs::create_dir_all(&cache_dir).unwrap();
-    std::fs::write(cache_dir.join("index-v1.json"), "garbage").unwrap();
+    std::fs::write(cache_dir.join(crate::cache::FILE_NAME), "garbage").unwrap();
     let projects = root.join("projects");
     project(&projects, "{\"type\":\"user\",\"message\":{\"content\":\"x\"}}\n");
     let reads = AtomicUsize::new(0);
@@ -54,9 +54,10 @@ fn garbage_cache_file_is_ignored_and_rewritten() {
     let got = scan::scan(&projects, Some(&mut c), &reads);
     assert_eq!(got.len(), 1);
     assert_eq!(reads.load(Ordering::SeqCst), 1);
-    let text = std::fs::read_to_string(cache_dir.join("index-v1.json")).unwrap();
+    let text = std::fs::read_to_string(cache_dir.join(crate::cache::FILE_NAME)).unwrap();
     let v: serde_json::Value = serde_json::from_str(&text).unwrap();
-    let entry = v.as_object().unwrap().values().next().unwrap();
+    assert_eq!(v["version"], crate::cache::VERSION);
+    let entry = v["entries"].as_object().unwrap().values().next().unwrap();
     assert!(entry.get("mtime").is_some() && entry.get("size").is_some() && entry.get("meta").is_some());
 }
 
@@ -68,4 +69,30 @@ fn no_cache_dir_means_no_cache_file() {
     let mut c = c;
     c.insert(m);
     c.save(); // must not panic or write anywhere
+}
+
+#[test]
+fn cache_written_by_another_version_is_ignored() {
+    assert_eq!(crate::cache::FILE_NAME, "index-v2.json");
+    let root = tmp("version");
+    let cache_dir = root.join("cache");
+    let projects = root.join("projects");
+    let f = project(&projects, "{\"type\":\"user\",\"message\":{\"content\":\"fresh\"}}\n");
+    let reads = AtomicUsize::new(0);
+    let mut c = Cache::load(Some(&cache_dir));
+    let first = scan::scan(&projects, Some(&mut c), &reads);
+    assert_eq!(first[0].title, "fresh");
+    // same entries, stale title, older version: must not be served
+    let file = cache_dir.join(crate::cache::FILE_NAME);
+    let mut v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    v["version"] = "0.0.0-old".into();
+    let key = f.to_string_lossy().into_owned();
+    v["entries"][&key]["meta"]["title"] = "stale".into();
+    std::fs::write(&file, v.to_string()).unwrap();
+    let mut c = Cache::load(Some(&cache_dir));
+    let again = scan::scan(&projects, Some(&mut c), &reads);
+    assert_eq!(reads.load(Ordering::SeqCst), 2);
+    assert_eq!(again[0].title, "fresh");
+    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(v["version"], crate::cache::VERSION);
 }

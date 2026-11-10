@@ -5,7 +5,14 @@ local lua_scan = require('agent-ide.index.lua_scan')
 local eq = MiniTest.expect.equality
 
 local dir = vim.fn.fnamemodify('tests/fixtures/projects', ':p'):gsub('/$', '')
+local synth = dofile(vim.fn.getcwd() .. '/tests/synthetic.lua')
 local notes, orig_notify
+local temp_dirs = {} -- generated test data, removed after each case
+local function temp_dir()
+  local d = vim.fn.tempname()
+  temp_dirs[#temp_dirs + 1] = d
+  return d
+end
 
 local T = MiniTest.new_set({ hooks = {
   pre_case = function()
@@ -16,6 +23,8 @@ local T = MiniTest.new_set({ hooks = {
     vim.notify = function(msg, level) notes[#notes + 1] = { msg = msg, level = level } end
   end,
   post_case = function()
+    for _, d in ipairs(temp_dirs) do vim.fn.delete(d, 'rf') end
+    temp_dirs = {}
     vim.notify = orig_notify
     helper._reset(); index._reset()
     config.setup({})
@@ -72,6 +81,31 @@ T['helper scan equals lua scan on fixtures'] = function()
   local l = by_id(lua_only(function() return scan(dir) end))
   eq(#h, 4)
   eq(h, l)
+end
+
+T['helper scan equals lua scan on generated big transcripts (titles included)'] = function()
+  need_helper()
+  local root = temp_dir()
+  local late = synth.title_line('Late')
+  local pad = synth.filler(256 * 1024):sub(1, 256 * 1024 - #late - 1) .. '\n'
+  local files = {
+    ['-a/late.jsonl'] = synth.big('Early', nil, 'Late'),
+    ['-a/early.jsonl'] = synth.big('Early', 'Middle', nil),
+    ['-b/middle.jsonl'] = synth.big(nil, 'Middle', nil),
+    ['-b/edge.jsonl'] = synth.big('Early', nil, nil) .. synth.filler(300 * 1024) .. late .. pad,
+    ['-c/utf8.jsonl'] = '{"type":"user","cwd":"/w/\255x","message":{"content":"bad \255 prompt"}}\n',
+    ['-c/quoted.jsonl'] = '{"type":"user","aiTitle":"no","message":{"content":"quoted"}}\n',
+  }
+  for name, text in pairs(files) do synth.write(root .. '/' .. name, text) end
+  local h = by_id(scan(root))
+  eq(index.backend(), 'helper')
+  local l = by_id(lua_only(function() return scan(root) end))
+  eq(#h, 6)
+  eq(h, l)
+  local titles = {}
+  for _, m in ipairs(h) do titles[m.id] = m.title end
+  eq(titles, { late = 'Late', early = 'Early', middle = 'first prompt', edge = 'Early',
+    utf8 = 'bad \239\191\189 prompt', quoted = 'quoted' })
 end
 
 T['helper history equals lua history on fixtures'] = function()

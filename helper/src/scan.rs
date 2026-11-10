@@ -1,20 +1,22 @@
 //! Session discovery and per-session metadata (port of `lua/agent-ide/index/lua_scan.lua`).
 //!
-//! Intended difference from the Lua fallback: the title is the last `aiTitle` anywhere in the
-//! file, not only in the first 256 KiB. Everything else (cwd, branch, first-prompt title) is
-//! looked up in the same 256 KiB head window as in Lua so both backends agree.
+//! Title rule, identical in Lua: the last `aiTitle` in the last 256 KiB (its first, possibly
+//! partial, line ignored), else the last one in the first 256 KiB, else the first prompt in the
+//! first 256 KiB, else `(untitled)`. A file of 512 KiB or less is read whole and its last
+//! `aiTitle` anywhere wins. cwd and branch come from the first 256 KiB. Files are never read
+//! beyond these two windows.
 use crate::cache::Cache;
 use crate::events::{is_space, parse_line};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
-use std::io::{BufRead, BufReader, Cursor};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::UNIX_EPOCH;
 
-const HEAD_WINDOW: usize = 256 * 1024;
+const WINDOW: usize = 256 * 1024;
 const TITLE_MAX: usize = 60;
 const UNTITLED: &str = "(untitled)";
 
@@ -43,7 +45,8 @@ fn contains(hay: &[u8], needle: &[u8]) -> bool {
 }
 
 fn decode(line: &[u8]) -> Option<Value> {
-    serde_json::from_slice::<Value>(line).ok().filter(|v| matches!(v, Value::Object(_) | Value::Array(_)))
+    let fixed = String::from_utf8_lossy(line);
+    serde_json::from_slice::<Value>(fixed.as_bytes()).ok().filter(|v| matches!(v, Value::Object(_) | Value::Array(_)))
 }
 
 fn nonempty_str<'a>(rec: &'a Value, key: &str) -> Option<&'a str> {
@@ -100,56 +103,13 @@ fn first_prompt_text(line: &[u8]) -> Option<String> {
     None
 }
 
-/// Metadata from a stream of transcript lines.
-pub fn meta_from_reader<R: BufRead>(path: &str, mtime: u64, size: u64, mut reader: R) -> SessionMeta {
-    let mut meta = default_meta(path, mtime, size);
-    let (mut ai_title, mut first_prompt): (Option<String>, Option<String>) = (None, None);
-    let mut buf = Vec::new();
-    let mut offset = 0usize;
-    loop {
-        buf.clear();
-        match reader.read_until(b'\n', &mut buf) {
-            Ok(0) | Err(_) => break,
-            Ok(n) => {
-                let start = offset;
-                offset += n;
-                let line: &[u8] = if buf.last() == Some(&b'\n') { &buf[..buf.len() - 1] } else { &buf };
-                if line.is_empty() {
-                    continue;
-                }
-                let head: Option<&[u8]> = (start < HEAD_WINDOW).then(|| &line[..line.len().min(HEAD_WINDOW - start)]);
-                if let Some(h) = head {
-                    if meta.cwd.is_none() && contains(h, b"\"cwd\"") {
-                        if let Some(rec) = decode(h) {
-                            if let Some(cwd) = nonempty_str(&rec, "cwd") {
-                                meta.cwd = Some(cwd.to_string());
-                                meta.branch = nonempty_str(&rec, "gitBranch").map(String::from);
-                            }
-                        }
-                    }
-                    if contains(h, b"\"aiTitle\"") {
-                        if let Some(t) = ai_title_of(h) {
-                            ai_title = Some(t);
-                        }
-                    } else if first_prompt.is_none() && contains(h, b"\"user\"") {
-                        first_prompt = first_prompt_text(h);
-                    }
-                }
-                // Part of the line beyond the Lua head window: only the title is looked up there.
-                if head.map_or(true, |h| h.len() < line.len()) && contains(line, b"\"aiTitle\"") {
-                    if let Some(t) = ai_title_of(line) {
-                        ai_title = Some(t);
-                    }
-                }
-            }
-        }
-    }
-    if let Some(t) = ai_title {
-        meta.title = t;
-    } else if let Some(p) = first_prompt {
-        meta.title = collapse_newlines(&p).chars().take(TITLE_MAX).collect();
-    }
-    meta
+fn lines(b: &[u8]) -> impl Iterator<Item = &[u8]> {
+    b.split(|c| *c == b'\n').filter(|l| !l.is_empty())
+}
+
+/// The last non-empty `aiTitle` of an ai-title record among the lines of `b`.
+fn last_ai_title(b: &[u8]) -> Option<String> {
+    lines(b).filter(|l| contains(l, b"\"aiTitle\"")).filter_map(ai_title_of).last()
 }
 
 fn ai_title_of(line: &[u8]) -> Option<String> {
@@ -160,15 +120,83 @@ fn ai_title_of(line: &[u8]) -> Option<String> {
     nonempty_str(&rec, "aiTitle").map(String::from)
 }
 
-pub fn meta_from_bytes(path: &str, mtime: u64, size: u64, bytes: &[u8]) -> SessionMeta {
-    meta_from_reader(path, mtime, size, Cursor::new(bytes))
+/// What metadata is read from: the first `WINDOW` bytes, and either the whole file (when it is
+/// `2 * WINDOW` bytes or less) or its last `WINDOW` bytes.
+pub enum Windows<'a> {
+    Whole(&'a [u8]),
+    HeadTail(&'a [u8], &'a [u8]),
 }
 
-/// Reads the file; an unreadable file gives the default `(untitled)` meta.
+pub fn meta_from_windows(path: &str, mtime: u64, size: u64, w: Windows) -> SessionMeta {
+    let mut meta = default_meta(path, mtime, size);
+    let head = match w {
+        Windows::Whole(all) => &all[..all.len().min(WINDOW)],
+        Windows::HeadTail(h, _) => h,
+    };
+    let mut first_prompt: Option<String> = None;
+    for line in lines(head) {
+        if meta.cwd.is_none() && contains(line, b"\"cwd\"") {
+            if let Some(rec) = decode(line) {
+                if let Some(cwd) = nonempty_str(&rec, "cwd") {
+                    meta.cwd = Some(cwd.to_string());
+                    meta.branch = nonempty_str(&rec, "gitBranch").map(String::from);
+                }
+            }
+        }
+        if first_prompt.is_none() && contains(line, b"\"user\"") {
+            first_prompt = first_prompt_text(line);
+        }
+        if meta.cwd.is_some() && first_prompt.is_some() {
+            break;
+        }
+    }
+    let ai_title = match w {
+        Windows::Whole(all) => last_ai_title(all),
+        Windows::HeadTail(h, tail) => {
+            let rest = tail.iter().position(|c| *c == b'\n').map_or(&tail[tail.len()..], |p| &tail[p + 1..]);
+            last_ai_title(rest).or_else(|| last_ai_title(h))
+        }
+    };
+    if let Some(t) = ai_title {
+        meta.title = t;
+    } else if let Some(p) = first_prompt {
+        meta.title = collapse_newlines(&p).chars().take(TITLE_MAX).collect();
+    }
+    meta
+}
+
+/// Metadata of a transcript held in memory (applies the same windows as `read_meta`).
+pub fn meta_from_bytes(path: &str, mtime: u64, size: u64, bytes: &[u8]) -> SessionMeta {
+    if bytes.len() <= 2 * WINDOW {
+        meta_from_windows(path, mtime, size, Windows::Whole(bytes))
+    } else {
+        meta_from_windows(path, mtime, size, Windows::HeadTail(&bytes[..WINDOW], &bytes[bytes.len() - WINDOW..]))
+    }
+}
+
+fn read_windows(f: &mut std::fs::File) -> std::io::Result<(Vec<u8>, Option<Vec<u8>>)> {
+    let len = f.seek(SeekFrom::End(0))?;
+    f.seek(SeekFrom::Start(0))?;
+    if len <= (2 * WINDOW) as u64 {
+        let mut all = Vec::with_capacity(len as usize);
+        f.read_to_end(&mut all)?;
+        return Ok((all, None));
+    }
+    let mut head = Vec::with_capacity(WINDOW);
+    f.by_ref().take(WINDOW as u64).read_to_end(&mut head)?;
+    f.seek(SeekFrom::Start(len - WINDOW as u64))?;
+    let mut tail = Vec::with_capacity(WINDOW);
+    f.read_to_end(&mut tail)?;
+    Ok((head, Some(tail)))
+}
+
+/// Reads the file's windows; an unreadable file gives the default `(untitled)` meta.
 pub fn read_meta(path: &Path, mtime: u64, size: u64) -> SessionMeta {
     let p = path.to_string_lossy();
-    match std::fs::File::open(path) {
-        Ok(f) => meta_from_reader(&p, mtime, size, BufReader::with_capacity(1 << 20, f)),
+    let read = std::fs::File::open(path).and_then(|mut f| read_windows(&mut f));
+    match read {
+        Ok((all, None)) => meta_from_windows(&p, mtime, size, Windows::Whole(&all)),
+        Ok((head, Some(tail))) => meta_from_windows(&p, mtime, size, Windows::HeadTail(&head, &tail)),
         Err(_) => default_meta(&p, mtime, size),
     }
 }

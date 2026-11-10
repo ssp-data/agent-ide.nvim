@@ -55,4 +55,51 @@ T['non-string prompt text keeps the session and is skipped'] = function()
   eq(all[1].title, 'real prompt')
   vim.fn.delete(d, 'rf')
 end
+
+local synth = dofile(vim.fn.getcwd() .. '/tests/synthetic.lua')
+local KIB, filler, title_line, big = 1024, synth.filler, synth.title_line, synth.big
+local function meta_of(text)
+  local d = vim.fn.tempname()
+  vim.fn.mkdir(d, 'p')
+  local p = d .. '/abc.jsonl'
+  local f = assert(io.open(p, 'wb')); f:write(text); f:close()
+  local m = scan.meta(p, 1, #text)
+  vim.fn.delete(d, 'rf')
+  return m
+end
+
+T['title of a big file comes from the tail window first'] = function()
+  local m = meta_of(big('Early', nil, 'Late'))
+  eq({ m.title, m.cwd }, { 'Late', '/w' })
+end
+T['big file without a late title uses the head window'] = function()
+  eq(meta_of(big('Early', 'Middle', nil)).title, 'Early')
+end
+T['big file title outside both windows is not seen'] = function()
+  eq(meta_of(big(nil, 'Middle', nil)).title, 'first prompt')
+end
+T['first line of the tail window is ignored'] = function()
+  local late = title_line('Late')
+  local pad = filler(256 * KIB):sub(1, 256 * KIB - #late - 1) .. '\n'
+  eq(#late + #pad, 256 * KIB)
+  eq(meta_of(big('Early', nil, nil) .. filler(300 * KIB) .. late .. pad).title, 'Early')
+end
+T['small file: last aiTitle anywhere wins'] = function()
+  local text = '{"type":"user","message":{"content":"p"}}\n' .. title_line('One') .. filler(200 * KIB) .. title_line('Two')
+  eq(meta_of(text).title, 'Two')
+end
+T['a user line with an aiTitle key can still be the first prompt'] = function()
+  eq(meta_of('{"type":"user","aiTitle":"not a title record","message":{"content":"quoted prompt"}}\n').title, 'quoted prompt')
+end
+T['an error in the scan callback is reported once at WARN'] = function()
+  local notes, orig = {}, vim.notify
+  vim.notify = function(msg, level) notes[#notes + 1] = { msg, level } end
+  local done = 0
+  for _ = 1, 2 do scan.scan(dir, function() done = done + 1; error('consumer boom') end) end
+  vim.wait(2000, function() return done == 2 end)
+  vim.notify = orig
+  eq(#notes, 1)
+  eq(notes[1][2], vim.log.levels.WARN)
+  eq(notes[1][1]:find('consumer boom', 1, true) ~= nil, true)
+end
 return T

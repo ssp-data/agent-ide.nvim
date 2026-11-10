@@ -9,6 +9,15 @@ local function dirname(p) return (p:gsub('/[^/]*$', '')) end
 
 local function basename(p) return p:match('([^/]*)$') end
 
+-- Byte-wise string order (Lua's `<` follows the locale's collation).
+local function bytes_lt(a, b)
+  for i = 1, math.min(#a, #b) do
+    local x, y = a:byte(i), b:byte(i)
+    if x ~= y then return x < y end
+  end
+  return #a < #b
+end
+
 --- Resolve the repository root for a directory holding a `.git` entry.
 local function resolve_dotgit(dir)
   local dotgit = dir .. '/.git'
@@ -21,6 +30,7 @@ local function resolve_dotgit(dir)
     local gitdir = line and line:match('^gitdir:%s*(.-)%s*$')
     if gitdir then
       if gitdir:sub(1, 1) ~= '/' then gitdir = dir .. '/' .. gitdir end
+      gitdir = uv.fs_realpath(gitdir) or vim.fs.normalize(gitdir)
       local repo = gitdir:match('^(.*)/%.git/worktrees/[^/]+/?$')
       if repo and repo ~= '' then return repo end
     end
@@ -99,18 +109,16 @@ function M.group(sessions, opts)
       local parent = basename(dirname(p.key))
       if parent ~= '' then p.name = parent .. '/' .. p.name end
     end
-    local order = {}
-    for i, s in ipairs(p.sessions) do order[s] = i end
+    -- ties are broken by path, then id, so the order never depends on the backend's file order
     table.sort(p.sessions, function(a, b)
       if (a.mtime or 0) ~= (b.mtime or 0) then return (a.mtime or 0) > (b.mtime or 0) end
-      return order[a] < order[b]
+      if (a.path or '') ~= (b.path or '') then return bytes_lt(a.path or '', b.path or '') end
+      return bytes_lt(tostring(a.id), tostring(b.id))
     end)
   end
-  local order = {}
-  for i, p in ipairs(projects) do order[p] = i end
   table.sort(projects, function(a, b)
     if a.mtime ~= b.mtime then return a.mtime > b.mtime end
-    return order[a] < order[b]
+    return bytes_lt(a.key, b.key)
   end)
   return projects
 end

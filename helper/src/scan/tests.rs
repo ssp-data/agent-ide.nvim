@@ -45,7 +45,7 @@ fn title_rules() {
     assert_eq!(m(&user("a \n\n  b\tc")).title, "a b\tc");
     assert_eq!(m(&user(&"é".repeat(70))).title, "é".repeat(60));
     assert_eq!(m(&user("   ")).title, "(untitled)");
-    // last aiTitle anywhere wins; first prompt only when none
+    // small file: last aiTitle anywhere wins; first prompt only when none
     let t = format!("{}{}{}", user("p"), "{\"type\":\"ai-title\",\"aiTitle\":\"One\"}\n", "{\"type\":\"ai-title\",\"aiTitle\":\"Two\"}\n");
     assert_eq!(m(&t).title, "Two");
     // sidechain prompts do not count
@@ -71,4 +71,83 @@ fn non_string_prompt_text_keeps_the_session_and_is_skipped() {
     assert_eq!(got.len(), 1);
     assert_eq!(got[0].title, "real prompt");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+const KIB: usize = 1024;
+
+fn filler(n_bytes: usize) -> String {
+    let line = format!("{}\n", serde_json::json!({"type":"assistant","message":{"content":[{"type":"text","text":"f".repeat(1000)}]}}));
+    line.repeat(n_bytes / line.len() + 1)
+}
+
+fn title_line(t: &str) -> String {
+    format!("{}\n", serde_json::json!({"type":"ai-title","aiTitle":t}))
+}
+
+/// A synthetic transcript of more than 600 KiB.
+fn big(early: Option<&str>, middle: Option<&str>, late: Option<&str>) -> String {
+    let mut s = String::from("{\"type\":\"user\",\"cwd\":\"/w\",\"message\":{\"content\":\"first prompt\"}}\n");
+    if let Some(t) = early { s += &title_line(t); }
+    s += &filler(300 * KIB);
+    if let Some(t) = middle { s += &title_line(t); }
+    s += &filler(300 * KIB);
+    if let Some(t) = late { s += &title_line(t); }
+    s += &filler(10 * KIB);
+    assert!(s.len() > 600 * KIB);
+    s
+}
+
+fn both(name: &str, text: &str) -> (SessionMeta, SessionMeta) {
+    let dir = std::env::temp_dir().join(format!("agent-ide-helper-big-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let f = dir.join("abc.jsonl");
+    std::fs::write(&f, text).unwrap();
+    let from_file = read_meta(&f, 1, text.len() as u64);
+    let _ = std::fs::remove_dir_all(&dir);
+    let p = f.to_string_lossy().into_owned();
+    (meta_from_bytes(&p, 1, text.len() as u64, text.as_bytes()), from_file)
+}
+
+#[test]
+fn big_file_title_comes_from_the_tail_window_first() {
+    let (a, b) = both("late", &big(Some("Early"), None, Some("Late")));
+    assert_eq!((a.title.as_str(), a.cwd.as_deref()), ("Late", Some("/w")));
+    assert_eq!(a, b);
+}
+
+#[test]
+fn big_file_without_late_title_uses_the_head_window() {
+    let (a, b) = both("early", &big(Some("Early"), Some("Middle"), None));
+    assert_eq!(a.title, "Early");
+    assert_eq!(a, b);
+}
+
+#[test]
+fn big_file_title_outside_both_windows_is_not_seen() {
+    let (a, b) = both("middle", &big(None, Some("Middle"), None));
+    assert_eq!(a.title, "first prompt");
+    assert_eq!(a, b);
+}
+
+#[test]
+fn first_line_of_the_tail_window_is_ignored() {
+    // the late title line starts exactly where the tail window starts
+    let head = big(Some("Early"), None, None);
+    let rest = filler(300 * KIB);
+    let late = title_line("Late");
+    let pad = filler(256 * KIB);
+    let pad = &pad[..256 * KIB - late.len()];
+    let pad = format!("{}\n", &pad[..pad.len() - 1]);
+    let text = format!("{head}{rest}{late}{pad}");
+    assert_eq!(text.len() - (late.len() + pad.len()), text.len() - 256 * KIB);
+    let (a, b) = both("edge", &text);
+    assert_eq!(a.title, "Early");
+    assert_eq!(a, b);
+}
+
+#[test]
+fn a_user_line_with_an_ai_title_key_can_still_be_the_first_prompt() {
+    let text = "{\"type\":\"user\",\"aiTitle\":\"not a title record\",\"message\":{\"content\":\"quoted prompt\"}}\n";
+    assert_eq!(meta_from_bytes("/p/a.jsonl", 1, 1, text.as_bytes()).title, "quoted prompt");
 }

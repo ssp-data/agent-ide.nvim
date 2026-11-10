@@ -3,7 +3,7 @@
 local parse = require('agent-ide.transcript.parse')
 local M = {}
 
-local MAX_READ = 256 * 1024
+local WINDOW = 256 * 1024 -- head and tail windows read for metadata
 local FILES_PER_TICK = 8
 local LINES_PER_TICK = 500
 local TITLE_MAX = 60
@@ -15,18 +15,58 @@ local DECODE_OPTS = { luanil = { object = true, array = true } }
 local function yield(fn) vim.defer_fn(fn, 0) end
 
 local function decode(line)
-  local ok, rec = pcall(vim.json.decode, line, DECODE_OPTS)
+  local ok, rec = pcall(vim.json.decode, parse.fix_utf8(line), DECODE_OPTS)
   if ok and type(rec) == 'table' then return rec end
 end
 
-local function read_head(path)
+-- The parts of a transcript that metadata is read from: `head` (first WINDOW bytes) and either
+-- `whole` (files of 2 * WINDOW bytes or less) or `tail` (last WINDOW bytes).
+local function read_windows(path)
   local f = io.open(path, 'rb')
   if not f then return nil end
-  local ok, text = pcall(f.read, f, MAX_READ)
+  local ok, w = pcall(function()
+    local len = f:seek('end')
+    f:seek('set', 0)
+    if len <= 2 * WINDOW then
+      local all = f:read('a') or ''
+      return { head = all:sub(1, WINDOW), whole = all }
+    end
+    local head = f:read(WINDOW) or ''
+    f:seek('set', len - WINDOW)
+    return { head = head, tail = f:read('a') or '' }
+  end)
   f:close()
-  return ok and text or nil
+  return ok and w or nil
 end
 
+-- The last non-empty `aiTitle` of an ai-title record among the lines of `text` that start at or
+-- after byte `from`. Only lines containing `"aiTitle"` are decoded.
+local function last_ai_title(text, from)
+  local title
+  local ls = from -- start of the line holding the current hit
+  local i = from
+  while true do
+    local hit = text:find('"aiTitle"', i, true)
+    if not hit then return title end
+    while true do
+      local nl = text:find('\n', ls, true)
+      if not nl or nl > hit then break end
+      ls = nl + 1
+    end
+    local le = (text:find('\n', hit, true) or #text + 1) - 1
+    local rec = decode(text:sub(ls, le))
+    if rec and rec.type == 'ai-title' and type(rec.aiTitle) == 'string' and rec.aiTitle ~= '' then
+      title = rec.aiTitle
+    end
+    i = le + 2
+    ls = i
+  end
+end
+
+---Title rule (same in the helper): the last `aiTitle` in the last WINDOW bytes (its first,
+---possibly partial, line ignored), else the last one in the first WINDOW bytes, else the first
+---prompt in the first WINDOW bytes, else `(untitled)`. A file of 2 * WINDOW bytes or less is
+---read whole and its last `aiTitle` anywhere wins. cwd and branch come from the first WINDOW bytes.
 ---@param path string
 ---@param mtime integer seconds
 ---@param size integer bytes
@@ -36,11 +76,11 @@ function M.meta(path, mtime, size)
     id = vim.fn.fnamemodify(path, ':t'):gsub('%.jsonl$', ''),
     path = path, title = '(untitled)', mtime = mtime, size = size,
   }
-  local text = read_head(path)
-  if not text then return meta end
+  local w = read_windows(path)
+  if not w then return meta end
 
-  local ai_title, first_prompt
-  for line in text:gmatch('[^\n]+') do
+  local first_prompt
+  for line in w.head:gmatch('[^\n]+') do
     if not meta.cwd and line:find('"cwd"', 1, true) then
       local rec = decode(line)
       if rec and type(rec.cwd) == 'string' and rec.cwd ~= '' then
@@ -48,12 +88,7 @@ function M.meta(path, mtime, size)
         if type(rec.gitBranch) == 'string' and rec.gitBranch ~= '' then meta.branch = rec.gitBranch end
       end
     end
-    if line:find('"aiTitle"', 1, true) then
-      local rec = decode(line)
-      if rec and rec.type == 'ai-title' and type(rec.aiTitle) == 'string' and rec.aiTitle ~= '' then
-        ai_title = rec.aiTitle
-      end
-    elseif not first_prompt and line:find('"user"', 1, true) then
+    if not first_prompt and line:find('"user"', 1, true) then
       for _, ev in ipairs(parse.parse_line(line)) do
         if ev.kind == 'prompt' and not ev.sidechain and type(ev.text) == 'string' and ev.text:find('%S') then
           first_prompt = ev.text
@@ -61,6 +96,15 @@ function M.meta(path, mtime, size)
         end
       end
     end
+    if meta.cwd and first_prompt then break end
+  end
+
+  local ai_title
+  if w.whole then
+    ai_title = last_ai_title(w.whole, 1)
+  else
+    local nl = w.tail:find('\n', 1, true)
+    ai_title = (nl and last_ai_title(w.tail, nl + 1)) or last_ai_title(w.head, 1)
   end
 
   if ai_title then
@@ -69,6 +113,17 @@ function M.meta(path, mtime, size)
     meta.title = vim.fn.strcharpart((first_prompt:gsub('%s*\n%s*', ' ')), 0, TITLE_MAX)
   end
   return meta
+end
+
+local cb_error_notified = false
+
+-- Call the consumer; an error in it is reported once per session instead of being swallowed.
+local function deliver(cb, value)
+  local ok, err = pcall(cb, value)
+  if not ok and not cb_error_notified then
+    cb_error_notified = true
+    vim.notify('Agent-IDE: error in index callback: ' .. tostring(err), vim.log.levels.WARN)
+  end
 end
 
 --- List `*.jsonl` files directly inside each sub-directory of `projects_dir`.
@@ -113,7 +168,7 @@ function M.scan(projects_dir, cb)
     if i <= #files then
       yield(step)
     else
-      pcall(cb, sessions)
+      deliver(cb, sessions)
     end
   end
   vim.schedule(step)
@@ -136,7 +191,7 @@ function M.history(path, cb)
     if i <= #lines then
       yield(step)
     else
-      pcall(cb, events)
+      deliver(cb, events)
     end
   end
   vim.schedule(step)
