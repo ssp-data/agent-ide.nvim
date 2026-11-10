@@ -140,4 +140,69 @@ T['headers use only the first line of name and label'] = function()
   eq(r.lines, { '▸ Na: ', '│ {}', '▸ la', '│ t', '▸ unknown: un', '│ r' })
   for _, l in ipairs(r.lines) do eq(l:find('[\r\n]'), nil) end
 end
+-- Very long lines ------------------------------------------------------------------------
+
+local function longest(lines)
+  local n = 0
+  for _, l in ipairs(lines) do n = math.max(n, #l) end
+  return n
+end
+local function suffix(n) return (' … +%d bytes (gr shows the raw line)'):format(n) end
+
+T['line limits are named constants'] = function()
+  eq({ render.MAX_FOLD_LINE, render.MAX_TEXT_LINE }, { 2000, 20000 })
+end
+T['a 600 KB single-line unknown is one short line with a counted cut'] = function()
+  local r = render.render({ { kind = 'unknown', label = 'image', raw = string.rep('A', 600000) } })
+  eq(#r.lines, 2)
+  eq(r.lines[2], '│ ' .. string.rep('A', 2000) .. suffix(600000 - 2000))
+  eq(r.folds, { { first = 1, last = 2 } })
+end
+T['the cut never splits a multi-byte character'] = function()
+  -- 999 two-byte characters fill 1998 bytes; the 3-byte one would end at 2001
+  local raw = string.rep('é', 999) .. '€' .. string.rep('x', 100)
+  local r = render.render({ { kind = 'unknown', label = 'u', raw = raw } })
+  eq(r.lines[2], '│ ' .. string.rep('é', 999) .. suffix(103))
+  eq(vim.fn.strchars(r.lines[2]) > 0, true)
+  eq(pcall(vim.str_utfindex, r.lines[2], 'utf-32'), true)
+end
+T['a 48 KB line in a Write body is cut; line count and folds do not change'] = function()
+  local big = string.rep('w', 48000)
+  local short = 'w'
+  local function run(content)
+    return render.render({
+      { kind = 'prompt', text = 'p' },
+      { kind = 'tool_call', id = 'a', name = 'Write', input = { file_path = '/x', content = 'one\n' .. content .. '\nthree' } },
+      { kind = 'tool_result', id = 'a', text = 'ok', is_error = false },
+      { kind = 'text', text = 'done' },
+    })
+  end
+  local cut, plain = run(big), run(short)
+  eq(#cut.lines, #plain.lines)
+  eq(cut.folds, plain.folds)
+  eq(cut.lines[10], '│ ' .. string.rep('w', 2000) .. suffix(48000 - 2000))
+  eq(longest(cut.lines) <= 4 + 2000 + #suffix(48000), true)
+end
+T['limits apply to meta, thinking, tool results and keep every line of the body'] = function()
+  local big = string.rep('m', 5000)
+  local r = render.render({
+    { kind = 'meta', label = 'm', text = 'a\n' .. big },
+    { kind = 'thinking', text = big },
+    { kind = 'tool_result', id = 'zz', text = big, is_error = false },
+  })
+  eq(#r.lines, 7)
+  for _, l in ipairs(r.lines) do eq(#l <= 4 + 2000 + #suffix(5000), true) end
+end
+T['answer and prompt lines are cut only above 20000 bytes'] = function()
+  local five = string.rep('a', 5000)
+  local r = render.render({ { kind = 'prompt', text = five }, { kind = 'text', text = five } })
+  eq(r.lines[4], five)
+  eq(r.lines[8], five)
+  local huge = string.rep('b', 25000)
+  r = render.render({ { kind = 'prompt', text = huge }, { kind = 'text', text = huge } })
+  eq(r.lines[4], string.rep('b', 20000) .. suffix(5000))
+  eq(r.lines[8], string.rep('b', 20000) .. suffix(5000))
+  eq(#r.lines, 9)
+end
+
 return T
