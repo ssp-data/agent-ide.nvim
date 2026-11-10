@@ -7,3 +7,6 @@ vim.api.nvim_create_user_command('Agents', function() require('agent-ide').toggl
 vim.api.nvim_create_user_command('AgentsSearch', function(o)
   require('agent-ide').search({ query = o.args })
 end, { nargs = '*', desc = 'Agent-IDE: search all sessions' })
+
+vim.api.nvim_create_user_command('AgentsGraph', function() require('agent-ide').graph() end,
+  { desc = 'Agent-IDE: commit graph of the current project' })

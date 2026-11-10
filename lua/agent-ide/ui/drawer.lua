@@ -245,6 +245,7 @@ local KEYS = {
   { '<CR>', 'open' }, { 'o', 'open' }, { 'za', 'fold' }, { 'R', 'refresh' }, { 'gp', 'jump' },
   { 'x', 'park' }, { 'glg', 'lazygit' }, { 'q', 'close' }, { 's', 'search' }, { '?', 'help' },
   { 'g?', 'help' },
+  { 'gG', 'graph' }, -- commit graph of the row's repository (ui/graph.lua)
 }
 local OWN = {}
 for _, k in ipairs(KEYS) do OWN[vim.keycode(k[1])] = true end
@@ -290,6 +291,13 @@ function actions.lazygit()
   require('agent-ide.ui.lazygit').open(root)
 end
 
+function actions.graph()
+  local graph = require('agent-ide.ui.graph')
+  local root, p = graph.node_root(current_node())
+  if not root then return notify('not a git project') end
+  graph.open({ root = root, project = p })
+end
+
 function actions.help()
   local rows = {
     { key = '<CR> / o', desc = 'open session, start a new one, use a prompt, or toggle' },
@@ -302,6 +310,7 @@ function actions.help()
     { key = 'q', desc = 'close drawer' },
     { key = '? / g?', desc = 'this help' },
     { key = '/', desc = 'search (built-in)' },
+    { key = 'gG', desc = 'commit graph of the project (or the row\'s worktree)' },
   }
   for _, k in ipairs(provider_keys()) do rows[#rows + 1] = { key = k.lhs, desc = k.desc } end
   require('agent-ide.ui.help').open('Agent-IDE drawer', rows)

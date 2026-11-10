@@ -56,6 +56,15 @@ function M.prompt_history(opts)
   M.search(vim.tbl_extend('force', { kinds = { 'prompt' }, title = 'Prompt history' }, opts or {}))
 end
 
+---Commit graph of the repository of the current context (the chat, diff, drawer row, file or
+---working directory); `opts.root` / `opts.dir` pick one.
+---@param opts? { root?: string, dir?: string, project?: table }
+function M.graph(opts)
+  local graph = require('agent-ide.ui.graph')
+  if opts and (opts.root or opts.dir) then return graph.open(opts) end
+  graph.open_context()
+end
+
 ---@return string text for a statusline (percent signs doubled)
 function M.statusline() return require('agent-ide.status').statusline() end
 
