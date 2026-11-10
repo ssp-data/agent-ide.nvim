@@ -42,3 +42,10 @@ Given by the user while testing `full-build` before the drawer polish landed. Th
 
 99. **Worktrees.** "remove all worktrees that are merged, and keep main only."
    - Done 2026-11-10: the four merged agent worktrees and their branches were removed. Left: `full-build` (95 commits ahead of `main`) and the drawer-polish worktree (in progress, removed after it merges). Merging `full-build` into `main` is the user's step at hand-over.
+
+10. **Misleading "saved" notice.** After `:w` in a session of the project `my-skills` the notice said `Agent-IDE: saved → Saved prompts/my-skills/this-is-a-new-session`; the user looked for it in their `my-skills` repository. It is not there, and should not be: per-project saved prompts live in the plugin's data folder (`stdpath('data')/agent-ide/prompts/<project>-<hash>/`), only library prompts go to `library_dir`.
+   - The notice names the drawer section, which reads like a path. To do: say what and where in words, e.g. `saved as a project prompt of my-skills: this-is-a-new-session (e on its drawer row opens the file)`, and for the library `saved to the library: writing/linkedin-post`. README: one sentence on where each kind lives.
+
+11. **`/` menu cannot be filtered.** "writing `/` and then typing `model` gives me `/__remote-workflowmode` instead of `/model` — the list comes up, but the typing does not work, I can't arrow-down the 1000 entries, I need a search."
+   - Cause to confirm: the completion inserts the first candidate as soon as the menu opens (the buffer-local `completeopt` was removed in review, so the user's global setting applies), so further typing no longer narrows from `/`. Also `/model` is not in Claude's list at all (screen-only command).
+   - To do: the `/` menu must narrow while typing and never insert before the user chooses (`noinsert,noselect` for this completion only, fuzzy matching), or be a small filterable picker; add the plugin's own entries for screen-only commands that have an equivalent (`/model` → model picker, `/copy` → yank last answer, `/clear`/`/resume` → explain or map), marked as plugin actions. See also item 2.
