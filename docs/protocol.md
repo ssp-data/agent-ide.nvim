@@ -43,6 +43,7 @@ So hook objects must be expected in real use, possibly before `init`.
 
 | purpose | line |
 |---|---|
+| initialize | `{"type":"control_request","request_id":"i1","request":{"subtype":"initialize"}}` |
 | prompt | `{"type":"user","message":{"role":"user","content":"<text>"}}` |
 | set model | `{"type":"control_request","request_id":"r1","request":{"subtype":"set_model","model":"sonnet"}}` |
 | set mode | `{"type":"control_request","request_id":"r2","request":{"subtype":"set_permission_mode","mode":"plan"}}` |
@@ -51,7 +52,9 @@ So hook objects must be expected in real use, possibly before `init`.
 | deny an ask | same with `"response":{"behavior":"deny","message":"<why>"}` |
 | allow and apply a suggestion | `"response":{"behavior":"allow","updatedInput":{...},"updatedPermissions":[<suggestion as received>]}` |
 
-Request ids we send are free-form strings (`r1`, ...). Ids Claude sends are UUIDs.
+Request ids we send are free-form strings (`r1`, ...; `i1`, ... for `initialize`). Ids Claude
+sends are UUIDs. The plugin writes `initialize` as the very first line of every process it
+starts, before the first prompt and any deferred setting.
 
 ## Output objects (stdout)
 
@@ -245,6 +248,34 @@ and `result(is_error:false, permission_denials[{tool_name, tool_use_id, tool_inp
   mode `default`. Invalid mode → `control_response{subtype:"error", error,
   error_code:"invalid_mode"}`. The status object can arrive after our next request was
   already sent (it is asynchronous).
+
+### `initialize`
+
+Answered at once, without a prompt or a turn (no usage): `system/hook_started`,
+`system/hook_response` may come first, then `control_response{subtype:"success", request_id,
+pending_permission_requests, pending_user_dialog_requests, response{…}}`. Observed with
+2.1.306 alone on stdin (then EOF; Claude exits), keys of `response`: `account, agents,
+analytics_disabled, available_output_styles, capabilities, claude_code_version, commands,
+current_permission_mode, fast_mode_disabled_reason, fast_mode_state, feedback_mode,
+ide_rc_auto_enable_gate, models, output_style, pid, remote_control_auto_connect_default,
+remote_control_auto_enable, remote_control_auto_on_by_default, remote_control_available,
+session_state, user_output_styles_dir`.
+
+- `models[]`: `value, resolvedModel, displayName, description, supportedEffortLevels?,
+  supportsEffort?, supportsAdaptiveThinking?, supportsAutoMode?, supportsThinkingOff,
+  supportsFastMode?`. 14 entries, in this order: `default` (its `resolvedModel` the
+  default model, its `displayName` `Default (recommended)`), the aliases and newest models
+  (`opus`, `claude-fable-5-2`, `sonnet`, `haiku`, `fable`), then older models by full id
+  (some with a date suffix). `value` is what `set_model` and `--model` take; two entries can
+  resolve to the same model (`default` and `fable`).
+- `commands[]`: `name, description, argumentHint` (`name` without the `/`), about 100 entries.
+- `account` holds the login; the plugin reads nothing from it.
+
+The plugin keeps `value, displayName, description, resolvedModel` of each model (as `value,
+name, description, resolved` in `models.json`) and the command names for the `/` menu before
+the first `init`. An error answer is ignored. Not verified: whether `initialize` after the
+first prompt is accepted (the plugin never sends it later), and with `--resume` (the Agent
+SDK sends it first in both cases).
 
 ### `claude agents --json` and processes started headless
 
