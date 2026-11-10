@@ -203,13 +203,31 @@ end
 
 function actions.close() M.close() end
 
--- A provider's row key (ui/sections.lua `keys`): the row's handler, else the key's own meaning.
+-- The drawer's own keys: a provider row key with the same lhs is neither mapped nor listed.
+local OWN = {}
+for _, k in ipairs({ '<CR>', 'o', 'za', 'R', 'gp', 'x', 'glg', 'q', 's', '?' }) do OWN[vim.keycode(k)] = true end
+
+local function provider_keys()
+  return vim.tbl_filter(function(k) return not OWN[vim.keycode(k.lhs)] end, sections.keys())
+end
+
+-- The register a plain operator uses ('clipboard' may make it + or *).
+local function default_register()
+  local cb = vim.o.clipboard
+  if cb:find('unnamedplus', 1, true) then return '+' end
+  if cb:find('unnamed', 1, true) then return '*' end
+  return '"'
+end
+
+-- A provider's row key (ui/sections.lua `keys`): the row's handler, else the key's own meaning:
+-- fed back with its count and register, ahead of what was typed after it (`yj` stays `yj`).
 function actions.row_key(lhs)
   local node = current_node()
   local fn = node and node.keys and node.keys[lhs]
   if not fn then
     local count = vim.v.count > 0 and tostring(vim.v.count) or ''
-    return api.nvim_feedkeys(count .. vim.keycode(lhs), 'n', false)
+    local reg = vim.v.register ~= default_register() and ('"' .. vim.v.register) or ''
+    return api.nvim_feedkeys(reg .. count .. vim.keycode(lhs), 'in', false)
   end
   local ok, err = pcall(fn, node)
   if not ok then vim.notify('Agent-IDE: ' .. tostring(err), vim.log.levels.ERROR) end
@@ -243,7 +261,7 @@ function actions.help()
     { key = '?', desc = 'this help' },
     { key = '/', desc = 'search (built-in)' },
   }
-  for _, k in ipairs(sections.keys()) do rows[#rows + 1] = { key = k.lhs, desc = k.desc } end
+  for _, k in ipairs(provider_keys()) do rows[#rows + 1] = { key = k.lhs, desc = k.desc } end
   require('agent-ide.ui.help').open('Agent-IDE drawer', rows)
 end
 
@@ -256,8 +274,8 @@ local function ensure_buf()
   vim.bo[buf].filetype = 'agent-ide'
   vim.bo[buf].modifiable = false
   local function map(lhs, fn) vim.keymap.set('n', lhs, fn, { buffer = buf, nowait = true, silent = true }) end
-  -- provider row keys first: the drawer's own keys below win a clash
-  for _, k in ipairs(sections.keys()) do map(k.lhs, function() actions.row_key(k.lhs) end) end
+  -- provider row keys (the drawer's own keys below win a clash)
+  for _, k in ipairs(provider_keys()) do map(k.lhs, function() actions.row_key(k.lhs) end) end
   map('<CR>', actions.open)
   map('o', actions.open)
   map('za', actions.fold)

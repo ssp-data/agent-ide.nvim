@@ -150,6 +150,7 @@ end
 ---@return table[]
 function M.top(ctx)
   local open = is_open(ctx.expanded, 'prompts', false)
+  cache.visible = { global = open, saved = {} } -- top() runs first on every render
   local icon = ctx.icons.prompts or '✎'
   local out = { fold_row({ { (open and ctx.icons.open or ctx.icons.closed) .. ' ' .. icon .. ' ' }, { 'Prompts', 'AgentIdeProject' } },
     'prompts', 'prompts', false) }
@@ -198,6 +199,7 @@ function M.rows(project, ctx)
   if not list or #list == 0 then return nil end
   local key, id = project.key .. '/saved', project.key .. '#saved'
   local o = is_open(ctx.expanded, key, false)
+  if o then cache.visible.saved[cache.folder(project)] = true end
   local out = { fold_row({ { '  ' .. (o and ctx.icons.open or ctx.icons.closed) .. ' Saved prompts', HL_SECTION },
     { ' (' .. #list .. ')', HL_DIM } }, id, key, false, project) }
   if o then

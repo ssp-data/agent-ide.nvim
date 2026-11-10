@@ -142,6 +142,34 @@ T['Saved prompts: shown after Sessions only when the project has some'] = functi
   eq({ t.nodes[7].type, t.nodes[7].entry.kind, t.nodes[7].project.key }, { 'prompt', 'saved', '/r/alpha' })
 end
 
+T['drawer focus: nothing while collapsed; open, only changed files are read again'] = function()
+  vim.fn.system({ 'cp', '-r', FIX .. '/library', tmp .. '/lib' })
+  setup({ command_dirs = {}, skill_dirs = {}, library_dir = tmp .. '/lib', saved_dir = tmp .. '/saved' })
+  local sources = require('agent-ide.prompts.sources')
+  local orig, scans = sources.scan, 0
+  sources.scan = function(...) scans = scans + 1; return orig(...) end
+  local ok, err = pcall(function()
+    build({ prompts = true })
+    loaded()
+    eq(scans, 1)
+    build({}) -- Prompts collapsed again
+    cache.focus()
+    vim.wait(500)
+    eq(scans, 1)
+    build({ prompts = true })
+    sources._reads = 0
+    vim.uv.sleep(20)
+    vim.fn.writefile({ '# Tweet now' }, tmp .. '/lib/writing/social/tweet.md')
+    cache.focus()
+    vim.wait(2000, function() return scans == 2 and not cache._loading() end, 10)
+    eq(sources._reads, 1)
+    local titles = vim.tbl_map(function(e) return e.title end, cache.global())
+    eq(vim.tbl_contains(titles, 'Tweet now'), true)
+  end)
+  sources.scan = orig
+  if not ok then error(err, 0) end
+end
+
 T['row keys: a key, a list of keys or false'] = function()
   config.setup({ keys = { prompts = { edit = { 'e', 'E' }, yank = false, rename = 'r', delete = 'd', to_library = 'L' } } })
   eq(vim.tbl_map(function(k) return k.lhs end, ps.keys()), { 'e', 'E', 'r', 'd', 'L' })

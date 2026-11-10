@@ -63,6 +63,13 @@ function M.project_root()
   return (root and root:sub(1, 1) == '/') and root or nil
 end
 
+-- Last scan's entries by path: unchanged files are not read again.
+local function by_path(entries)
+  local out = {}
+  for _, e in ipairs(entries or {}) do out[e.path] = e end
+  return out
+end
+
 local function scan_global()
   if G.loading then
     G.again = true
@@ -72,7 +79,7 @@ local function scan_global()
   local o, d = opts(), M.dirs()
   local root = G.root
   sources.scan({ command_dirs = o.command_dirs, skill_dirs = o.skill_dirs, library_dir = d.library,
-    project_root = root, project_dirs = o.project_dirs }, function(entries)
+    project_root = root, project_dirs = o.project_dirs, known = by_path(G.entries) }, function(entries)
     G.loading = false
     if G.again then return scan_global() end
     local sig = signature(entries)
@@ -112,7 +119,7 @@ local function scan_saved(folder)
     return
   end
   st.loading, st.again = true, false
-  sources.scan({ saved_dir = M.dirs().saved, project_name = folder }, function(entries)
+  sources.scan({ saved_dir = M.dirs().saved, project_name = folder, known = by_path(st.entries) }, function(entries)
     st.loading = false
     if st.again then return scan_saved(folder) end
     local sig = signature(entries)
@@ -142,12 +149,25 @@ function M.invalidate()
   for folder in pairs(saved) do scan_saved(folder) end
 end
 
----The drawer was entered: scan again after a short pause, quietly.
+-- What the drawer showed open at its last render (set by ui/prompt_sections.lua).
+M.visible = { global = false, saved = {} }
+
+---The drawer was entered: after a short pause, scan again what it shows open (only changed
+---files are read); nothing while the Prompts node and every Saved prompts section are closed.
 function M.focus()
+  if not M.visible.global and next(M.visible.saved) == nil then return end
   if not focus_timer then focus_timer = vim.uv.new_timer() end
   focus_timer:stop()
-  focus_timer:start(300, 0, vim.schedule_wrap(M.invalidate))
+  focus_timer:start(300, 0, vim.schedule_wrap(function()
+    if M.visible.global and (G.entries or G.loading) then scan_global() end
+    for folder in pairs(M.visible.saved) do
+      if saved[folder] then scan_saved(folder) end
+    end
+  end))
 end
+
+---Test only: a scan of the commands, skills and templates is running.
+function M._loading() return G.loading end
 
 ---@param fn fun() called after a scan found something new
 function M.on_update(fn)
@@ -161,6 +181,7 @@ end
 function M._reset()
   G = { entries = nil, loading = false, again = false, root = nil, sig = nil, waiters = {} }
   saved = {}
+  M.visible = { global = false, saved = {} }
 end
 
 return M

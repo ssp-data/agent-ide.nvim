@@ -30,10 +30,10 @@ local function wait_for(cond, what, ms)
   if not vim.wait(ms or 5000, cond, 20) then error('timed out waiting for ' .. what, 2) end
 end
 
-local function start()
+local function start(keys)
   child.restart({ '-u', 'tests/minimal_init.lua' })
   child.lua([[
-    local tmp = ...
+    local tmp, keys = ...
     vim.env.TMUX = nil
     _G.notes = {}
     vim.notify = function(msg) table.insert(_G.notes, msg) end
@@ -51,9 +51,10 @@ local function start()
     require('agent-ide').setup({ projects_dir = tmp .. '/projects', helper = { enabled = false },
       live = { interval_ms = 100000, cmd = { 'echo', '[]' } }, claude = { cmd = { 'false' } },
       icons = { open = 'v', closed = '>', project = 'P' },
-      prompts = { command_dirs = { tmp .. '/commands' }, skill_dirs = {}, library_dir = tmp .. '/library', saved_dir = tmp .. '/saved' } })
+      prompts = { command_dirs = { tmp .. '/commands' }, skill_dirs = {}, library_dir = tmp .. '/library', saved_dir = tmp .. '/saved' },
+      keys = keys })
     require('agent-ide').toggle()
-  ]], { tmp })
+  ]], { tmp, keys or {} })
 end
 
 local function drawer_lines()
@@ -194,6 +195,25 @@ T['the row keys keep their meaning elsewhere in the drawer'] = function()
   child.lua('vim.fn.setreg(\'"\', "before")')
   child.type_keys('yy')
   eq(child.lua_get('vim.fn.getreg(\'"\')'), '> P repo  · now\n')
+  -- typed in one chunk: the motion stays after the operator; a register prefix is kept
+  drawer_cursor_to('Prompts')
+  child.type_keys('yj')
+  eq(child.lua_get('vim.fn.getreg(\'"\')'), '> ✎ Prompts\n> P repo  · now\n')
+  drawer_cursor_to('> P repo  ')
+  child.type_keys('"ayy')
+  eq(child.lua_get('vim.fn.getreg("a")'), '> P repo  · now\n')
+end
+
+T["the drawer's own keys win a clash with a row key, also in the help"] = function()
+  start({ prompts = { edit = 'R', yank = 's' } })
+  on_row('Invoice text')
+  child.type_keys('R')
+  eq(child.lua_get('vim.api.nvim_buf_get_name(0)'), 'agent-ide://drawer')
+  child.type_keys('?')
+  local text = table.concat(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), '\n')
+  eq(text:find('prompt row: edit', 1, true), nil)
+  eq(text:find('prompt row: yank', 1, true), nil)
+  eq(text:find('prompt row: rename', 1, true) ~= nil, true)
 end
 
 return T
