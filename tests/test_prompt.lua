@@ -736,6 +736,49 @@ T['text_to_send converts [attach] lines in place: nothing moved, blank lines kep
   eq(P.text_to_send(lines), 'intro\n\n@a.lua\nmiddle @b.lua text\n\n\n```\n[attach] in/fence\n```\nend\n@"my file.md"')
 end
 
+T['in_fence: the send rule, judged from the lines up to the cursor'] = function()
+  eq(P.in_fence({ 'text' }), false)
+  eq(P.in_fence({ '```python', '@decorator' }), true)
+  eq(P.in_fence({ '```', 'x' }), true)
+  eq(P.in_fence({ '```', 'x', '```', 'after' }), false)
+  eq(P.in_fence({ '```' }), true) -- the fence line itself
+  eq(P.in_fence({ '~~~', '```', 'x' }), true) -- a different fence does not close
+  eq(P.in_fence({ '````', '```', 'x' }), true) -- nor a shorter one
+  eq(P.in_fence({ '  ```', 'x' }), false) -- indented: plain text
+  eq(P.in_fence({ '```', '  ```', 'x' }), true)
+end
+
+T['@ inside a fenced code block types @; outside it, and after a closed fence, the picker opens'] = function()
+  start()
+  stub_pick('a.lua')
+  edit_at({ 'Look:', '```python', 'x = 1', '' }, 4, 0)
+  child.type_keys('@', 'dataclass', '<CR>', 'mail me @', '<CR>', '~~~ @')
+  eq(lines_of('prompt'), { 'Look:', '```python', 'x = 1', '@dataclass', 'mail me @', '~~~ @' })
+  eq(child.lua_get('_G.offered'), vim.NIL)
+  -- a closing fence line: still part of the block
+  child.type_keys('<CR>', '```', '<CR>', 'see @')
+  wait_for(function() return lines_of('prompt')[8] == 'see @a.lua ' end, 'picker after the fence')
+  -- tilde fence, open to the end
+  edit_at({ '~~~', 'a ' }, 2, 2)
+  stub_pick('a.lua')
+  child.type_keys('@')
+  eq(lines_of('prompt'), { '~~~', 'a @' })
+  eq(child.lua_get('_G.offered'), vim.NIL)
+  -- name@host types normally, also as one burst of input (a fast typist, a macro, `.`)
+  edit_at({ 'mail ' }, 1, 5)
+  child.type_keys('name', '@', 'host ')
+  child.type_keys('me@x.org a@')
+  eq(lines_of('prompt'), { 'mail name@host me@x.org a@' })
+  eq(child.lua_get('_G.offered'), vim.NIL)
+  -- a burst ending in ` @`: the picker opens at that spot
+  child.type_keys(' see @')
+  wait_for(function() return lines_of('prompt')[1] == 'mail name@host me@x.org a@ see @a.lua ' end, 'burst')
+  -- in a fence, as a burst
+  edit_at({ '```', '' }, 2, 0)
+  child.type_keys('@deco x @y')
+  eq(lines_of('prompt'), { '```', '@deco x @y' })
+end
+
 T['@ after whitespace in a git work tree offers the tracked and untracked files'] = function()
   git_init()
   start()

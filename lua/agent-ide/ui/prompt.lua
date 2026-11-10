@@ -30,6 +30,16 @@ local function fence_step(fence, line)
   return nil, true
 end
 
+---True when the last of `lines` (the buffer's lines up to the cursor's) is inside a fenced
+---code block or is a fence line, by the rule `text_to_send` uses.
+---@param lines string[]
+---@return boolean
+function M.in_fence(lines)
+  local fence, plain = nil, true
+  for _, line in ipairs(lines) do fence, plain = fence_step(fence, line) end
+  return not plain
+end
+
 ---The mention Claude Code reads for `path`: `@<path>`, `@"<path>"` when it holds whitespace
 ---(Claude Code ends an unquoted mention at whitespace; the quoted one attaches the file).
 ---@param path string
@@ -560,15 +570,20 @@ function M.setup_buf(buf, s)
   end
 
   if opts.at_picker ~= false then
-    map('i', '@', function()
-      local col = api.nvim_win_get_cursor(0)[2]
+    -- At line start or after whitespace (so `name@host` types normally), never in a code fence.
+    -- Not an <expr> mapping: that one is evaluated while characters typed just before (in the
+    -- same burst of input) are not in the line yet; a plain `@` goes back to the front of the
+    -- typeahead, so it lands before the keys that follow.
+    vim.keymap.set('i', '@', function()
+      local row, col = unpack(api.nvim_win_get_cursor(0))
       local before = api.nvim_get_current_line():sub(col, col)
       local st = bufs[buf]
-      if st and not st.picking and (col == 0 or before:match('%s')) then
-        return ('<Cmd>lua require("agent-ide.ui.prompt").pick(%d, true)<CR>'):format(buf)
+      if st and not st.picking and (col == 0 or before:match('%s'))
+        and not M.in_fence(api.nvim_buf_get_lines(buf, 0, row, false)) then
+        return M.pick(buf, true)
       end
-      return '@'
-    end, 'attach file')
+      api.nvim_feedkeys('@', 'in', false)
+    end, { buffer = buf, nowait = true, silent = true, desc = 'Agent-IDE: attach file' })
   end
   for _, lhs in ipairs(list(keys.attach)) do
     map('n', lhs, function()
