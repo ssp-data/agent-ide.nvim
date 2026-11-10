@@ -67,6 +67,10 @@ Run one file or case: `TEST_FILE=tests/test_tree.lua make test`, `TEST_CASE='tex
 10. **No dependencies** on other plugins. Neovim 0.12+. Optional integrations are guarded (`pcall`, `package.loaded`).
 11. **Privacy.** The repository is public. No personal paths, names of private projects, real session ids, or content from real transcripts in code, tests, docs or commits. Fixtures are synthetic. Tests run with data, cache, state and runtime dirs pointed at temporary folders (`tests/run.lua`) and must not touch the real ones.
 
+## A trap worth knowing
+
+With `conceallevel >= 2`, Neovim asks the treesitter highlighter about every row it needs a height for, and each answer is its own range parse. On a transcript of 20 000 lines that froze Neovim for minutes as soon as the cursor entered the window. `lua/agent-ide/util/ts_conceal.lua` switches that per-row check off for transcript buffers (a private flag of the highlighter; `tests/test_ts_conceal.lua` holds a budget for it). If a long transcript ever feels stuck again, start with `AGENT_IDE_WATCHDOG=1 nvim` and read `stuck.log`.
+
 ## Conventions
 
 - Match the surrounding code: comment density, naming, idiom. Keep files focused (about 350 lines is a good ceiling).

@@ -59,6 +59,11 @@ function M.setup_buf(buf)
     callback = function(ev) M.apply_win(api.nvim_get_current_win(), ev.buf) end })
   api.nvim_create_autocmd('BufWipeout', { group = augroup, buffer = buf,
     callback = function(ev) bufs[ev.buf] = nil end })
+  -- a long transcript must not freeze Neovim when a render plugin sets 'conceallevel'
+  require('agent-ide.util.ts_conceal').keep_off(buf, augroup)
+  vim.schedule(function()
+    if api.nvim_buf_is_valid(buf) then require('agent-ide.util.ts_conceal').off(buf) end
+  end)
 end
 
 ---Store the per-line fold levels (as from `render.fold_levels`) read by `foldexpr` for `buf`.
@@ -88,6 +93,7 @@ function M.set_lines(buf, lines)
   vim.bo[buf].modifiable = true
   api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.bo[buf].modifiable = false
+  require('agent-ide.util.ts_conceal').off(buf)
 end
 
 ---Per-line fold levels of transcript `buf` ('>1' starts a fold), or nil for other buffers.

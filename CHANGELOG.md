@@ -43,6 +43,7 @@ First public version.
 ### Fixed
 
 - `/` typed in a burst (fast typing, a macro, `.`) after other text no longer prepares the command menu; it opens only on an empty line.
+- Moving into a long transcript no longer freezes Neovim for minutes when a markdown render plugin sets `conceallevel` (treesitter checked every line of the buffer one by one; a 20 000-line session took minutes, now milliseconds).
 - `X` right after a Claude restarted in its pane no longer says it cannot reach the session: it asks and then checks the pane itself.
 
 ### Notes
