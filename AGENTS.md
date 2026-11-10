@@ -9,6 +9,7 @@ A Neovim plugin that manages Claude Code sessions from inside Neovim: a drawer w
 - Lua module: `agent-ide`. Command: `:Agents`. Global keys under `<leader>a`.
 - Design document: `docs/superpowers/specs/2026-11-10-agents-ide-design.md` (section 14 lists what changed since approval). Plans per part are in `docs/superpowers/plans/`.
 - Observed Claude Code stream protocol: `docs/protocol.md`.
+- Current state, what is unverified by eye, and open items: `HANDOVER.md`.
 
 ## Layout
 
@@ -26,7 +27,7 @@ A Neovim plugin that manages Claude Code sessions from inside Neovim: a drawer w
 | `lua/agent-ide/ui/drawer_legend.lua`, `drawer_session_keys.lua` | the drawer's legend of state marks (`gL`); the chat's keys on a session row |
 | `lua/agent-ide/ui/graph.lua`, `graph_render.lua`, `graph_keys.lua`, `graph_context.lua` | commit graph: window, pure lane layout, keys, which repository |
 | `lua/agent-ide/ui/tmux_close.lua`, `tmux_verify.lua` | closing a Claude in a tmux pane (`X`, `:AgentsCloseIdle`); the checks before any key is typed |
-| `lua/agent-ide/ui/delete.lua`, `lua/agent-ide/trash.lua` | deleting a session (`D`) into the trash, `:AgentsTrash` restore and empty |
+| `lua/agent-ide/ui/delete.lua`, `lua/agent-ide/trash.lua`, `trash_fs.lua`, `trash_history.lua` | deleting a session (`D`) into the trash, `:AgentsTrash` restore and empty |
 | `lua/agent-ide/ui/search_hl.lua` | marks of a search query in a transcript window (`]n`, `[n`) |
 | `lua/agent-ide/ui/bufname.lua` | names of the plugin's buffers (`agents://<project>/<title>`, …) |
 | `lua/agent-ide/hidden.lua` | hidden sessions (`H`), kept in `hidden.json` |
