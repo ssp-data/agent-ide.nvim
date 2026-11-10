@@ -162,7 +162,7 @@ T['L copies a saved prompt into the library; r renames a saved prompt'] = functi
   eq(child.lua_get('_G.inputs')[1], { prompt = 'Save to library as: ', default = 'add-idle-support' })
   eq(vim.fn.readfile(lib .. '/ideas/idle.md'), { 'Add idle support' })
   eq(exists(folder .. '/add-idle-support.md'), true)
-  eq(last_note(), 'Agent-IDE: saved → Library/ideas/idle')
+  eq(last_note(), 'Agent-IDE: saved to the library: ideas/idle')
   -- rename stays in the project's folder; no folders there
   drawer_cursor_to('add idle support')
   child.lua('_G.typed = { "x/y", "idle work" }')

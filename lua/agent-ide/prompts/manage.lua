@@ -95,7 +95,7 @@ function M.to_library(e)
         local path = lib .. '/' .. rel .. '.md'
         local ok, werr = store.write_new(path, text)
         if ok then
-          notify('saved → ' .. short({ kind = 'template', path = path }))
+          notify(require('agent-ide.prompts.save').notice('saved', 'template', path))
           return cache.invalidate()
         end
         if werr ~= 'exists' then return notify('could not save: ' .. tostring(werr), vim.log.levels.WARN) end
