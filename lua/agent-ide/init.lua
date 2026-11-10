@@ -41,6 +41,10 @@ function M.next_waiting()
   require('agent-ide.ui.waiting').next_waiting()
 end
 
+---Pick a prompt (saved prompts of the chat's project, the library, Claude's commands and
+---skills) and put it into the current chat's prompt buffer.
+function M.prompts() require('agent-ide.prompts.actions').pick() end
+
 ---@return string text for a statusline (percent signs doubled)
 function M.statusline() return require('agent-ide.status').statusline() end
 

@@ -301,6 +301,14 @@ function M.open(s, project)
   update_visible()
 end
 
+---Focus the prompt of the chat of `s` (its window reopened when hidden), optionally in insert
+---mode. Does nothing when `s` has no chat yet.
+---@param s table Session
+---@param insert boolean
+function M.focus_prompt(s, insert)
+  if chats[s.id] then focus_prompt(chats[s.id], insert) end
+end
+
 ---Session of the chat view in the focused tab: the current window's chat, else the first
 ---transcript shown in this tab.
 ---@return table|nil Session

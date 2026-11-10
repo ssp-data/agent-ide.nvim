@@ -226,7 +226,7 @@ end
 
 function actions.help()
   local rows = {
-    { key = '<CR> / o', desc = 'open session, start a new one, or toggle project' },
+    { key = '<CR> / o', desc = 'open session, start a new one, use a prompt, or toggle' },
     { key = 'za', desc = 'toggle fold' },
     { key = 'R', desc = 'refresh' },
     { key = 'gp', desc = 'jump to tmux pane' },
