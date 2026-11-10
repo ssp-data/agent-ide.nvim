@@ -66,9 +66,9 @@ local function show_preview()
   local event = hit.event or 1
   local key = hit.path .. ':' .. event
   P.preview_gen = P.preview_gen + 1
-  local gen = P.preview_gen
+  local mine, gen = P, P.preview_gen
   local function draw(c)
-    if not P or gen ~= P.preview_gen or not view.valid(P.v) then return end
+    if P ~= mine or gen ~= P.preview_gen or not view.valid(P.v) then return end
     if not c.first then
       return view.render_preview(P.v, { '(this event is no longer in the transcript)' }, 1, {}, hit.title, hit.project)
     end
@@ -78,7 +78,7 @@ local function show_preview()
   end
   if P.contexts[key] then return draw(P.contexts[key]) end
   search.context(hit.path, event, function(first, events)
-    if not P then return end
+    if P ~= mine then return end
     if vim.tbl_count(P.contexts) >= CONTEXTS then P.contexts = {} end
     P.contexts[key] = { first = first, events = events }
     draw(P.contexts[key])
@@ -120,12 +120,13 @@ function run()
     P.pending = true
     return
   end
-  local q, t_key = query(), P.t_key
-  P.inflight, P.pending = true, false
+  local q, t_key, mine = query(), P.t_key, P
+  P.inflight, P.pending, P.t_key = true, false, nil
   search.search({ query = q, kinds = KIND_SETS[P.kind_set].kinds, scope = scope_param(), limit = LIMIT,
     projects = P.maps and P.maps.by_cwd or nil }, function(res)
-    if not P then return end
+    if P ~= mine then return end -- closed (or another picker opened) meanwhile
     P.inflight = false
+    if P.pending and t_key then P.t_key = t_key end -- measured from the oldest key not yet served
     if P.pending or not view.valid(P.v) then return run() end -- outdated: the newer query goes now
     apply(res, q, t_key)
   end)
@@ -136,9 +137,7 @@ local function changed()
   P.t_key = P.t_key or vim.uv.hrtime()
   P.timer:stop()
   P.timer:start(M._debounce_ms, 0, vim.schedule_wrap(function()
-    if not P then return end
-    run()
-    P.t_key = nil
+    if P then run() end
   end))
 end
 
@@ -171,7 +170,8 @@ local function with_text(hit, cb)
   if hit.kind == 'tool' then return cb(hit.snippet) end
   search.context(hit.path, hit.event, function(first, events)
     local ev = first and events[hit.event - first + 1]
-    cb(ev and type(ev.text) == 'string' and ev.text or hit.snippet)
+    local want = hit.kind == 'prompt' and 'prompt' or 'text'
+    cb(ev and ev.kind == want and type(ev.text) == 'string' and ev.text or hit.snippet)
   end)
 end
 

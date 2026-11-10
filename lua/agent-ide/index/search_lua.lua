@@ -15,7 +15,7 @@ local RESCAN_S = 5
 local DEFAULT_KINDS = { title = true, prompt = true, answer = true }
 
 local S = { dir = nil, metas = nil, scanned = 0, scanning = false, waiting = {}, docs = {}, queue = {}, busy = false,
-  listeners = {}, gen = 0 }
+  listeners = {} }
 
 local function yield(fn) vim.defer_fn(fn, 0) end
 
@@ -153,11 +153,8 @@ end
 ---@param params table as the helper's `search` request
 ---@param cb fun(result: table)
 function M.search(params, cb)
-  S.gen = S.gen + 1
-  local gen = S.gen
   local dir = params.projects_dir
   with_sessions(dir, function(metas)
-    if gen ~= S.gen then return end -- a newer search replaced this one
     local words = match.words(params.query)
     local empty = #words == 0
     local kinds = {}
@@ -170,7 +167,6 @@ function M.search(params, cb)
         session = m.id, event = item and item.event, ts = item and item.ts or (not item and m.activity) or nil }
     end
     local function step()
-      if gen ~= S.gen then return end
       local t0 = uv.hrtime()
       while i <= #metas do
         local m = metas[i]
@@ -220,7 +216,7 @@ function M.on_ready(fn) S.listeners[#S.listeners + 1] = fn end
 ---Test only: forget everything.
 function M._reset()
   S = { dir = nil, metas = nil, scanned = 0, scanning = false, waiting = {}, docs = {}, queue = {}, busy = false,
-    listeners = {}, gen = 0 }
+    listeners = {} }
 end
 
 return M

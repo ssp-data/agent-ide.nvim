@@ -173,6 +173,22 @@ T['Enter on a tool call opens its fold; a deleted session is reported'] = functi
   eq(child.lua_get('_G.notes[#_G.notes]'):find('no longer exists', 1, true) ~= nil, true)
 end
 
+T['a transcript rewritten after indexing still opens on the hit (found by its text)'] = function()
+  need_helper()
+  start('helper')
+  open_picker()
+  type_query('release notes written')
+  eq(state().hits[1].kind, 'answer')
+  -- two events inserted before the hit: its index now points elsewhere
+  local path = projects .. '/-w-alpha/a1.jsonl'
+  local lines = vim.fn.readfile(path)
+  table.insert(lines, 2, S.user('an inserted prompt', 0, '/w/alpha'))
+  table.insert(lines, 3, S.answer('an inserted answer', 0))
+  vim.fn.writefile(lines, path)
+  child.type_keys('<CR>')
+  wait_for(function() return child.lua_get('vim.api.nvim_get_current_line()') == 'Release notes written.' end, 'hit line')
+end
+
 T['<C-y> copies the full text, <C-r> puts a prompt into the chat prompt'] = function()
   start('lua')
   open_picker()
