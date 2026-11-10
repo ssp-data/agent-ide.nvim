@@ -117,7 +117,7 @@ These are the defaults. Pass only what you want to change to `setup()` (or `opts
 ```lua
 require('agent-ide').setup({
   projects_dir = vim.fn.expand('~/.claude/projects'),
-  drawer = { width = 44, side = 'right' },
+  drawer = { width = 44, side = 'right', legend = true }, -- legend: the state marks at the bottom (gL)
   live = { interval_ms = 5000, cmd = { 'claude', 'agents', '--json' } },
   helper = { enabled = true, path = nil }, -- nil: <plugin root>/helper/target/release/agent-ide-helper
   claude = {
@@ -188,6 +188,8 @@ The drawer has no header line; `?` lists every key. Each row shows its state mar
 
 Ages read `now`, `5m`, `3h`, `12d`, then months (`14mo`) and years (`2y`). Colours: waiting violet (bold), busy yellow, idle green, done orange, failed red, parked rows (mark, title, age) and ages dimmed, never italic; the groups are `AgentIdeWaiting`, `AgentIdeBusy`, `AgentIdeIdle`, `AgentIdeDone`, `AgentIdeFailed`, `AgentIdeParked`, `AgentIdeAge` and `AgentIdeSection`, and a colorscheme can set them. The dim groups (`AgentIdeParked`, `AgentIdeAge`, `AgentIdeMissing`, `AgentIdeBranch`, `AgentIdeGitUntracked`) take the foreground of `Comment` at setup and on every `ColorScheme`, without italic or bold. A project row is its fold arrow and bold name; a parked project's name is dimmed. A project whose folder is gone says `(folder missing)`; a session started in a sub-folder of its project shows `<subfolder>/ · <title>`.
 
+**Legend.** The bottom of the drawer explains the state marks: `● input  ◐ running  ● idle  ○ parked  ✓ done  ✗ failed`, each mark in its colour (the marks of your icon set), over one or two lines. It stays put while the list scrolls, never takes the focus and never covers the cursor row (the list scrolls instead). It hides itself while the drawer is shorter than 12 lines or narrower than 24 columns. `gL` shows or hides it; `drawer = { legend = false }` starts with it hidden.
+
 **Hidden sessions.** `H` on a session row hides it: nothing is deleted, the session only moves into a collapsed, dimmed `Hidden (n)` group, the last row of its project's `Sessions (n)` section (which counts the visible ones only). `<CR>` or `za` expands the group; its rows open like any other session, and `H` on one shows it again. Hidden sessions do not count for the project's age, order or state mark, except while one needs you: a hidden session that is waiting, busy, done-unread or failed is listed among the normal rows (and counted in the roll-up, the footer and `<leader>an`) for as long as that lasts. A project whose sessions are all hidden still shows, with `Sessions (0)` and its group. Search finds hidden sessions as usual. The list is kept in `hidden.json` (see [Privacy](#privacy)); several Neovims share it.
 
 ### Deleting sessions
@@ -221,6 +223,10 @@ Open a terminal straight into a project:
 nvim +'Agents project'
 ```
 
+### Closing terminal sessions
+
+`X` on a session row that runs in another Claude in a tmux pane (the row shows `tmux <window>.<pane>`) ends that Claude the way you would there: after a confirm (default: no) it types Ctrl-C into the pane, and again 300 ms later (Claude's own exit). Right before, it checks again that the pane still exists and still runs that Claude, so the keys never land in a pane that meanwhile runs something else; the process itself is never signalled. A session that is working or waiting for input asks a second time. If Claude still runs 5 s later, a notice says so and nothing more happens. Outside tmux, or when the pane is not known (`elsewhere`), `X` says it cannot reach the session; for a session running in this Neovim use `x`. `:AgentsCloseIdle` closes every Claude that is idle in a tmux pane, after one confirm with their count.
+
 ## Keys
 
 Global:
@@ -236,7 +242,7 @@ In the drawer:
 
 | Key | Action |
 |---|---|
-| `<CR>`, `o` | Expand or collapse a project; open a session; start a new session (`+ New session`); use a prompt |
+| `<CR>`, `o` | Expand or collapse a project; open a session; start a new session (`+ New session`; pressed again while that one has sent nothing, it comes back with its draft; `2<CR>` starts a separate one); use a prompt |
 | `za` | Expand or collapse the node under the cursor |
 | `zM` | Collapse all: only the top-level rows remain (a project opened again shows its sessions) |
 | `zR` | Expand all projects with their `Sessions`; `Changes`, `Commits`, `Saved prompts`, `Hidden` and the Prompts node stay as they are (opening them loads git or prompts for every project). `zR` again, with nothing changed in between, opens everything (a commit's own file list excepted). Git counts of closed sections load a few projects at a time |
@@ -246,7 +252,10 @@ In the drawer:
 | `x` | Park the session: stop the Claude process this Neovim runs for it |
 | `H` | Hide the session into its project's `Hidden (n)` group; on a hidden session: show it again (Vim's `H` motion is not available in the drawer) |
 | `D` | Delete an inactive session: move it to the plugin's trash after a confirm (see [Deleting sessions](#deleting-sessions)) |
+| `<leader>aM`, `<S-Tab>`, `<C-c>`, `<leader>at`, `gr` | On a session row, what they do in its chat, for that session and without opening it: pick the model, next permission mode, interrupt (only while Claude works), continue in native Claude in a tmux pane, raw view in the main window. A session without a process takes the mode or model when it starts; one running in another Claude is refused (the raw view still opens). On other rows `<S-Tab>` and `<C-c>` keep their Vim meaning |
+| `X` | Close the Claude that runs the session in a tmux pane, after a confirm (see [Closing terminal sessions](#closing-terminal-sessions)) |
 | `q` | Close the drawer |
+| `gL` | Show or hide the legend of the state marks |
 | `glg` | Open lazygit for the row's repository (a worktree row or session: that worktree) |
 | `gs` | Scope: only the row's project (else the working directory's), or back to all projects (see [Project scope](#project-scope)) |
 | `?`, `g?` | Help (`/` searches in it, `q` or `<Esc>` closes it) |
@@ -256,7 +265,7 @@ In the drawer:
 | `y` | Prompt row: yank its text (unnamed and `+` registers) |
 | `L` | Saved prompt row: copy it into the library (asks for a name) |
 
-The prompt row keys are under `keys.prompts`; elsewhere in the drawer they keep their Vim meaning, and a drawer key above always wins over one of them. The other drawer keys are fixed.
+The prompt row keys are under `keys.prompts`; elsewhere in the drawer they keep their Vim meaning, and a drawer key above always wins over one of them. The session row keys are the chat's (`keys.chat`), so a remap applies to both. The other drawer keys are fixed.
 
 In the chat (transcript and prompt buffer, unless noted):
 

@@ -8,6 +8,7 @@ local project = require('agent-ide.project')
 local scope = require('agent-ide.scope')
 local session = require('agent-ide.session')
 local tmux = require('agent-ide.tmux')
+local legend = require('agent-ide.ui.drawer_legend')
 local model = require('agent-ide.ui.drawer_model')
 local sections = require('agent-ide.ui.sections')
 local tree = require('agent-ide.ui.tree')
@@ -121,6 +122,7 @@ local function render(focus)
       end
     end
   end
+  legend.update()
 end
 
 local function rescan()
@@ -248,8 +250,12 @@ function actions.open()
     local dir = p.root or p.key
     -- only an absolute key is a folder: a project without cwd is keyed by a bare directory name
     if dir:sub(1, 1) ~= '/' or vim.fn.isdirectory(dir) ~= 1 then return notify('project folder not found: ' .. dir) end
-    local s = session.open({ cwd = dir })
-    model.add_unsaved(s.id, p.key)
+    -- an unsent new session of the project comes back with its draft; a count: a separate one
+    local s = vim.v.count == 0 and model.unsent_new(p.key) or nil
+    if not s then
+      s = session.open({ cwd = dir })
+      model.add_unsaved(s.id, p.key)
+    end
     require('agent-ide.ui.chat').open(s, p)
   elseif node.type == 'scope' or node.type == 'others' then
     M.set_scope('all')
@@ -413,6 +419,14 @@ function actions.scope()
   M.set_scope('project', node and node.project)
 end
 
+function actions.legend() legend.toggle() end
+
+-- `X`: close the Claude running the session in a tmux pane (ui/tmux_close.lua). Other rows: nothing.
+function actions.close_tmux()
+  local node = current_node()
+  if node and node.type == 'session' then require('agent-ide.ui.tmux_close').close_row(node) end
+end
+
 -- The drawer's own keys (lhs, action name); a provider row key with the same lhs is neither
 -- mapped nor listed. `?` (actions.help) lists them all.
 local KEYS = {
@@ -421,6 +435,8 @@ local KEYS = {
   { 'g?', 'help' },
   { 'gG', 'graph' }, -- commit graph of the row's repository (ui/graph.lua)
   { 'gs', 'scope' }, -- project scope <-> all (scope.lua)
+  { 'gL', 'legend' }, -- legend of the state marks (ui/drawer_legend.lua)
+  { 'X', 'close_tmux' }, -- close a Claude in a tmux pane (ui/tmux_close.lua)
 }
 local OWN = {}
 for _, k in ipairs(KEYS) do OWN[vim.keycode(k[1])] = true end
@@ -491,8 +507,11 @@ function actions.help()
     { key = '/', desc = 'search (built-in)' },
     { key = 'gG', desc = 'commit graph of the project (or the row\'s worktree)' },
     { key = 'gs', desc = 'scope: only this project / all projects' },
+    { key = 'gL', desc = 'show or hide the legend of the state marks' },
+    { key = 'X', desc = 'close the Claude running it in a tmux pane (Ctrl-C twice there; asks first)' },
   }
   for _, k in ipairs(provider_keys()) do rows[#rows + 1] = { key = k.lhs, desc = k.desc } end
+  vim.list_extend(rows, require('agent-ide.ui.drawer_session_keys').help_rows(OWN))
   require('agent-ide.ui.help').open('Agent-IDE drawer', rows)
 end
 
@@ -508,6 +527,7 @@ local function ensure_buf()
   -- provider row keys (the drawer's own keys below win a clash)
   for _, k in ipairs(provider_keys()) do map(k.lhs, function() actions.row_key(k.lhs) end) end
   for _, k in ipairs(KEYS) do map(k[1], actions[k[2]]) end
+  require('agent-ide.ui.drawer_session_keys').map(buf, OWN, current_node) -- the chat's keys on session rows
   api.nvim_create_autocmd('BufEnter', { buffer = buf, callback = function() sections.focus() end })
   S.buf = buf
   return buf
@@ -527,6 +547,7 @@ local function open_drawer()
 end
 
 local function teardown()
+  legend.close()
   set_shown(false)
   index.on_change(nil)
   if debounce then debounce:stop() end
@@ -593,6 +614,7 @@ function M.close()
   if api.nvim_get_current_win() == win and main then api.nvim_set_current_win(main) end
   api.nvim_win_close(win, false)
   S.win = nil
+  legend.close()
   set_shown(false)
 end
 

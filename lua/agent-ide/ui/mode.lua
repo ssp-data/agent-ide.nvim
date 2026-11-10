@@ -42,13 +42,14 @@ function M.cycle(s)
   s:set_mode(M.claude_name(M.next_mode(s.mode_requested or s.mode)))
 end
 
----Pick a model from `config.claude.models` for session `s`.
+---Pick a model from `config.claude.models` for session `s`; `on_pick(model)` after a request.
 ---@param s table Session
-function M.pick_model(s)
+---@param on_pick? fun(model: string)
+function M.pick_model(s, on_pick)
   local list = claude_cfg().models
   list = type(list) == 'table' and #list > 0 and list or DEFAULT_MODELS
   vim.ui.select(list, { prompt = 'Model' }, function(choice)
-    if choice then s:set_model(choice) end
+    if choice and s:set_model(choice) and on_pick then on_pick(choice) end
   end)
 end
 

@@ -4,7 +4,7 @@ local M = {}
 local function defaults()
   return {
     projects_dir = vim.fn.expand('~/.claude/projects'),
-    drawer = { width = 44, side = 'right' },
+    drawer = { width = 44, side = 'right', legend = true }, -- legend: the state marks at the bottom (gL)
     live = { interval_ms = 5000, cmd = { 'claude', 'agents', '--json' } },
     helper = { enabled = true, path = nil }, -- nil: <plugin root>/helper/target/release/agent-ide-helper
     -- modes: what <S-Tab> cycles through (plugin names; `manual` is Claude's `default`);
