@@ -1,4 +1,4 @@
-.PHONY: deps test helper test-helper bench release-notes release publish
+.PHONY: deps test helper test-helper bench release-notes release publish demo
 
 deps:
 	@test -d deps/mini.nvim || git clone --depth 1 https://github.com/echasnovski/mini.nvim deps/mini.nvim
@@ -21,6 +21,10 @@ test-helper-release:
 .PHONY: test-real
 test-real: deps $(if $(shell command -v cargo),helper)
 	timeout 1800 nvim --headless --noplugin -u tests/minimal_init.lua -c "luafile tests/real/run.lua"
+
+# Neovim on the synthetic demo (demo/): sessions, repositories and prompts under /tmp/agent-ide-demo.
+demo: $(if $(shell command -v cargo),helper)
+	scripts/demo.sh
 
 bench: deps
 	BENCH_DIR="$(DIR)" nvim --headless --noplugin -u tests/minimal_init.lua -c "luafile tests/bench.lua" -c "qa!"

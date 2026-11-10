@@ -1,0 +1,3 @@
+{"uuid": "e7c539ba-ee56-4f9f-9c65-50e5db3752f6", "cwd": "/tmp/agent-ide-demo/git/ssp-blog", "gitBranch": "main", "sessionId": "d5eb79cc-d089-4fa1-ab75-40ee8c82fd32", "timestamp": "2026-11-10T16:39:57.000Z", "type": "user", "message": {"role": "user", "content": "Find broken image links in content/."}}
+{"uuid": "95cfdc86-ea92-4277-94f2-3ef0fce9e960", "cwd": "/tmp/agent-ide-demo/git/ssp-blog", "gitBranch": "main", "sessionId": "d5eb79cc-d089-4fa1-ab75-40ee8c82fd32", "timestamp": "2026-11-10T16:40:37.000Z", "type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Two links point to missing files."}]}}
+{"type": "ai-title", "aiTitle": "Fix broken image links", "sessionId": "d5eb79cc-d089-4fa1-ab75-40ee8c82fd32"}
