@@ -14,3 +14,7 @@ test-helper:
 
 bench: deps
 	BENCH_DIR="$(DIR)" nvim --headless --noplugin -u tests/minimal_init.lua -c "luafile tests/bench.lua" -c "qa!"
+
+.PHONY: test-omarchy
+test-omarchy:
+	node --test omarchy/io.github.sspaeti.agent-ide/test/*.test.js
