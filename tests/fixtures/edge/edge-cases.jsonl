@@ -43,5 +43,7 @@ not json with bad byte ş
 {"type":"user","message":{"content":[{"type":"text","text":"[Request interrupted by user]"}]}}
 {"type":"user","message":{"content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]}}
 {"type":"user","message":{"content":[{"type":"text","text":"[Request interrupted by user] and more"}]}}
+{"type":"user","isMeta":true,"message":{"content":" \n\t<local-command-caveat>Caveat: indented.</local-command-caveat>"}}
+{"type":"user","message":{"content":"<command-name>/model</command-name>\n            <command-message>model</command-message>\n            <command-args>sonnet</command-args>"}}
 {"type":"user","message":{"content":"cut off here
 {"type":"assistant","message":{"content":"still being writ

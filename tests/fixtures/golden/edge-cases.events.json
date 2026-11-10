@@ -56,5 +56,6 @@
   {"kind": "meta", "label": "meta", "text": "[Request interrupted by user]"},
   {"kind": "meta", "label": "meta", "text": "[Request interrupted by user for tool use]"},
   {"kind": "prompt", "text": "[Request interrupted by user] and more"},
+  {"kind": "prompt", "text": "/model sonnet"},
   {"kind": "unknown", "label": "invalid JSON", "raw": "{\"type\":\"user\",\"message\":{\"content\":\"cut off here"}
 ]
