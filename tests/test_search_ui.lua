@@ -141,10 +141,10 @@ T['picker with the helper: fuzzy, answers, kinds cycle, Enter opens the chat on 
   type_query('umlatu')
   local hits = state().hits
   eq(hits[1].match, 'fuzzy')
-  -- <C-t> cycles kinds: prompts only, then answers only
-  child.type_keys('<C-t>')
+  -- <C-f> cycles kinds: prompts only, then answers only
+  child.type_keys('<C-f>')
   wait_for(function() return vim.deep_equal(state().kinds, { 'prompt' }) end, 'kinds prompt')
-  child.type_keys('<C-t>')
+  child.type_keys('<C-f>')
   wait_for(function() return vim.deep_equal(state().kinds, { 'answer' }) and #state().hits > 0 and state().hits[1].kind == 'answer' end, 'answers')
   eq(state().hits[1].snippet, 'Fixed the umlaut handling.')
   child.type_keys('<CR>')
@@ -224,7 +224,7 @@ T['scope: drawer s searches the project, <Tab> cycles to all; / stays built-in; 
   local row
   for i, l in ipairs(rows) do if l:find(' beta ', 1, true) then row = i end end
   child.lua('local s = require("agent-ide.ui.drawer").state(); vim.api.nvim_set_current_win(s.win); vim.api.nvim_win_set_cursor(s.win, { ..., 0 })', { row })
-  child.type_keys('s')
+  child.type_keys('S')
   wait_for(function() local s = state(); return s ~= vim.NIL and s.backend ~= nil end, 'picker')
   eq(state().scope, 'project')
   eq(title():find('project beta', 1, true) ~= nil, true)
@@ -236,8 +236,8 @@ T['scope: drawer s searches the project, <Tab> cycles to all; / stays built-in; 
   child.type_keys('<Esc>q')
   child.lua('local s = require("agent-ide.ui.drawer").state(); vim.api.nvim_set_current_win(s.win)')
   child.type_keys('?')
-  local help = child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)')
-  eq(vim.iter(help):any(function(l) return l:match('^s%s+search') ~= nil end), true)
+  local help = child.lua_get("vim.api.nvim_buf_get_lines(require('agent-ide.ui.help')._state().lbuf, 0, -1, false)")
+  eq(vim.iter(help):any(function(l) return l:match('^S / <leader>ff / <leader>S%s+search') ~= nil end), true)
 end
 
 T['entry points: keys, :AgentsSearch, prompt history newest first; stale results are dropped'] = function()
@@ -306,7 +306,7 @@ T['a resize keeps query, scope, kinds and selection'] = function()
   start('lua')
   open_picker()
   type_query('release')
-  child.type_keys('<C-t>') -- prompts only
+  child.type_keys('<C-f>') -- prompts only
   wait_for(function() return vim.deep_equal(state().kinds, { 'prompt' }) and #state().hits == 2 end, 'prompts')
   child.type_keys('<C-n>')
   eq(state().sel, 2)
@@ -373,7 +373,7 @@ T['picker keys come from config; <C-r> and <C-k> keep their Vim meaning'] = func
   eq(mapped('<C-r>', 'i'), '')
   eq(mapped('<C-k>', 'i'), '')
   eq(mapped('<C-e>', 'i'), '')
-  eq(mapped('<C-t>', 'i'), '')
+  eq(mapped('<C-f>', 'i'), '')
   eq(mapped('<C-g>', 'i') ~= '', true)
   eq(mapped('<Esc>', 'i'), '')
   eq(mapped('<Esc>', 'n') ~= '', true)

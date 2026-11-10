@@ -110,6 +110,8 @@ function M._reset()
   by_id, order, listeners, broken, forgotten = {}, {}, {}, {}, {}
   last_quota = nil
   require('agent-ide.session.commands')._reset()
+  require('agent-ide.claude.models')._reset()
+  require('agent-ide.ui.mode')._reset()
   object._reset_ids()
 end
 

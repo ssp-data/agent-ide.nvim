@@ -5,6 +5,9 @@ local api = vim.api
 local M = {}
 
 local augroup = api.nvim_create_augroup('agent-ide.history', { clear = true })
+local ns = api.nvim_create_namespace('agent-ide.history.answers')
+
+M.ANSWER_MARK = '● '
 
 -- Per transcript buffer: { levels = string[], winbar = string|nil }
 local bufs = {}
@@ -59,6 +62,11 @@ function M.setup_buf(buf)
     callback = function(ev) M.apply_win(api.nvim_get_current_win(), ev.buf) end })
   api.nvim_create_autocmd('BufWipeout', { group = augroup, buffer = buf,
     callback = function(ev) bufs[ev.buf] = nil end })
+  -- a long transcript must not freeze Neovim when a render plugin sets 'conceallevel'
+  require('agent-ide.util.ts_conceal').keep_off(buf, augroup)
+  vim.schedule(function()
+    if api.nvim_buf_is_valid(buf) then require('agent-ide.util.ts_conceal').off(buf) end
+  end)
 end
 
 ---Store the per-line fold levels (as from `render.fold_levels`) read by `foldexpr` for `buf`.
@@ -88,6 +96,34 @@ function M.set_lines(buf, lines)
   vim.bo[buf].modifiable = true
   api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.bo[buf].modifiable = false
+  require('agent-ide.util.ts_conceal').off(buf)
+end
+
+---Mark the lines where Claude's text starts (`render.render().answers`, 1-based) with a `●` as
+---inline virtual text: the buffer text stays as it is, so yanks and text objects copy the words
+---only. Marks from line `from` (1-based) on are replaced; earlier ones stay.
+---@param buf integer
+---@param from integer
+---@param lines integer[]
+function M.mark_answers(buf, from, lines)
+  api.nvim_buf_clear_namespace(buf, ns, from - 1, -1)
+  local count = api.nvim_buf_line_count(buf)
+  for _, l in ipairs(lines) do
+    if l >= from and l <= count then
+      api.nvim_buf_set_extmark(buf, ns, l - 1, 0, { virt_text = { { M.ANSWER_MARK, 'AgentIdeAnswerMark' } },
+        virt_text_pos = 'inline', right_gravity = false })
+    end
+  end
+end
+
+---Lines marked as answer starts in `buf` (tests).
+---@param buf integer
+---@return integer[]
+function M.answer_marks(buf)
+  local out = {}
+  for _, m in ipairs(api.nvim_buf_get_extmarks(buf, ns, 0, -1, {})) do out[#out + 1] = m[2] + 1 end
+  table.sort(out)
+  return out
 end
 
 ---Per-line fold levels of transcript `buf` ('>1' starts a fold), or nil for other buffers.

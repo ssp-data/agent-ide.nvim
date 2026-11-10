@@ -9,6 +9,27 @@ function M.list(v)
   return {}
 end
 
+---The keys of option `name` in `config.keys[group]` (`group` nil: a global key), as `M.list`.
+---@param group string|nil
+---@param name string
+---@return string[]
+function M.get(group, name)
+  local config = require('agent-ide.config')
+  local keys = config.get().keys
+  local g
+  if type(keys) == 'table' then g = group and keys[group] or keys end
+  -- with `keys = false` the drawer keeps its defaults (ui/drawer.lua)
+  if type(g) ~= 'table' and group == 'drawer' then g = config.defaults().keys.drawer end
+  return type(g) == 'table' and M.list(g[name]) or {}
+end
+
+---The first key of option `name` in `config.keys[group]` for a hint in a message, or `none`.
+---@param group string|nil
+---@param name string
+---@param none? string default '(no key)'
+---@return string
+function M.first(group, name, none) return M.get(group, name)[1] or none or '(no key)' end
+
 ---The keys joined for a help line (`a / b`), nil when there are none.
 ---@param v string|string[]|false|nil
 ---@return string|nil

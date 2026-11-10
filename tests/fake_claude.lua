@@ -5,6 +5,9 @@
 --   {"emit": <object>}         write the object as one line, flushed
 --   {"emit_raw": "<text>"}     write the text exactly (no newline added), flushed; for chunking/garbage
 --   {"sleep_ms": n}  {"exit": code}  {"ignore_stdin": true} (stop reading, sleep until killed)
+--   {"initialize": <response>}  block until the plugin's `initialize` request arrives, answer it
+--                    (same request_id) with control_response success and <response> (e.g. models)
+--   {"initialize_error": "<text>"}  same, answered with control_response error
 -- After the last step it keeps reading stdin until EOF, then exits 0.
 -- Env FAKE_CLAUDE_LOG=<file>: appends {"argv":[...],"cwd":"...","api_key_set":bool} first, then
 --   {"in":"<exact input line>"} per line received. `--version` anywhere in argv prints $FAKE_CLAUDE_VERSION
@@ -44,22 +47,28 @@ local function read_line()
   return l
 end
 
+-- The first input line (received earlier or now) containing `text`; nil at EOF.
+local function take(text)
+  while true do
+    for i, l in ipairs(pending) do
+      if l:find(text, 1, true) then return table.remove(pending, i) end
+    end
+    local l = read_line()
+    if l == nil then return nil end
+    pending[#pending + 1] = l
+  end
+end
+
 for _, step in ipairs(steps) do
   if step.expect then
-    local found
-    while not found do
-      for i, l in ipairs(pending) do
-        if l:find(step.expect, 1, true) then found = i; break end
-      end
-      if found then
-        table.remove(pending, found)
-      else
-        local l = read_line()
-        if l == nil then break end
-        pending[#pending + 1] = l
-      end
-    end
-    if not found then os.exit(0) end
+    if not take(step.expect) then os.exit(0) end
+  elseif step.initialize ~= nil or step.initialize_error ~= nil then
+    local l = take('"subtype":"initialize"')
+    if not l then os.exit(0) end
+    local id = vim.json.decode(l).request_id
+    local r = step.initialize_error and { subtype = 'error', request_id = id, error = step.initialize_error }
+      or { subtype = 'success', request_id = id, response = step.initialize }
+    io.stdout:write(vim.json.encode({ type = 'control_response', response = r }), '\n'); io.stdout:flush()
   elseif step.emit ~= nil then
     io.stdout:write(vim.json.encode(step.emit), '\n'); io.stdout:flush()
   elseif step.emit_raw ~= nil then

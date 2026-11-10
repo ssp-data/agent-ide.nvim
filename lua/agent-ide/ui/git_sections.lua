@@ -122,6 +122,42 @@ end
 
 local function age(date, now) return require('agent-ide.ui.tree').ago(date, now) end
 
+-- The first rows of an open Commits section: the commit graph of the work tree (ui/graph.lua),
+-- dimmed, named with the drawer's graph key, <CR> opens it; then `uncommitted (n)`, what is not
+-- committed yet (the working tree and the index against HEAD, untracked files too), which
+-- expands to its files, each a diff of the working file against HEAD.
+local function graph_row(out, w, ctx, parent)
+  local key = require('agent-ide.util.keys').get('drawer', 'graph')[1]
+  local node = { type = 'git_graph', project = w.project, root = w.root, id = w.root .. '#graph',
+    fold = { key = parent.fold.key, default = false, focus = parent.id },
+    open = function(n) require('agent-ide.ui.graph').open({ root = n.root, project = n.project }) end }
+  out[#out + 1] = { pieces = { { w.indent .. '    commit graph' .. (key and (' · ' .. key) or ''), 'AgentIdeAge' } }, node = node }
+end
+
+local function uncommitted_rows(out, w, ctx)
+  local ind = w.indent .. '    '
+  local files = cache.uncommitted(w.root)
+  local key = w.root .. '/git/uncommitted'
+  local open = is_open(ctx.expanded, key)
+  local node = { type = 'git_uncommitted', project = w.project, root = w.root, id = w.root .. '#uncommitted',
+    fold = { key = key, default = false } }
+  node.fold.focus = node.id
+  local n = files and #files or nil
+  out[#out + 1] = { node = node, pieces = {
+    { ind .. (open and ctx.icons.open or ctx.icons.closed) .. ' ' },
+    { 'uncommitted', n == 0 and 'AgentIdeAge' or 'AgentIdeSection' },
+    { n and (' (' .. n .. ')') or '', 'AgentIdeAge' },
+  } }
+  if not open then return end
+  if not files then
+    out[#out + 1] = hint(ind .. '    ', 'loading…', w.project)
+  elseif #files == 0 then
+    out[#out + 1] = hint(ind .. '    ', 'nothing to commit', w.project)
+  else
+    files_rows(out, w, files, ind .. '    ', node, 'head')
+  end
+end
+
 local function commit_rows(out, w, ctx, commits)
   local ind = w.indent .. '    '
   for i, c in ipairs(commits) do
@@ -199,6 +235,8 @@ local function tree_rows(out, w, ctx)
   label = base and (base.mode == 'branch' and 'Commits on branch' or 'Recent commits') or 'Commits'
   open, node = section(out, w, ctx, 'commits', label, commits and #commits)
   if open then
+    graph_row(out, w, ctx, node)
+    uncommitted_rows(out, w, ctx)
     if not commits then
       out[#out + 1] = hint(w.indent .. '    ', 'loading…', w.project)
     else

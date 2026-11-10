@@ -1,4 +1,5 @@
--- Renders transcript events into buffer lines plus fold ranges.
+-- Renders transcript events into buffer lines plus fold ranges, and the lines where Claude's own
+-- text (an answer, a remark between tool calls) starts: the view marks them with a `●`.
 local M = {}
 
 local CAP_INPUT, CAP_RESULT, CAP_UNKNOWN, CAP_EDIT_SIDE = 60, 200, 20, 30
@@ -137,12 +138,13 @@ local function emit(events, results, known, out, nested)
         local j = i
         while j <= #events and events[j].sidechain do j = j + 1 end
         local group = vim.list_slice(events, i, j - 1)
-        local inner = { lines = {}, folds = {} }
+        local inner = { lines = {}, folds = {}, answers = {} }
         emit(group, results, known, inner, true)
         block(('▸ subagent (%d events)'):format(#group), inner.lines)
         i = j
       else
         if ev.kind == 'text' then
+          if not nested and ev.text ~= '' then out.answers[#out.answers + 1] = #out.lines + 1 end
           plain(cut_lines(split(ev.text), M.MAX_TEXT_LINE))
           plain({ '' })
         elseif ev.kind == 'tool_call' then
@@ -202,10 +204,11 @@ local function emit_turn(events, out)
 end
 
 ---Render events turn by turn; the result is the concatenation of each turn rendered alone.
+---`answers`: the first line of every main-thread `text` event (a subagent's text is not one).
 ---@param events table[]
----@return { lines: string[], folds: { first: integer, last: integer }[] }
+---@return { lines: string[], folds: { first: integer, last: integer }[], answers: integer[] }
 function M.render(events)
-  local out = { lines = {}, folds = {} }
+  local out = { lines = {}, folds = {}, answers = {} }
   local first = 1
   for i = 2, #events + 1 do
     if i > #events or M.starts_turn(events[i]) then

@@ -13,7 +13,10 @@ local session = require('agent-ide.session')
 
 local M = {}
 
-local ELSEWHERE = 'Agent-IDE: session is running in another Claude; use gp in the drawer to jump to it'
+local function elsewhere_msg()
+  return 'Agent-IDE: session is running in another Claude; use '
+    .. require('agent-ide.util.keys').first('drawer', 'tmux') .. ' in the drawer to jump to it'
+end
 
 ---@class agent_ide.Chat
 ---@field s table Session
@@ -76,7 +79,10 @@ end
 local function winbar_text(s, project, width)
   local st = state_parts(s)
   local model_label, mode_label = require('agent-ide.ui.mode').labels(s)
-  local model = (s.model or s.model_requested) and one_line(model_label) or nil
+  -- the model it runs with, else the one it would start with here; none for a session another
+  -- Claude runs (elsewhere, native: nothing starts here)
+  local away = not s.model and (s:_elsewhere() or require('agent-ide.ui.handoff').away(s))
+  local model = not away and one_line(model_label) or nil
   local mode = (s.mode or s.mode_requested) and ('[' .. mode_label:gsub('^mode:', '') .. ']') or nil
   local hot = mode and not (quiet_mode(s.mode) and quiet_mode(s.mode_requested))
   local queued = #s.queue > 0 and ('queued:' .. #s.queue) or nil
@@ -293,7 +299,7 @@ local function send(c)
       -- the prompt moved on while the question ran: what it holds now was never meant to go
       if not unchanged then
         if not valid_buf(c.pbuf) then return end
-        if c.s:_elsewhere() then return notify(ELSEWHERE, vim.log.levels.WARN) end
+        if c.s:_elsewhere() then return notify(elsewhere_msg(), vim.log.levels.WARN) end
         notify('Agent-IDE: not sent: the prompt changed while checking; send again', vim.log.levels.WARN)
         return
       end
@@ -309,7 +315,7 @@ local function send(c)
   if ok then
     prompt.clear(c.pbuf)
   elseif reason == 'running elsewhere' then
-    notify(ELSEWHERE, vim.log.levels.WARN)
+    notify(elsewhere_msg(), vim.log.levels.WARN)
   elseif reason ~= 'empty' then
     notify('Agent-IDE: ' .. tostring(reason), vim.log.levels.WARN)
   end
@@ -469,6 +475,8 @@ function M.open(s, project)
   windows.tcd(twin, c.project)
   load(c, fresh)
   update_visible()
+  local queue = package.loaded['agent-ide.ui.queue']
+  if queue then queue.follow(s) end -- an open queue panel shows this session now
 end
 
 ---Focus the prompt of the chat of `s` (its window reopened when hidden), optionally in insert

@@ -628,13 +628,14 @@ function M.create(s)
     buffer = buf, callback = function(ev) vim.bo[ev.buf].modified = false end })
   M.setup_buf(buf, s)
   require('agent-ide.prompts.save').attach(buf) -- :w, ZZ, :x and <leader>W save the prompt
+  require('agent-ide.ui.drafts').attach(buf, s) -- the draft kept on disk, brought back now
   return buf
 end
 
 ---Window options for a window showing a prompt buffer (it may be split off a transcript window).
 ---@param win integer
 function M.setup_win(win)
-  for name, value in pairs({ winfixheight = true, winbar = '', foldenable = false, foldmethod = 'manual' }) do
+  for name, value in pairs({ winfixheight = true, winbar = '', foldenable = false, foldmethod = 'manual', wrap = true, linebreak = true }) do
     api.nvim_set_option_value(name, value, { scope = 'local', win = win })
   end
 end
@@ -644,10 +645,12 @@ end
 ---@return boolean
 function M.browsing(buf) return bufs[buf] ~= nil and bufs[buf].idx ~= nil end
 
----Empty the prompt buffer after a send; the text no longer stands for a loaded prompt file.
+---Empty the prompt buffer after a send; the text no longer stands for a loaded prompt file and
+---its draft on disk goes.
 ---@param buf integer
 function M.clear(buf)
   reset_history(buf)
+  require('agent-ide.ui.drafts').clear(buf)
   vim.b[buf].agent_ide_origin = nil
   api.nvim_buf_set_lines(buf, 0, -1, false, {})
   vim.bo[buf].modified = false

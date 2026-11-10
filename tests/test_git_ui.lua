@@ -184,6 +184,21 @@ T['drawer: branch suffix, Changes and Commits sections with counts, files with s
     eq({ row, has_parts(l, row[1], row[2]) ~= nil }, { row, true })
   end
   press_on('Commits on branch (2)')
+  -- uncommitted: a.lua (line 5) and the untracked u.txt against HEAD
+  wait_for(function() return has_line(drawer_lines(), 'uncommitted (2)') ~= nil end, 'uncommitted count')
+  press_on('uncommitted (2)')
+  wait_for(function() return has_parts(drawer_lines(), '          ? u.txt ', ' +1') ~= nil end, 'uncommitted files')
+  eq(has_parts(drawer_lines(), '          M a.lua ', ' +1 −1') ~= nil, true)
+  press_on('          M a.lua')
+  wait_for(function() return view() ~= vim.NIL end, 'diff view')
+  local v = view()
+  eq({ v.mode, v.path, v.n }, { 'head', 'a.lua', 2 })
+  eq(v.left.winbar:find('HEAD (uncommitted)', 1, true) ~= nil, true)
+  eq(v.right.name:sub(-#'/a.lua'), '/a.lua') -- the real, editable file
+  eq({ v.left.diff, v.right.diff, v.right.modifiable }, { true, true, true })
+  child.type_keys('\\gq')
+  wait_for(function() return view() == vim.NIL end, 'diff closed')
+  press_on('uncommitted (2)') -- fold it again
   press_on(' two ')
   wait_for(function() return has_parts(drawer_lines(), '          M a.lua ', ' +1 −1') ~= nil end, 'commit files')
   -- za on a file row folds its section; the cursor lands on the section
@@ -607,7 +622,7 @@ T['glg and ? in the diff view'] = function()
   eq(child.lua_get('_G.snacks_cwd'), repo)
   child.type_keys('g?')
   wait_for(function() return child.lua_get('vim.api.nvim_win_get_config(0).relative') ~= '' end, 'help')
-  local text = table.concat(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), '\n')
+  local text = table.concat(child.lua_get("vim.api.nvim_buf_get_lines(require('agent-ide.ui.help')._state().lbuf, 0, -1, false)"), '\n')
   for _, k in ipairs({ ']f', '[f', 'gb', 'gB', 'q', ']c / [c', 'glg' }) do eq(text:find(k, 1, true) ~= nil, true) end
 end
 
@@ -663,7 +678,7 @@ T['q returns to a parked or handed-off session\'s chat; the hand-off key outside
   wait_for(function() return child.lua_get('require("agent-ide.ui.chat")._windows().prompt ~= nil') end, 'chat')
   -- outside tmux <leader>at parks the session and shows the command
   child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.chat")._windows().transcript); _G.notes = {}')
-  child.type_keys('\\at')
+  child.type_keys('\\aT')
   wait_for(function() return #child.lua_get('_G.notes') > 0 end, 'hand-off notice')
   press_on('Changes vs main (5)')
   press_on('M a.lua')
@@ -756,9 +771,9 @@ T['q, ? and R are mapped on the scratch side only; the real file keeps them, the
   -- g? opens the help on the real side; q on the scratch side closes the view
   child.type_keys('g?')
   wait_for(function() return child.lua_get('vim.api.nvim_win_get_config(0).relative') ~= '' end, 'help')
-  local text = table.concat(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), '\n')
+  local text = table.concat(child.lua_get("vim.api.nvim_buf_get_lines(require('agent-ide.ui.help')._state().lbuf, 0, -1, false)"), '\n')
   for _, k in ipairs({ 'q / <leader>gq', '? / g?', 'R / <leader>gR' }) do eq(text:find(k, 1, true) ~= nil, true) end
-  child.type_keys('q')
+  child.type_keys('<Esc>', 'q')
   child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.diff").state().left)')
   child.type_keys('q')
   wait_for(function() return view() == vim.NIL end, 'closed by q on the scratch side')

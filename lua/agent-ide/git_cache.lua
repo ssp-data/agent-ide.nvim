@@ -104,6 +104,16 @@ local loaders = {
       with_base(root, e, function(b) git.commits(root, done, b) end)
     end)
   end,
+  -- what is not committed yet: the working tree and the index against HEAD, untracked files
+  -- included (the same query as the branch changes, with HEAD for the base)
+  uncommitted = function(root)
+    load(root, 'uncommitted', function(done, e)
+      local gen = e.gen
+      git.changes(root, function(files) done(files) end, { rev = 'HEAD', label = 'HEAD' }, function()
+        if entries[root] == e and e.gen == gen then emit(root, 'uncommitted') end
+      end)
+    end)
+  end,
 }
 
 ---@param root string
@@ -135,6 +145,13 @@ function M.commits(root)
   return e.data.commits, e.data.base
 end
 
+---@return table[]|nil files changed in the working tree and the index against HEAD (untracked too)
+function M.uncommitted(root)
+  local e = entry(root)
+  if not e.loaded.uncommitted then loaders.uncommitted(root) end
+  return e.data.uncommitted
+end
+
 ---@param root string
 ---@param hash string
 ---@return table[]|nil files of that commit
@@ -149,7 +166,7 @@ end
 
 local getters -- kind -> getter, filled below
 
----Call `cb(value)` once `kind` ('changes', 'commits', 'base', 'files:<hash>') of `root` is
+---Call `cb(value)` once `kind` ('changes', 'commits', 'uncommitted', 'base', 'files:<hash>') of `root` is
 ---loaded (at once when it already is), starting the load when needed.
 ---@param root string
 ---@param kind string
@@ -238,7 +255,7 @@ function M.off_update(fn)
   end
 end
 
-getters = { changes = M.changes, commits = M.commits, base = M.base, head = M.head }
+getters = { changes = M.changes, commits = M.commits, base = M.base, head = M.head, uncommitted = M.uncommitted }
 
 ---Test only: store `value` as loaded data of `kind` (bumps the generation: running loads are dropped).
 function M._set(root, kind, value)

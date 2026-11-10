@@ -88,13 +88,24 @@ T['a session running elsewhere: tmux pane or native, in the drawer\'s dim word']
   eq(plain(bar({ state = 'idle' })), 'I native · proj · Fix the parser')
 end
 
-T['no model known: no model segment; the queue is counted'] = function()
+T['no model reported yet: the start model (default, last used, claude.model, asked for); the queue is counted'] = function()
   local b = bar({ state = 'busy', queue = { 'a', 'b' } })
-  eq(b:find('AgentIdeModel', 1, true), nil)
-  eq(b:find('AgentIdeMode', 1, true), nil)
-  eq(plain(b), 'B busy · queued:2 · proj · Fix the parser')
-  -- a model asked for before Claude reported one
-  eq(plain(bar({ state = 'idle', model_requested = 'sonnet' })), 'I idle · proj · Fix the parser  model ?→sonnet')
+  eq(b:find('AgentIdeModel', 1, true) ~= nil, true)
+  eq(b:find('AgentIdeMode#', 1, true), nil)
+  eq(plain(b), 'B busy · queued:2 · proj · Fix the parser  default')
+  -- a model asked for before Claude reported one: that one, no arrow
+  eq(plain(bar({ state = 'idle', model_requested = 'sonnet' })), 'I idle · proj · Fix the parser  sonnet')
+  -- the model last used here (prefs.json), unless claude.model is set
+  child.lua('require("agent-ide.prefs").set("model", "haiku")')
+  eq(plain(bar({ state = 'idle' })), 'I idle · proj · Fix the parser  haiku')
+  child.lua('require("agent-ide.config").get().claude.model = "opus"')
+  eq(plain(bar({ state = 'idle' })), 'I idle · proj · Fix the parser  opus')
+  eq(plain(bar({ state = 'idle', model_requested = 'sonnet' })), 'I idle · proj · Fix the parser  sonnet')
+  child.lua('require("agent-ide.config").get().claude.model = nil; require("agent-ide.prefs").set("model", nil)')
+  -- Claude's list names the default
+  child.lua('require("agent-ide.claude.models").record({ { value = "default", name = "Default (recommended)", resolved = "claude-x-1" }, { value = "x", name = "X 1", resolved = "claude-x-1" } })')
+  eq(plain(bar({ state = 'idle' })), 'I idle · proj · Fix the parser  x 1')
+  child.lua('require("agent-ide.claude.models")._reset()')
 end
 
 T['mode badge: the default mode quiet, any other one hot'] = function()

@@ -114,7 +114,7 @@ end
 local function ins(log)
   local out = {}
   for _, l in ipairs(fake.log(log)) do
-    if l['in'] then out[#out + 1] = vim.json.decode(l['in']) end
+    if l['in'] and not fake.is_init(l['in']) then out[#out + 1] = vim.json.decode(l['in']) end
   end
   return out
 end
@@ -164,9 +164,10 @@ T['new session happy path: idle -> busy -> idle, events prompt + text'] = functi
   eq(a[#a - 1], '--session-id')
   eq(a[#a], s.id)
   eq(ins(log)[1], { type = 'user', message = { role = 'user', content = 'hello' } })
-  -- raw lines both ways
-  eq(s.raw[1].dir, 'out')
-  eq(vim.json.decode(s.raw[1].line), ins(log)[1])
+  -- raw lines both ways (the `initialize` request first)
+  eq({ s.raw[1].dir, s.raw[2].dir }, { 'out', 'out' })
+  eq(fake.is_init(s.raw[1].line), true)
+  eq(vim.json.decode(s.raw[2].line), ins(log)[1])
   eq(s.raw[#s.raw].dir, 'in')
 end
 
@@ -521,7 +522,7 @@ T['park while busy asks; declined keeps it running; accepted parks'] = function(
   assert(wait(function() return got ~= nil end))
   eq({ got, asked, s.state, s.owned }, { true, 2, 'parked', false })
   eq(s.events[#s.events], { kind = 'text', text = 'working' })
-  eq(children(), false)
+  assert(wait(function() return not children() end, 4000)) -- a keeper lingers 2 s after Claude ends
 end
 
 T['interrupt drops the queue and the error result starts no turn'] = function()

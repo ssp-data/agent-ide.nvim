@@ -175,7 +175,7 @@ end
 T['in tmux: parks, opens a pane with claude --resume, refuses sends, reloads when it exits'] = function()
   start()
   open_fixture()
-  child.type_keys('\\at')
+  child.type_keys('\\aT')
   wait_for(function() return #tmux_calls() == 2 end, 'tmux calls')
   local calls = tmux_calls()
   local chan = calls[1][2]
@@ -209,7 +209,7 @@ end
 T['native Claude ends while the user reads another session: a notice, no focus or chat change'] = function()
   start()
   open_fixture()
-  child.type_keys('\\at')
+  child.type_keys('\\aT')
   wait_for(function() return #tmux_calls() == 2 end, 'tmux calls')
   child.lua('vim.cmd("tabnew"); _G.work = { tab = vim.api.nvim_get_current_tabpage(), win = vim.api.nvim_get_current_win() }')
   vim.fn.writefile({}, tmux_dir .. '/release')
@@ -223,7 +223,7 @@ T['a running session is parked (its process stopped) before the pane opens'] = f
   child.type_keys('i', 'Hi', '<Esc>', '\\<CR>')
   wait_for(function() return has_line(transcript(), 'Hello.') ~= nil and current().state == 'idle' end, 'turn end')
   eq(current().owned, true)
-  child.type_keys('\\at')
+  child.type_keys('\\aT')
   wait_for(function() return #tmux_calls() == 2 end, 'tmux calls')
   eq(current().owned, false)
   eq(current().state, 'parked')
@@ -235,7 +235,7 @@ T['a working session asks first; declining hands nothing over'] = function()
   open_fixture()
   child.type_keys('i', 'Hi', '<Esc>', '\\<CR>')
   wait_for(function() return current().state == 'busy' end, 'busy')
-  child.type_keys('\\at')
+  child.type_keys('\\aT')
   wait_for(function() return child.lua_get('_G.confirmed') == 1 end, 'confirm')
   vim.wait(200)
   eq(tmux_calls(), {})
@@ -246,7 +246,7 @@ end
 T['outside tmux: parks and tells the command to run by hand'] = function()
   start(nil, { in_tmux = false })
   open_fixture()
-  child.type_keys('\\at')
+  child.type_keys('\\aT')
   local want = "claude --resume " .. FIXTURE_ID
   wait_for(function() return has_line(notes(), want) ~= nil end, 'notice')
   eq(notes()[has_line(notes(), want)], "Agent-IDE: parked; not in tmux, so continue it by hand: cd '" .. repo
@@ -264,7 +264,7 @@ end
 T['a pane that cannot open: warning, the waiter is stopped, the session is back'] = function()
   start(nil, { split_code = 1 })
   open_fixture()
-  child.type_keys('\\at')
+  child.type_keys('\\aT')
   wait_for(function() return has_line(notes(), 'cannot open a tmux pane') ~= nil end, 'warning')
   wait_for(function() return winbar():find(AWAY, 1, true) == nil end, 'back')
   wait_for(waiter_dead, 'waiter stopped')
@@ -273,7 +273,7 @@ end
 T['the pane dies without a signal: found by polling, the session is back'] = function()
   start(nil, { poll_ms = 100 })
   open_fixture()
-  child.type_keys('\\at')
+  child.type_keys('\\aT')
   wait_for(function() return winbar():find(AWAY, 1, true) ~= nil end, 'away')
   vim.wait(300)
   eq(winbar():find(AWAY, 1, true) ~= nil, true) -- pane %9 still listed
@@ -289,18 +289,18 @@ T['<leader>at while away offers to take the session back; refused while native C
   start(nil, { live_cmd = { 'cat', live_file } })
   child.lua('_G.asked = 0; vim.fn.confirm = function() _G.asked = _G.asked + 1; return 1 end')
   open_fixture()
-  child.type_keys('\\at')
+  child.type_keys('\\aT')
   wait_for(function() return winbar():find(AWAY, 1, true) ~= nil end, 'away')
-  child.type_keys('\\at')
+  child.type_keys('\\aT')
   wait_for(function() return has_line(notes(), 'native Claude still runs this session; quit it there first') ~= nil end, 'refusal')
   eq(winbar():find(AWAY, 1, true) ~= nil, true)
   vim.fn.writefile({ '[]' }, live_file)
-  child.type_keys('\\at')
+  child.type_keys('\\aT')
   wait_for(function() return winbar():find(AWAY, 1, true) == nil end, 'taken back')
   eq(child.lua_get('_G.asked'), 2)
   wait_for(waiter_dead, 'waiter stopped')
   -- the next hand-off waits on a new channel
-  child.type_keys('\\at')
+  child.type_keys('\\aT')
   wait_for(function() return #vim.tbl_filter(function(c) return c[1] == 'wait-for' end, tmux_calls()) == 2 end, 'second waiter')
   local waits = vim.tbl_filter(function(c) return c[1] == 'wait-for' end, tmux_calls())
   eq(waits[1][2] ~= waits[2][2], true)
@@ -309,7 +309,7 @@ end
 T['quitting Neovim stops the waiter'] = function()
   start()
   open_fixture()
-  child.type_keys('\\at')
+  child.type_keys('\\aT')
   wait_for(function() return vim.fn.filereadable(tmux_dir .. '/waiter.pid') == 1 end, 'waiter')
   child.stop()
   wait_for(waiter_dead, 'waiter stopped', 3000)
@@ -331,10 +331,15 @@ T['help lists the hand-off key'] = function()
   local rows = child.lua_get('_G.help_rows')
   local found
   for _, r in ipairs(rows) do
-    if r.key == '<leader>at' then found = r.desc end
+    if r.key == 'gT / <leader>aT' then found = r.desc end
   end
   eq(found, 'continue in native Claude in a tmux pane (parks here; reloads when it exits)')
-  eq(child.lua_get('vim.fn.maparg("<leader>at", "n") ~= ""'), true)
+  eq(child.lua_get('vim.fn.maparg("<leader>aT", "n") ~= ""'), true)
+  -- the typed key only in the transcript: in the prompt gT stays Vim's
+  local function in_win(which, lhs)
+    return child.lua_get(([[vim.api.nvim_win_call(require('agent-ide.ui.chat')._windows().%s, function() return vim.fn.maparg('%s', 'n') ~= '' end)]]):format(which, lhs))
+  end
+  eq({ in_win('transcript', 'gT'), in_win('prompt', 'gT'), in_win('prompt', '<leader>aT') }, { true, false, true })
 end
 
 return T

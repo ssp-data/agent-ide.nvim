@@ -168,7 +168,7 @@ end
 local function fake_ins()
   local out = {}
   for _, l in ipairs(fake.log(log)) do
-    if l['in'] then out[#out + 1] = vim.json.decode(l['in']) end
+    if l['in'] and not fake.is_init(l['in']) then out[#out + 1] = vim.json.decode(l['in']) end
   end
   return out
 end
@@ -202,7 +202,7 @@ T['new session row opens a chat: transcript above, prompt below (8 lines), left 
   eq(layout, { above = true, same_col = true, left = true, height = 8, fix = true, current = true,
     tname = 'agents://repo/new session', pname = 'agents://repo/new session · prompt',
     tbt = 'nofile', tft = 'markdown', tmod = false, pbt = 'acwrite', pft = 'markdown', pmod = true })
-  eq(winbar(), 'I idle · repo · new session')
+  eq(winbar(), 'I idle · repo · new session  default') -- the model it would start with
 end
 
 T['<C-CR> in insert mode sends; the answer streams into the transcript; prompt is emptied'] = function()
@@ -455,7 +455,7 @@ T['drawer hidden: a session opened in a terminal Claude meanwhile is refused, th
   child.type_keys(' more')
   wait_for(function()
     local notes = child.lua_get('_G.notes')
-    return notes[#notes] == 'Agent-IDE: session is running in another Claude; use gp in the drawer to jump to it'
+    return notes[#notes] == 'Agent-IDE: session is running in another Claude; use gT in the drawer to jump to it'
   end, 'refusal notice')
   child.type_keys('<Esc>')
   eq(prompt_lines(), { 'Never sent more' })
@@ -645,7 +645,7 @@ T['opening the fixture shows its history; a send resumes it'] = function()
   local bash = has_line(lines, '▸ Bash:')
   eq(bash ~= nil, true)
   eq(child.lua_get('vim.api.nvim_win_call(require("agent-ide.ui.chat")._windows().transcript, function() return vim.fn.foldclosed(' .. bash .. ') end)'), bash)
-  eq(winbar(), '. parked · repo · Alpha basics')
+  eq(winbar(), '. parked · repo · Alpha ba…  default')
   type_prompt('Next question')
   child.type_keys('<C-CR>')
   wait_for(function() return has_line(transcript(), 'Next answer') ~= nil end, 'answer')
@@ -694,7 +694,7 @@ T['a session running elsewhere refuses to send and keeps the text'] = function()
   type_prompt('Hijack')
   child.type_keys('<C-CR>')
   local notes = child.lua_get('_G.notes')
-  eq(notes[#notes], 'Agent-IDE: session is running in another Claude; use gp in the drawer to jump to it')
+  eq(notes[#notes], 'Agent-IDE: session is running in another Claude; use gT in the drawer to jump to it')
   eq(prompt_lines(), { 'Hijack' })
   vim.wait(100)
   eq(fake.log(log), {})
@@ -705,7 +705,7 @@ T['g? opens the chat help'] = function()
   open_new()
   child.type_keys('g?')
   wait_for(function() return child.lua_get('vim.api.nvim_win_get_config(0).relative') ~= '' end, 'help float')
-  local text = table.concat(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), '\n')
+  local text = table.concat(child.lua_get("vim.api.nvim_buf_get_lines(require('agent-ide.ui.help')._state().lbuf, 0, -1, false)"), '\n')
   for _, key in ipairs({ '<C-CR>', '<leader><CR>', '<C-c>', '<leader>ap', 'g?', 'za', ':w', 'i / a / o' }) do
     eq(text:find(key, 1, true) ~= nil, true)
   end

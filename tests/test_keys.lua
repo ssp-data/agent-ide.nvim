@@ -58,7 +58,10 @@ local function exercise(keys)
       require('agent-ide').setup({ projects_dir = dir, helper = { enabled = false },
         live = { interval_ms = 600000, cmd = { 'echo', '[]' } }, icons_style = 'plain', keys = keys })
     end)
-    try('toggle', function() require('agent-ide').toggle() end)
+    try('toggle', function()
+      require('agent-ide').toggle()
+      _G.dbuf = require('agent-ide.ui.drawer').state().buf
+    end)
     try('chat', function()
       _G.s = require('agent-ide.session').open({ cwd = repo })
       require('agent-ide.ui.chat').open(_G.s, { key = repo, name = 'repo', root = repo, sessions = {} })
@@ -110,6 +113,7 @@ local function places(path)
   if group == 'search_picker' then return { { '_G.qbuf', 'n' } } end
   if group == 'diff' then return { { '_G.lbuf', 'n' }, { '_G.rbuf', 'n' } } end
   if group == 'graph' then return { { '_G.gbuf', 'n' } } end
+  if group == 'drawer' then return { { '_G.dbuf', 'n' } } end
   if group == 'prompts' then return {} end -- drawer row keys: checked through prompt_sections.keys()
   local t, p = { '_G.tbuf', 'n' }, { '_G.pbuf', 'n' }
   local only = {
@@ -128,8 +132,8 @@ T['every default key option as a two-key list: no error, both keys mapped and wo
     set_path(keys, l.path, l.keys)
   end
   eq(exercise(keys), {})
-  local bufs = child.lua_get('{ _G.tbuf, _G.pbuf, _G.rawbuf, _G.lbuf, _G.rbuf, _G.qbuf }')
-  eq(#bufs, 6)
+  local bufs = child.lua_get('{ _G.tbuf, _G.pbuf, _G.rawbuf, _G.lbuf, _G.rbuf, _G.qbuf, _G.dbuf }')
+  eq(#bufs, 7)
   local row_keys = {}
   for _, k in ipairs(child.lua_get('require("agent-ide.ui.prompt_sections").keys()')) do row_keys[k.lhs] = true end
   for _, l in ipairs(leaves) do
@@ -140,8 +144,8 @@ T['every default key option as a two-key list: no error, both keys mapped and wo
       end
       for _, pl in ipairs(places(l.path)) do
         local buf = pl[1] and child.lua_get(pl[1]) or nil
-        -- one-character diff keys stay off the user's own file
-        local expect = not (pl[1] == '_G.rbuf' and #lhs == 1)
+        -- one-character diff keys stay off the user's own file; a typed native key off the prompt
+        local expect = not (pl[1] == '_G.rbuf' and #lhs == 1) and not (pl[1] == '_G.pbuf' and name == 'chat.native' and lhs:sub(1, 1) ~= '<')
         eq({ name, lhs, pl[1] or 'global', mapped(buf, pl[2], lhs) }, { name, lhs, pl[1] or 'global', expect })
       end
     end
@@ -163,7 +167,7 @@ T['every default key option as a two-key list: no error, both keys mapped and wo
     child.lua('vim.cmd("stopinsert"); vim.api.nvim_set_current_win(require("agent-ide.ui.chat")._windows().prompt)')
     child.type_keys('<Esc>', (lhs:gsub('<leader>', '\\')))
     eq({ lhs, child.lua_get('vim.api.nvim_win_get_config(0).relative ~= ""') }, { lhs, true })
-    child.type_keys('q')
+    child.type_keys('<Esc>', 'q') -- the help opens in its query line (insert mode)
   end
   -- and the global toggle by its second key closes and reopens the drawer
   local toggle

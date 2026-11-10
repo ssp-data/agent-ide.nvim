@@ -12,7 +12,7 @@ local procs, orig_notify, notes
 
 local T = MiniTest.new_set({ hooks = {
   pre_case = function()
-    config.setup({})
+    config.setup({ keeper = { enabled = false } }) -- the direct wrapper; keepers have their own tests
     procs, notes = {}, {}
     orig_notify = vim.notify
     vim.notify = function(msg, level) notes[#notes + 1] = { msg = msg, level = level } end
@@ -35,7 +35,7 @@ local function wait(pred, ms) return vim.wait(ms or 5000, pred, 10) end
 --- Start the fake with a scenario; returns proc and a record of callbacks.
 local function run(scenario, extra)
   local cmd, log = fake.cmd(scenario)
-  config.setup({ claude = vim.tbl_extend('force', { cmd = cmd }, (extra and extra.claude) or {}) })
+  config.setup({ keeper = { enabled = false }, claude = vim.tbl_extend('force', { cmd = cmd }, (extra and extra.claude) or {}) })
   local rec = { objs = {}, raws = {}, garbage = {}, exits = {}, log = log }
   local opts = vim.tbl_extend('force', {
     session_id = 'sid-1',
@@ -60,8 +60,8 @@ T['args: new session, resume, model, custom cmd'] = function()
   eq(process.args({ session_id = 'abc', model = 'haiku' }),
     vim.list_extend(vim.deepcopy(expected), { '--model', 'haiku', '--session-id', 'abc' }))
   eq(process.args({ session_id = 'abc', model = 'haiku', resume = true }),
-    vim.list_extend(vim.deepcopy(expected), { '--resume', 'abc' }))
-  config.setup({ claude = { cmd = { 'nvim', '-l', 'x.lua' } } })
+    vim.list_extend(vim.deepcopy(expected), { '--model', 'haiku', '--resume', 'abc' }))
+  config.setup({ keeper = { enabled = false }, claude = { cmd = { 'nvim', '-l', 'x.lua' } } })
   local a = process.args({ session_id = 'abc' })
   eq(vim.list_slice(a, 1, 4), { 'nvim', '-l', 'x.lua', '-p' })
   eq(a[#a], 'abc')

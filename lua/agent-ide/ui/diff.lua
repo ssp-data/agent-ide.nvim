@@ -18,7 +18,7 @@ local repair_group = api.nvim_create_augroup('agent-ide.diff.repair', { clear = 
 ---@field right integer window
 ---@field root string
 ---@field project table
----@field mode 'branch'|'commit'
+---@field mode 'branch'|'commit'|'head' head: the working file against HEAD (uncommitted)
 ---@field list table[] files
 ---@field index integer|nil position of `file` in `list`
 ---@field file table
@@ -138,7 +138,8 @@ local function apply(left_raw, right_raw, keep_cursor)
   local cursors = keep_cursor and { api.nvim_win_get_cursor(D.left), api.nvim_win_get_cursor(D.right) }
   diffoff(D.left)
   diffoff(D.right)
-  local l_rev = D.mode == 'commit' and (D.commit.short .. '^') or (D.base and D.base.rev and D.base.rev:sub(1, 7) or 'empty')
+  local l_rev = D.mode == 'commit' and (D.commit.short .. '^') or D.mode == 'head' and 'HEAD'
+    or (D.base and D.base.rev and D.base.rev:sub(1, 7) or 'empty')
   local proj = { name = D.project and D.project.name or vim.fs.basename(D.root), root = D.root }
   local lbuf = scratch.get(l_rev, f.old_path or f.path, note and { note } or left_lines or {}, proj)
   local rbuf, real
@@ -182,7 +183,7 @@ end
 local function show(keep_cursor)
   D.seq = D.seq + 1
   local seq, d, f = D.seq, D, D.file
-  local left_rev = d.mode == 'commit' and (d.commit.hash .. '^') or (d.base and d.base.rev)
+  local left_rev = d.mode == 'commit' and (d.commit.hash .. '^') or d.mode == 'head' and 'HEAD' or (d.base and d.base.rev)
   local pending, left, right = 2, nil, nil
   local function done()
     pending = pending - 1
@@ -259,7 +260,7 @@ api.nvim_create_autocmd('BufWinEnter', { group = repair_group, callback = functi
 end })
 
 ---Open the diff view on `opts.list[opts.index]`.
----@param opts { project: table, root: string, mode: 'branch'|'commit', list: table[], index: integer, commit?: table }
+---@param opts { project: table, root: string, mode: 'branch'|'commit'|'head', list: table[], index: integer, commit?: table }
 function M.open(opts)
   local file = opts.list[opts.index]
   if not file then return end
@@ -331,13 +332,13 @@ function M._restore(d, win)
   end
 end
 
----Reload the shown file (and, in the branch view, the list and the base: the repository's git
----data is invalidated).
+---Reload the shown file (and, in the branch and uncommitted views, the list and the base: the
+---repository's git data is invalidated).
 function M.refresh()
   if not D then return end
-  if D.mode == 'branch' then
+  if D.mode == 'branch' or D.mode == 'head' then
     cache.invalidate(D.root)
-    cache.when(D.root, 'changes', function() end) -- the list reload shows the file again
+    cache.when(D.root, D.mode == 'head' and 'uncommitted' or 'changes', function() end) -- the list reload shows the file again
   else
     show(true)
   end
@@ -350,11 +351,11 @@ function M.close()
 end
 
 function on_update(root, kind)
-  if not D or root ~= D.root or D.mode ~= 'branch' then return end
-  if kind == 'base' then
+  if not D or root ~= D.root or (D.mode ~= 'branch' and D.mode ~= 'head') then return end
+  if kind == 'base' and D.mode == 'branch' then
     D.base = cache.base(root)
-  elseif kind == 'changes' then
-    local list = cache.changes(root)
+  elseif (kind == 'changes' and D.mode == 'branch') or (kind == 'uncommitted' and D.mode == 'head') then
+    local list = kind == 'changes' and cache.changes(root) or cache.uncommitted(root)
     if not list then return end
     D.list, D.index = list, nil
     for i, f in ipairs(list) do

@@ -107,55 +107,76 @@ T['drawer window has list off even when listchars is set'] = function()
   eq(child.lua_get('vim.wo[require("agent-ide.ui.drawer").state().win].list'), false)
 end
 
-T['? opens the shortcut help, q closes it, / is not mapped; in the help ? searches'] = function()
+T['? opens the help palette: a query line over the keys; <Esc> <Esc> and q close it'] = function()
   start()
   child.lua('require("agent-ide").toggle()')
   local drawer_win = child.lua_get('require("agent-ide.ui.drawer").state().win')
-  eq(child.lua_get('vim.fn.maparg("/", "n")'), '')
   child.type_keys('?')
   wait_for(function() return child.lua_get('vim.api.nvim_win_get_config(0).relative') ~= '' end, 'help float')
-  local text = table.concat(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), '\n')
-  for _, key in ipairs({ '<CR>', 'za', 'R', 'gp', 'q', '?' }) do
+  local st = child.lua_get('require("agent-ide.ui.help")._state()')
+  eq(child.lua_get('vim.api.nvim_get_current_win()'), st.qwin)
+  eq(child.lua_get('vim.api.nvim_get_mode().mode'), 'i')
+  local text = table.concat(child.lua_get('vim.api.nvim_buf_get_lines(..., 0, -1, false)', { st.lbuf }), '\n')
+  for _, key in ipairs({ '<CR>', 'za', 'R', 'gT', 'q', '?' }) do
     eq(text:find(key, 1, true) ~= nil, true)
   end
-  eq(child.lua_get('vim.bo.modifiable'), false)
-  eq(child.lua_get('{ vim.wo.cursorline, vim.wo.wrap }'), { true, false })
-  eq(child.lua_get('vim.fn.maparg("?", "n")'), '') -- backward search inside the help
+  eq(child.lua_get('vim.bo[...].modifiable', { st.lbuf }), false)
+  eq(child.lua_get('{ vim.wo[...].cursorline, vim.wo[...].wrap }', { st.lwin, st.lwin }), { true, false })
+  eq(child.lua_get('vim.api.nvim_win_get_config(...).focusable', { st.lwin }), false)
+  child.type_keys('<Esc>')
+  eq(child.lua_get('vim.api.nvim_get_mode().mode'), 'n')
+  eq(child.lua_get('vim.api.nvim_get_current_win()'), st.qwin)
   child.type_keys('q')
   wait_for(function() return child.lua_get('vim.api.nvim_get_current_win()') == drawer_win end, 'help closed by q')
+  eq(child.lua_get('require("agent-ide.ui.help")._state()'), vim.NIL)
   child.type_keys('?')
   wait_for(function() return child.lua_get('vim.api.nvim_win_get_config(0).relative') ~= '' end, 'help float 3')
-  child.type_keys('<Esc>')
+  child.type_keys('<Esc>', '<Esc>')
   wait_for(function() return child.lua_get('vim.api.nvim_get_current_win()') == drawer_win end, 'help closed by Esc')
-  eq(child.lua_get('#vim.tbl_filter(function(w) local c = vim.api.nvim_win_get_config(w); return c.relative ~= "" and c.focusable end, vim.api.nvim_list_wins())'), 0)
+  eq(child.lua_get('#vim.tbl_filter(function(b) return vim.api.nvim_buf_get_name(b):find("agents://help", 1, true) ~= nil end, vim.api.nvim_list_bufs())'), 0)
 end
 
-T['/ searches inside the help: the cursor lands on the word, n / N step, the float stays'] = function()
+T['typing filters the help fuzzily; <C-n> moves; <CR> presses the key in the drawer'] = function()
   start()
-  child.lua([[require('agent-ide.ui.help').open('Test help', {
-    { key = 'a', desc = 'alpha first' }, { key = 'b', desc = 'beta' }, { key = 'c', desc = 'gamma alpha' },
-    { key = 'd', desc = 'delta alpha' } })]])
-  local float = child.lua_get('vim.api.nvim_get_current_win()')
-  child.type_keys('/', 'gamma', '<CR>')
-  eq(child.lua_get('vim.api.nvim_get_current_win()'), float)
-  eq(child.lua_get('vim.api.nvim_win_get_cursor(0)'), { 3, 3 })
-  child.type_keys('/', 'alpha', '<CR>')
-  eq(child.lua_get('vim.api.nvim_win_get_cursor(0)'), { 3, 9 })
-  child.type_keys('n')
-  eq(child.lua_get('vim.api.nvim_win_get_cursor(0)'), { 4, 9 })
-  child.type_keys('N')
-  eq(child.lua_get('vim.api.nvim_win_get_cursor(0)'), { 3, 9 })
-  child.type_keys('?', 'beta', '<CR>')
-  eq(child.lua_get('vim.api.nvim_win_get_cursor(0)'), { 2, 3 })
-  eq(child.lua_get('vim.api.nvim_win_is_valid(...)', { float }), true)
-  child.type_keys('<Esc>')
-  eq(child.lua_get('vim.api.nvim_win_is_valid(...)', { float }), false)
+  child.lua('require("agent-ide").toggle()')
+  local drawer_win = child.lua_get('require("agent-ide.ui.drawer").state().win')
+  child.type_keys('?')
+  wait_for(function() return child.lua_get('vim.api.nvim_win_get_config(0).relative') ~= '' end, 'help float')
+  local st = child.lua_get('require("agent-ide.ui.help")._state()')
+  local function list() return child.lua_get('vim.api.nvim_buf_get_lines(..., 0, -1, false)', { st.lbuf }) end
+  -- with an empty query the groups show; the first row is selected
+  eq(vim.tbl_contains(list(), 'On a session row'), true)
+  eq(child.lua_get('require("agent-ide.ui.help")._state().sel'), 1)
+  child.type_keys('legend')
+  wait_for(function() return list()[1]:find('show or hide the legend', 1, true) ~= nil end, 'filtered')
+  eq(#list() < 10, true)
+  eq(child.lua_get('require("agent-ide.ui.help")._state().selected'), 'gL / <leader>aL')
+  -- the matched letters are marked
+  eq(child.lua_get('#vim.api.nvim_buf_get_extmarks(..., -1, 0, -1, {})', { st.lbuf }) >= 5, true)
+  child.type_keys('<C-u>', 'refr')
+  wait_for(function() return list()[1]:find('refresh', 1, true) ~= nil end, 'refresh first')
+  eq(child.lua_get('require("agent-ide.ui.help")._state().selected'), 'R')
+  -- <CR> presses R in the drawer: the help closes and the drawer rescans
+  child.lua('_G.scans = 0; local idx = require("agent-ide.index"); local orig = idx.scan; idx.scan = function(...) _G.scans = _G.scans + 1; return orig(...) end')
+  child.type_keys('<CR>')
+  wait_for(function() return child.lua_get('vim.api.nvim_get_current_win()') == drawer_win end, 'back in the drawer')
+  wait_for(function() return child.lua_get('_G.scans') == 1 end, 'R pressed')
+  eq(child.lua_get('vim.api.nvim_get_mode().mode'), 'n')
+  -- nothing matches
+  child.type_keys('?')
+  wait_for(function() return child.lua_get('vim.api.nvim_win_get_config(0).relative') ~= '' end, 'help float 2')
+  st = child.lua_get('require("agent-ide.ui.help")._state()')
+  child.type_keys('zzzzzzzz')
+  wait_for(function() return list()[1] == '  nothing matches' end, 'nothing')
+  eq(child.lua_get('require("agent-ide.ui.help")._state().selected'), vim.NIL)
+  child.type_keys('<CR>')
+  wait_for(function() return child.lua_get('vim.api.nvim_get_current_win()') == drawer_win end, 'closed, nothing pressed')
 end
 
 T['help.open twice does not stack floats'] = function()
   start()
   child.lua([[local h = require('agent-ide.ui.help'); h.open('t', { { key = 'a', desc = 'b' } }); h.open('t', { { key = 'a', desc = 'b' } })]])
-  eq(child.lua_get('#vim.tbl_filter(function(w) local c = vim.api.nvim_win_get_config(w); return c.relative ~= "" and c.focusable end, vim.api.nvim_list_wins())'), 1)
+  eq(child.lua_get('#vim.tbl_filter(function(w) local c = vim.api.nvim_win_get_config(w); return c.relative ~= "" end, vim.api.nvim_list_wins())'), 2)
 end
 
 T['drawer on the left when configured'] = function()
@@ -198,8 +219,8 @@ T['no header line: the first row is the Prompts row, the cursor starts on it; ? 
   eq(child.lua_get('vim.api.nvim_win_get_cursor(0)'), { 1, 0 })
   -- help: the only place the keys are shown
   child.type_keys('?')
-  local help = child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)')
-  for _, key in ipairs({ '<CR> / o', 'za', 'R', 'gp', 's', 'x', 'glg', 'q', '?' }) do
+  local help = child.lua_get("vim.api.nvim_buf_get_lines(require('agent-ide.ui.help')._state().lbuf, 0, -1, false)")
+  for _, key in ipairs({ '<CR> / o', 'za', 'R', 'gT / <leader>aT', 'S / <leader>ff / <leader>S', 'sP', 'glg', 'q', '? / g?' }) do
     eq({ key, has_line(help, key) ~= nil }, { key, true })
   end
 end
@@ -362,27 +383,28 @@ T['history of a vanished transcript says so'] = function()
   vim.fn.delete(tmp, 'rf')
 end
 
-T['gp outside tmux reports a reason'] = function()
+T['gT on a session running elsewhere, outside tmux, reports a reason'] = function()
   start()
   child.lua('require("agent-ide").toggle()')
   drawer_cursor_to('> alpha ')
   child.type_keys('<CR>')
   drawer_cursor_to('Alpha basics')
-  child.type_keys('gp')
+  child.type_keys('gT')
   wait_for(function() return #child.lua_get('_G.notes') > 0 end, 'notification')
   local notes = child.lua_get('_G.notes')
   eq(notes[#notes], 'Agent-IDE: cannot jump (not in tmux)')
 end
 
-T['gp on a session without live state says it is not running'] = function()
+T['gT on a session not running anywhere continues it in native Claude (outside tmux: by hand)'] = function()
   start()
   child.lua('require("agent-ide").toggle()')
   drawer_cursor_to('> notes ')
   child.type_keys('<CR>')
   drawer_cursor_to('Meeting notes summary')
-  child.type_keys('gp')
+  child.type_keys('gT')
+  wait_for(function() return #child.lua_get('_G.notes') > 0 end, 'notification')
   local notes = child.lua_get('_G.notes')
-  eq(notes[#notes], 'Agent-IDE: session is not running')
+  eq(notes[#notes]:find('parked; not in tmux, so continue it by hand: ', 1, true) ~= nil, true)
 end
 
 T['q closes the drawer window, tab stays'] = function()
@@ -516,6 +538,11 @@ T['highlight groups survive a colorscheme change; waiting is violet'] = function
   child.cmd('colorscheme default')
   eq(child.lua_get('vim.api.nvim_get_hl(0, { name = "AgentIdeWaiting", link = false }).fg'), 0xa277ff)
   eq(child.lua_get('vim.api.nvim_get_hl(0, { name = "AgentIdeBusy" }).link'), 'AgentIdeLevel2')
+  -- idle grey, filled; parked the dim comment colour, another shade; the answer mark green
+  eq(child.lua_get('vim.api.nvim_get_hl(0, { name = "AgentIdeIdle", link = false }).fg'), 0x8b95a7)
+  eq(child.lua_get('vim.api.nvim_get_hl(0, { name = "AgentIdeParked", link = false }).fg ~= 0x8b95a7'), true)
+  eq(child.lua_get('vim.api.nvim_get_hl(0, { name = "AgentIdeAnswerMark" }).link'), 'AgentIdeLevel1')
+  eq(child.lua_get('require("agent-ide.config").get().icons.idle ~= require("agent-ide.config").get().icons.parked'), true)
 end
 
 T['a relative project key never changes the tab cwd'] = function()

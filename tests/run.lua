@@ -14,6 +14,22 @@ for name, sub in pairs({ XDG_DATA_HOME = 'data', XDG_CACHE_HOME = 'cache', XDG_S
   vim.uv.os_setenv(name, d)
 end
 
+-- Keepers (lua/agent-ide/keeper) outlive the Neovim that started them on purpose; between cases
+-- and at the end the ones of this run are ended with their fake Claudes.
+local function kill_keepers()
+  local dir = xdg_root .. '/run/agent-ide'
+  for _, f in ipairs(vim.fn.glob(dir .. '/keeper-*.json', false, true)) do
+    local ok, data = pcall(vim.json.decode, table.concat(vim.fn.readfile(f), '\n'))
+    if ok and type(data) == 'table' and type(data.keeper_pid) == 'number' then
+      pcall(vim.uv.kill, data.keeper_pid, 15)
+      if type(data.claude_pid) == 'number' then pcall(vim.uv.kill, data.claude_pid, 15) end
+    end
+    vim.fn.delete(f)
+  end
+  for _, f in ipairs(vim.fn.glob(dir .. '/keeper-*.sock', false, true)) do vim.fn.delete(f) end
+  if package.loaded['agent-ide.keeper'] then package.loaded['agent-ide.keeper']._reset() end
+end
+
 local reporter = MiniTest.gen_reporter.stdout({ quit_on_finish = false })
 local finish = reporter.finish
 reporter.finish = function()
@@ -28,6 +44,7 @@ reporter.finish = function()
       ok = false
     end
   end
+  kill_keepers()
   vim.fn.delete(xdg_root, 'rf')
   vim.cmd(ok and 'qall!' or 'cquit 1')
 end
@@ -38,6 +55,11 @@ end
 local function filter_cases(case)
   local test = case.test
   case.test = function(...)
+    -- prefs.json (the model last used, the legend toggle) is kept across restarts on purpose;
+    -- between cases it would leak one case's choices into the next
+    vim.fn.delete(xdg_root .. '/state/nvim/agent-ide/prefs.json')
+    if package.loaded['agent-ide.prefs'] then package.loaded['agent-ide.prefs']._reset() end
+    kill_keepers()
     local ok, e = pcall(test, ...)
     if not ok then error(tostring(e), 0) end
   end

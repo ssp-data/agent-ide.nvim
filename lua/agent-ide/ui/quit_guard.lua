@@ -27,12 +27,13 @@ function M._forced(cmd)
   return false
 end
 
----Sessions started by this Neovim that are running a turn or wait for an answer.
+---Sessions started by this Neovim that are running a turn or wait for an answer and would
+---end with it (a Claude under a keeper keeps running).
 ---@return integer
 function M.working()
   local n = 0
   for _, s in ipairs(require('agent-ide.session').all()) do
-    if s.owned and (s.state == 'busy' or s.state == 'waiting') then n = n + 1 end
+    if s.owned and (s.state == 'busy' or s.state == 'waiting') and not (s.proc and s.proc.keeper) then n = n + 1 end
   end
   return n
 end

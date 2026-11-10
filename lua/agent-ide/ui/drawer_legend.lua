@@ -2,7 +2,7 @@
 -- ✗ failed`), pinned to the bottom of the drawer window: a non-focusable float anchored to that
 -- window, so it stays put while the tree scrolls and works with any 'laststatus' (a window's own
 -- statusline does not exist with a global one). Hidden while the drawer is too small; `gL`
--- toggles it. The tree's cursor row is never under it: the view (or the cursor) moves.
+-- toggles it (remembered across restarts, prefs.lua). The tree's cursor row is never under it: the view (or the cursor) moves.
 local api = vim.api
 local config = require('agent-ide.config')
 
@@ -82,10 +82,16 @@ end
 
 local ns = api.nvim_create_namespace('agent-ide.drawer_legend')
 
+-- The toggle as remembered (prefs.json), else `config.drawer.legend`.
 local function enabled()
   if on == nil then
-    local d = config.get().drawer
-    on = not (type(d) == 'table' and d.legend == false)
+    local saved = require('agent-ide.prefs').get('legend')
+    if saved ~= nil then
+      on = saved
+    else
+      local d = config.get().drawer
+      on = not (type(d) == 'table' and d.legend == false)
+    end
   end
   return on
 end
@@ -165,9 +171,10 @@ function M.update()
   keep_clear(dwin, false)
 end
 
----`gL`: show or hide the legend (for this Neovim session).
+---`gL`: show or hide the legend; remembered across restarts.
 function M.toggle()
   on = not enabled()
+  require('agent-ide.prefs').set('legend', on)
   M.update()
   if on and not S.win then
     vim.notify('Agent-IDE: legend hidden while the drawer is smaller than '

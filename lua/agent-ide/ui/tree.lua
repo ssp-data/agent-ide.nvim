@@ -68,7 +68,7 @@ end
 ---@param projects_dir string|nil
 ---@param note_of? fun(session_id: string, state: string): table|string|nil the state word of a session row (`{ text, hl_group }`)
 ---@param extra? fun(project: table, ctx: table): table[]|nil, table[]|nil extra rows and a project-row suffix (see ui/sections.lua)
----@param opts? { top?: fun(ctx: table): table[]|nil, width?: integer, scope?: { branch?: string, others?: integer } }
+---@param opts? { top?: fun(ctx: table): table[]|nil, width?: integer, scope?: { branch?: string, others?: integer, key?: string } }
 ---  top: rows above the projects (see ui/sections.lua); width: the drawer width (nil: no
 ---  alignment, the right part follows after two spaces); scope: project scope (see scope.lua):
 ---  `projects` holds the one project, shown without its own row (its rows one level up) under a
@@ -125,7 +125,7 @@ function M.build(projects, state_of, expanded, now, icons, projects_dir, note_of
     local left = { { one_line(p.name), 'AgentIdeAge', fit = true } }
     if scoped.branch and scoped.branch ~= '' then left[2] = { '  ' .. one_line(scoped.branch), 'AgentIdeAge', fit = true } end
     if p.missing then left[#left + 1] = { ' (folder missing)', 'AgentIdeMissing', fit = 'last' } end
-    add_row(left, { { 'project · gs: all', 'AgentIdeAge' } }, { type = 'scope', project = p })
+    add_row(left, { { (scoped.key or '?') .. ': all', 'AgentIdeAge' } }, { type = 'scope', project = p })
   end
 
   if opts.top then
@@ -204,7 +204,7 @@ function M.build(projects, state_of, expanded, now, icons, projects_dir, note_of
 
   if scoped and (scoped.others or 0) > 0 then
     local n = scoped.others
-    add({ { ('%d session%s in other projects need%s you · gs'):format(n, n == 1 and '' or 's', n == 1 and 's' or ''),
+    add({ { ('%d session%s in other projects need%s you · %s'):format(n, n == 1 and '' or 's', n == 1 and 's' or '', scoped.key or '?'),
       'AgentIdeAge' } }, { type = 'others' })
   end
 

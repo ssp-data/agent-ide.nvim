@@ -188,13 +188,13 @@ T['parking a working session asks; declined keeps it, accepted returns queued pr
   eq(has_line(notes(), '1 queued prompt(s) returned to the prompt buffer') ~= nil, true)
 end
 
-T['x on a drawer row parks that session'] = function()
+T['sP on a drawer row parks that session'] = function()
   start(turn('Hi', 'Hello.'))
   open_fixture()
   send('Hi')
   wait_for(function() return sess().state == 'idle' end, 'turn end')
   drawer_cursor_to('Alpha basics')
-  child.type_keys('x')
+  child.type_keys('sP')
   wait_for(function() return sess().state == 'parked' end, 'parked')
   eq(sess().owned, false)
 end
@@ -207,7 +207,7 @@ T['parking a session that does not run here, or runs in another Claude: a notice
   start()
   open_fixture()
   drawer_cursor_to('Alpha basics')
-  child.type_keys('x')
+  child.type_keys('sP')
   wait_for(function() return has_line(notes(), 'nothing to park; it is not running in this Neovim') ~= nil end, 'notice 2')
   eq(fake.log(log), {})
 end
@@ -226,7 +226,7 @@ T['help floats list the park keys'] = function()
     end
   end
   eq(desc('Agent-IDE chat', '<leader>ax'), "park: stop this session's Claude process (asks when working); the next send resumes it")
-  eq(desc('Agent-IDE drawer', 'x'), 'park the session: stop its Claude process here')
+  eq(desc('Agent-IDE drawer', 'sP'), 'park the session: stop its Claude process here')
 end
 
 return T

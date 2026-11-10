@@ -200,6 +200,7 @@ function M.render_preview(v, out, target, m, title, footer)
   vim.bo[buf].modifiable = true
   api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.bo[buf].modifiable = false
+  history.mark_answers(buf, 1, out.answers or {})
   history.apply_win(win, buf)
   vim.wo[win].winbar = ''
   api.nvim_buf_clear_namespace(buf, ns, 0, -1)

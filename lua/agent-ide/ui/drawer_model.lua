@@ -25,6 +25,9 @@ end
 function M.state_of(id)
   local s = session.get(id)
   if s and s.state ~= 'parked' then return s.state end
+  -- a keeper of this plugin holds its Claude (busy, waiting or idle in the background)
+  local k = require('agent-ide.keeper').info(id)
+  if k and (k.state == 'busy' or k.state == 'waiting' or k.state == 'idle') then return k.state end
   -- the live list may still show the process we just stopped until its next poll
   local e = live.get()[id]
   if s and e and s.pid ~= nil and e.pid == s.pid then return 'parked' end
@@ -37,9 +40,10 @@ local function first_line(text) return (text or ''):match('^%s*([^\r\n]*)') end
 ---@return integer[]
 function M.elsewhere_pids()
   local pids = {}
+  local kept = require('agent-ide.keeper').claude_pids()
   for id, e in pairs(live.get()) do
     local s = session.get(id)
-    if e.pid and (not s or s:_elsewhere()) then pids[#pids + 1] = e.pid end
+    if e.pid and not kept[e.pid] and (not s or s:_elsewhere()) then pids[#pids + 1] = e.pid end
   end
   table.sort(pids)
   return pids
@@ -72,6 +76,11 @@ function M.note_of(id, state)
   local s = session.get(id)
   local handoff = package.loaded['agent-ide.ui.handoff']
   if s and handoff and handoff.away(s) then return { 'native', 'AgentIdeAge' } end
+  -- held by a keeper, not attached here: it needs you, or it runs in the background
+  if require('agent-ide.keeper').info(id) and not (s and s:_alive()) then
+    if state == 'waiting' then return { 'input', 'AgentIdeWaiting' } end
+    if state == 'busy' or state == 'idle' then return { 'background', 'AgentIdeAge' } end
+  end
   local e = live.get()[id]
   local elsewhere = e ~= nil and (s == nil or s:_elsewhere())
   if state == 'waiting' then

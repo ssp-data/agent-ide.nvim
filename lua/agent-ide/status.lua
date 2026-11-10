@@ -235,8 +235,13 @@ local function compute_text()
   elseif l.level == 3 then text = ('review (%d)'):format(l.review)
   else text = ('input required (%d)'):format(l.waiting) end
   local ok, cur = pcall(M._src.current)
-  if ok and type(cur) == 'table' and type(cur.model) == 'string' and cur.model ~= '' then
-    text = text .. ' · ' .. cur.model:gsub('^claude%-', '')
+  if ok and type(cur) == 'table' then
+    local mode = require('agent-ide.ui.mode')
+    local model = type(cur.model) == 'string' and cur.model ~= '' and cur.model or mode.start_model(cur)
+    if model then
+      local name = mode.model_name(cur, model)
+      text = text .. ' · ' .. (name or model:gsub('^claude%-', ''))
+    end
   end
   return text .. quota_text()
 end
@@ -312,11 +317,7 @@ end
 -- Test knobs: heartbeat and sweep intervals.
 M._cfg = { heartbeat_ms = 30000, sweep_ms = 60000 }
 
-local function runtime_dir()
-  local base = vim.uv.os_getenv('XDG_RUNTIME_DIR')
-  if not base or base == '' then base = vim.fn.stdpath('run') end
-  return base .. '/agent-ide'
-end
+local function runtime_dir() return require('agent-ide.util.rundir').dir() end
 
 ---@return string status file of this instance
 function M.file() return runtime_dir() .. '/status-' .. vim.uv.os_getpid() .. '.json' end

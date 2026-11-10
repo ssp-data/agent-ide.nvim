@@ -95,7 +95,7 @@ T['zR opens every project with its sessions, not Changes or Commits; again: ever
   start()
   wait_for(function() return count('^> proj') == 3 end, 'projects')
   cursor_to('> proj02')
-  child.type_keys('zR')
+  child.type_keys('z9')
   wait_for(function() return count('^v proj') == 3 end, 'all open')
   eq(count('Sessions %(2%)'), 3)
   eq(count('Topic'), 6)
@@ -103,12 +103,12 @@ T['zR opens every project with its sessions, not Changes or Commits; again: ever
   eq(count('^  > Changes'), 3)
   eq(current():find('^v proj02') ~= nil, true) -- the cursor stays on its node
   -- a second zR with nothing changed in between: Changes and Commits open too
-  child.type_keys('zR')
+  child.type_keys('z9')
   wait_for(function() return count('^  v Changes') == 3 end, 'changes open')
   eq(count('^  v .*[Cc]ommits'), 3)
   -- something changed in between: one level only again
-  child.type_keys('zM')
-  child.type_keys('zR')
+  child.type_keys('z0')
+  child.type_keys('z9')
   eq(count('^v proj'), 3)
 end
 
@@ -116,9 +116,9 @@ T['zM leaves only top-level rows; za on a project opens it as before; cursor on 
   make(3, 2)
   start()
   wait_for(function() return count('^> proj') == 3 end, 'projects')
-  child.type_keys('zR')
+  child.type_keys('z9')
   cursor_to('Topic 2 of proj02')
-  child.type_keys('zM')
+  child.type_keys('z0')
   eq(count('^v '), 0)
   eq(#lines(), 3 + (find('Prompts') and 1 or 0))
   eq(current():find('^> proj02') ~= nil, true)
@@ -143,7 +143,7 @@ T['zR with 60 git projects: fast, and git starts in a few of them at a time'] = 
     vim.api.nvim_set_current_win(s.win)
     collectgarbage('collect')
     local t0 = vim.uv.hrtime()
-    vim.fn.maparg('zR', 'n', false, true).callback()
+    vim.fn.maparg('z9', 'n', false, true).callback()
     local ms = (vim.uv.hrtime() - t0) / 1e6
     local counting = require('agent-ide.ui.git_sections')._counting()
     vim.system = orig
