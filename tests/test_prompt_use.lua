@@ -80,7 +80,7 @@ end
 -- Open the Prompts node and the given sub-folds, then put the cursor on `text`.
 local function on_row(text, folds)
   drawer_cursor_to('Prompts')
-  if has_line(drawer_lines(), '> ✎ Prompts') then child.type_keys('<CR>') end
+  if has_line(drawer_lines(), '> Prompts') then child.type_keys('<CR>') end
   for _, f in ipairs(folds or {}) do
     drawer_cursor_to(f)
     if drawer_lines()[has_line(drawer_lines(), f)]:find('> ' .. f, 1, true) then child.type_keys('<CR>') end
@@ -183,7 +183,7 @@ T['no chat open: the top-level node says so; a saved prompt row opens a session 
   local folder = child.lua_get('require("agent-ide.prompts.cache").folder({ key = ... })', { repo })
   vim.fn.mkdir(tmp .. '/saved/' .. folder, 'p')
   vim.fn.writefile({ 'Saved text' }, tmp .. '/saved/' .. folder .. '/saved-text.md')
-  drawer_cursor_to('> P repo  ')
+  drawer_cursor_to('> repo  ')
   child.type_keys('<CR>')
   drawer_cursor_to('Saved prompts (1)')
   child.type_keys('<CR>')
@@ -212,7 +212,7 @@ T['e opens a template for editing; a command read-only with a notice'] = functio
   drawer_cursor_to('Prompts')
   child.lua('vim.api.nvim_win_set_cursor(0, { vim.api.nvim_win_get_cursor(0)[1], 0 })')
   child.type_keys('e')
-  eq(child.lua_get('vim.api.nvim_win_get_cursor(0)[2]'), 2) -- '> ✎': end of the first word
+  eq(child.lua_get('vim.api.nvim_win_get_cursor(0)[2]'), 8) -- '> Prompts': end of the word
 end
 
 local function choose(field, value)

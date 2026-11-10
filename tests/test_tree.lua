@@ -32,14 +32,14 @@ end
 
 T['collapsed: one line per project with rolled-up state'] = function()
   local t = tree.build(projects, lookup({ s2 = { status = 'waiting' } }), {}, 1060, icons)
-  eq(t.lines, { '> P alpha  W input (1) now', '> P old (folder missing)  . 16m' })
+  eq(t.lines, { '> alpha  W input (1) now', '> old (folder missing)  . 16m' })
   eq(t.nodes[1].type, 'project')
 end
 
 T['expanded: section and all sessions'] = function()
   local t = tree.build(projects, lookup({ s1 = { status = 'busy' } }), { ['/r/alpha'] = true }, 1060, icons)
-  eq(t.lines, { 'v P alpha  B now', '    + New session', '  v Sessions (2)', '      B Fix login  now', '      . docs/ · Docs  11m',
-    '> P old (folder missing)  . 16m' })
+  eq(t.lines, { 'v alpha  B now', '    + New session', '  v Sessions (2)', '      B Fix login  now', '      . docs/ · Docs  11m',
+    '> old (folder missing)  . 16m' })
   eq({ t.nodes[4].type, t.nodes[4].session.id, t.nodes[4].state }, { 'session', 's1', 'busy' })
   eq(t.nodes[2], { type = 'new', project = projects[1] })
   eq(t.nodes[3], { type = 'section', project = projects[1], key = '/r/alpha/sessions' })
@@ -117,7 +117,7 @@ T['highlights.setup defines all groups and is idempotent'] = function()
   eq(('#%06x'):format(hl('AgentIdeDone').fg), '#ff9e64')
   eq({ ('#%06x'):format(hl('AgentIdeWaiting').fg), hl('AgentIdeWaiting').bold }, { '#a277ff', true })
   eq(vim.api.nvim_get_hl(0, { name = 'AgentIdeSection', link = true }).link, 'Directory')
-  eq(vim.api.nvim_get_hl(0, { name = 'AgentIdeAge', link = true }).link, 'Comment')
+  eq(vim.api.nvim_get_hl(0, { name = 'AgentIdeAge', link = true }).link, nil) -- an explicit dim style, see below
 end
 
 T['state lookup decides session icons; roll-up ranks waiting > failed > done > busy > idle > parked'] = function()
@@ -126,7 +126,7 @@ T['state lookup decides session icons; roll-up ranks waiting > failed > done > b
     { id = 'c', title = 'C', activity = 800 } } } }
   local function roll(states)
     local t = tree.build(p, function(id) return states[id] or 'parked' end, { ['/r/a'] = true }, 1000, icons)
-    return t.lines[1]:match('^v P a  (%S+) ')
+    return t.lines[1]:match('^v a  (%S+) ')
   end
   eq(roll({ a = 'idle', b = 'busy' }), 'B')
   eq(roll({ a = 'done', b = 'busy' }), 'D')
@@ -159,7 +159,7 @@ T['rows align the right part to the drawer width; state words in their colour'] 
   local t = tree.build(mixed(), function(id) return STATES[id] end, { ['/r/n'] = true }, 1000, icons, nil,
     function(id) return NOTES[id] end, nil, { width = 44 })
   eq(t.lines, {
-    'v P neomd                    W input (1) now',
+    'v neomd                      W input (1) now',
     '    + New session',
     '  v Sessions (5)',
     '      B Add IDLE support                 now',
@@ -188,26 +188,73 @@ end
 T['project row: review (n) for done and failed, icon and age when quiet'] = function()
   local p = mixed()
   local t = tree.build(p, function(id) return ({ c = 'done', d = 'failed' })[id] or 'idle' end, {}, 1000, icons, nil, nil, nil, { width = 30 })
-  eq(t.lines[1], '> P neomd     F review (2) now')
+  eq(t.lines[1], '> neomd       F review (2) now')
   eq(W(t.lines[1]), 30)
   t = tree.build(p, function() return 'idle' end, {}, 1000, icons, nil, nil, nil, { width = 30 })
-  eq(t.lines[1], '> P neomd                I now')
+  eq(t.lines[1], '> neomd                  I now')
 end
 
-T['header: title left, key hints right; hints that do not fit are dropped'] = function()
-  local header = { title = 'Agents', hints = { 'R refresh', 'glg lazygit', '? help' } }
-  local ic = vim.tbl_extend('force', icons, { agents = 'A' })
-  local t = tree.build(projects, lookup({}), {}, 1060, ic, nil, nil, nil, { width = 44, header = header })
-  eq(t.lines[1], 'A Agents    R refresh · glg lazygit · ? help')
-  eq(t.nodes[1], { type = 'header' })
-  eq(t.lines[2]:sub(1, 9), '> P alpha')
-  t = tree.build(projects, lookup({}), {}, 1060, ic, nil, nil, nil, { width = 30, header = header })
-  eq(t.lines[1], 'A Agents             R refresh')
-  t = tree.build(projects, lookup({}), {}, 1060, ic, nil, nil, nil, { width = 12, header = header })
-  eq(t.lines[1], 'A Agents')
-  -- on an empty drawer the header stays above the hint
-  t = tree.build({}, lookup({}), {}, 0, ic, nil, nil, nil, { width = 44, header = header })
-  eq({ #t.lines, t.nodes[1].type, t.nodes[2].type }, { 2, 'header', 'hint' })
+T['no header row: the first row is the first project (or the top rows); project rows are arrow and name'] = function()
+  local t = tree.build(projects, lookup({}), {}, 1060, icons, nil, nil, nil, { width = 44 })
+  eq({ t.nodes[1].type, #t.lines }, { 'project', 2 })
+  eq(t.lines[1]:match('^> alpha +%. now$') ~= nil, true)
+  local top = function() return { { pieces = { { '> Prompts' } }, node = { type = 'prompt_section' } } } end
+  t = tree.build(projects, lookup({}), {}, 1060, icons, nil, nil, nil, { width = 44, top = top })
+  eq({ t.lines[1], t.nodes[1].type, t.lines[2]:sub(1, 7) }, { '> Prompts', 'prompt_section', '> alpha' })
+  -- with the real icons a project row still has no icon
+  local nerd = require('agent-ide.ui.icons').nerd
+  t = tree.build(projects, lookup({}), { ['/r/alpha'] = true }, 1060, nerd, nil, nil, nil, { width = 44 })
+  eq(t.lines[1]:match('^▾ alpha ') ~= nil, true)
+  eq(t.lines[2], '    + New session')
+  eq(t.lines[3], '  ▾ Sessions (2)')
+  eq(t.lines[#t.lines]:match('^▸ old %(folder missing%) +○ %S+$') ~= nil, true)
+end
+
+T['a parked session row is dimmed whole: mark, title, age; idle and parked use different marks'] = function()
+  local nerd = require('agent-ide.ui.icons').nerd
+  local t = tree.build(projects, lookup({ s1 = { status = 'idle' } }), { ['/r/alpha'] = true }, 1060, nerd, nil, nil, nil,
+    { width = 44 })
+  eq(t.lines[4]:match('^      ● Fix login') ~= nil, true)
+  eq(t.lines[5]:match('^      ○ docs/ · Docs') ~= nil, true)
+  local groups = {}
+  for _, h in ipairs(t.hl) do
+    if h.line == 5 then groups[#groups + 1] = t.lines[5]:sub(h.col_start + 1, h.col_end) .. '=' .. h.group end
+  end
+  eq(groups, { '○=AgentIdeParked', 'docs/ · =AgentIdeParked', 'Docs=AgentIdeParked', '11m=AgentIdeAge' })
+  eq(find(t, 4, 'AgentIdeIdle') ~= nil, true)
+end
+
+T['no highlight group of the drawer is italic, even when Comment is'] = function()
+  vim.api.nvim_set_hl(0, 'Comment', { fg = '#665c54', italic = true })
+  local names = { 'AgentIdeProject', 'AgentIdeWaiting', 'AgentIdeBusy', 'AgentIdeIdle', 'AgentIdeParked', 'AgentIdeDone',
+    'AgentIdeFailed', 'AgentIdeMissing', 'AgentIdeAge', 'AgentIdeSection', 'AgentIdeBranch', 'AgentIdeGitHash',
+    'AgentIdeGitAdd', 'AgentIdeGitDel', 'AgentIdeGitAdded', 'AgentIdeGitModified', 'AgentIdeGitDeleted', 'AgentIdeGitRenamed',
+    'AgentIdeGitUntracked' }
+  for _, n in ipairs(names) do vim.cmd('hi clear ' .. n) end
+  highlights.setup()
+  require('agent-ide.ui.git_hl').setup()
+  local t = tree.build(projects, lookup({ s1 = { status = 'busy' } }), { ['/r/alpha'] = true }, 1060, icons)
+  local used = {}
+  for _, h in ipairs(t.hl) do used[h.group] = true end
+  for _, n in ipairs(names) do used[n] = true end
+  for g in pairs(used) do
+    local def = vim.api.nvim_get_hl(0, { name = g, link = false })
+    eq({ g, def.italic == true }, { g, false })
+  end
+  -- the dim groups take Comment's colour, not its style
+  for _, g in ipairs({ 'AgentIdeParked', 'AgentIdeAge', 'AgentIdeMissing', 'AgentIdeBranch', 'AgentIdeGitUntracked' }) do
+    local def = vim.api.nvim_get_hl(0, { name = g, link = false })
+    eq({ g, ('#%06x'):format(def.fg), def.bold == true }, { g, '#665c54', false })
+  end
+  -- a user override still wins (default = true)
+  vim.api.nvim_set_hl(0, 'AgentIdeAge', { fg = '#112233', italic = true })
+  highlights.setup()
+  eq(vim.api.nvim_get_hl(0, { name = 'AgentIdeAge', link = false }).italic, true)
+  -- and a colour scheme change re-reads Comment
+  vim.cmd('hi clear AgentIdeAge')
+  vim.api.nvim_set_hl(0, 'Comment', { fg = '#aabbcc', italic = true })
+  vim.api.nvim_exec_autocmds('ColorScheme', {})
+  eq(('#%06x'):format(vim.api.nvim_get_hl(0, { name = 'AgentIdeAge', link = false }).fg), '#aabbcc')
 end
 
 T['umlauts, CJK and emoji titles align by display width and cut whole characters'] = function()
@@ -229,14 +276,14 @@ T['a title of 300 characters at width 24: the age stays visible'] = function()
   local p = { { key = '/r/a', name = string.rep('n', 80), is_git = false, missing = false, activity = 1000, sessions = {
     { id = 's', title = string.rep('x', 300), activity = 1000 } } } }
   local t = tree.build(p, lookup({}), { ['/r/a'] = true }, 1000, icons, nil, function() return 'elsewhere' end, nil, { width = 24 })
-  eq(t.lines[1], 'v P nnnnnnnnnnnn…  . now')
+  eq(t.lines[1], 'v nnnnnnnnnnnnnn…  . now')
   eq(t.lines[4], '      . …  elsewhere now')
 end
 
 T['a project without sessions'] = function()
   local p = { { key = '/r/e', name = 'empty', is_git = false, missing = false, activity = 1000, sessions = {} } }
   local t = tree.build(p, lookup({}), { ['/r/e'] = true }, 1000, icons, nil, nil, nil, { width = 30 })
-  eq(t.lines, { 'v P empty                . now', '    + New session', '  v Sessions (0)' })
+  eq(t.lines, { 'v empty                  . now', '    + New session', '  v Sessions (0)' })
 end
 
 T['provider rows with a right part are aligned; rows without stay as given'] = function()

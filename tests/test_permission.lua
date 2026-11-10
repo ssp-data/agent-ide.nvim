@@ -176,9 +176,9 @@ local function open_new()
   if child.lua_get('require("agent-ide.ui.drawer").state().win') == vim.NIL then
     child.lua('require("agent-ide").toggle()')
   end
-  wait_for(function() return has_line(drawer_lines(), ' P repo  ') ~= nil end, 'project row')
-  if has_line(drawer_lines(), '> P repo  ') then
-    drawer_cursor_to('> P repo  ')
+  wait_for(function() return has_line(drawer_lines(), ' repo  ') ~= nil end, 'project row')
+  if has_line(drawer_lines(), '> repo  ') then
+    drawer_cursor_to('> repo  ')
     child.type_keys('<CR>')
   end
   drawer_cursor_to('    + New session')

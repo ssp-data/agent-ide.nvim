@@ -48,15 +48,15 @@ end
 T['collapsed project: branch suffix only off the default branch'] = function()
   local p = project('/x/r')
   cache._set('/x/r', 'head', BRANCH)
-  eq(lines(p, {}), { '> P p  feat  . now' })
+  eq(lines(p, {}), { '> p  feat  . now' })
   cache._set('/x/r', 'head', vim.tbl_extend('force', BRANCH, { branch = 'main', on_default = true }))
-  eq(lines(p, {}), { '> P p  . now' })
+  eq(lines(p, {}), { '> p  . now' })
   cache._set('/x/r', 'head', vim.tbl_extend('force', BRANCH, { branch = 'abc1234', detached = true }))
-  eq(lines(p, {}), { '> P p  abc1234  . now' })
+  eq(lines(p, {}), { '> p  abc1234  . now' })
 end
 
 T['non-git and missing projects show no git rows'] = function()
-  eq(lines(project('/x/n', { is_git = false, root = nil }), { ['/x/n'] = true }), { 'v P p  . now', '    + New session', '  v Sessions (0)' })
+  eq(lines(project('/x/n', { is_git = false, root = nil }), { ['/x/n'] = true }), { 'v p  . now', '    + New session', '  v Sessions (0)' })
   eq(#lines(project('/x/m', { missing = true }), { ['/x/m'] = true }), 3)
 end
 

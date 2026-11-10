@@ -84,7 +84,7 @@ end
 
 local function on_row(text, folds)
   drawer_cursor_to('Prompts')
-  open('✎ Prompts')
+  open('Prompts')
   for _, f in ipairs(folds or {}) do
     drawer_cursor_to(f)
     open(f)
@@ -108,7 +108,7 @@ T['r renames a template; group/name moves it; a taken name is refused'] = functi
   eq(exists(lib .. '/writing/linkedin-post.md'), false)
   eq(exists(lib .. '/social-media/linkedin.md'), true)
   eq(last_note(), 'Agent-IDE: renamed → Library/social-media/linkedin')
-  wait_for(function() return has_line(drawer_lines(), 'social-media (1)') ~= nil end, 'moved in the drawer')
+  wait_for(function() return has_line(drawer_lines(), 'social-media/ (1)') ~= nil end, 'moved in the drawer')
   -- taken
   on_row('Invoice text')
   child.lua('_G.typed = { "social-media/linkedin" }')
@@ -152,7 +152,7 @@ T['L copies a saved prompt into the library; r renames a saved prompt'] = functi
   local folder = saved_folder()
   vim.fn.mkdir(folder, 'p')
   vim.fn.writefile({ 'Add idle support' }, folder .. '/add-idle-support.md')
-  drawer_cursor_to('> P repo  ')
+  drawer_cursor_to('> repo  ')
   child.type_keys('<CR>')
   drawer_cursor_to('Saved prompts (1)')
   child.type_keys('<CR>')
@@ -191,17 +191,17 @@ end
 
 T['the row keys keep their meaning elsewhere in the drawer'] = function()
   start()
-  drawer_cursor_to('> P repo  ')
-  local row = drawer_lines()[has_line(drawer_lines(), '> P repo  ')]
-  eq(row:match('^> P repo +· now$') ~= nil, true)
+  drawer_cursor_to('> repo  ')
+  local row = drawer_lines()[has_line(drawer_lines(), '> repo  ')]
+  eq(row:match('^> repo +○ now$') ~= nil, true)
   child.lua('vim.fn.setreg(\'"\', "before")')
   child.type_keys('yy')
   eq(child.lua_get('vim.fn.getreg(\'"\')'), row .. '\n')
   -- typed in one chunk: the motion stays after the operator; a register prefix is kept
   drawer_cursor_to('Prompts')
   child.type_keys('yj')
-  eq(child.lua_get('vim.fn.getreg(\'"\')'), '> ✎ Prompts\n' .. row .. '\n')
-  drawer_cursor_to('> P repo  ')
+  eq(child.lua_get('vim.fn.getreg(\'"\')'), '> Prompts\n' .. row .. '\n')
+  drawer_cursor_to('> repo  ')
   child.type_keys('"ayy')
   eq(child.lua_get('vim.fn.getreg("a")'), row .. '\n')
 end

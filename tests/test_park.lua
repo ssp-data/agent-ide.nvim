@@ -114,9 +114,9 @@ end
 
 local function open_fixture()
   child.lua('require("agent-ide").toggle()')
-  wait_for(function() return has_line(drawer_lines(), ' P repo  ') ~= nil end, 'project row')
-  if has_line(drawer_lines(), '> P repo  ') then
-    drawer_cursor_to('> P repo  ')
+  wait_for(function() return has_line(drawer_lines(), ' repo  ') ~= nil end, 'project row')
+  if has_line(drawer_lines(), '> repo  ') then
+    drawer_cursor_to('> repo  ')
     child.type_keys('<CR>')
   end
   drawer_cursor_to('Alpha basics')

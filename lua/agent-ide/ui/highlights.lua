@@ -1,6 +1,14 @@
 -- Highlight groups for the drawer and the chat view. `default = true` lets colorschemes override.
 local M = {}
 
+---A dim style: the foreground of `Comment` as it resolves now, never italic or bold (many
+---colourschemes make Comment italic; dimmed things here are dimmed only).
+---@return table
+function M.dim()
+  local c = vim.api.nvim_get_hl(0, { name = 'Comment', link = false })
+  return { fg = c.fg, ctermfg = c.ctermfg, italic = false, bold = false }
+end
+
 local GROUPS = {
   AgentIdeProject = { bold = true },
   -- overall status levels (statusline, status file); the drawer's state groups link to them
@@ -11,16 +19,17 @@ local GROUPS = {
   AgentIdeWaiting = { link = 'AgentIdeLevel4' },
   AgentIdeBusy = { link = 'AgentIdeLevel2' },
   AgentIdeIdle = { link = 'AgentIdeLevel1' },
-  AgentIdeParked = { link = 'Comment' }, -- dimmed
+  AgentIdeParked = M.dim, -- dimmed
   AgentIdeDone = { link = 'AgentIdeLevel3' }, -- the result waits to be read
   AgentIdeFailed = { fg = '#f7768e', ctermfg = 204 }, -- red; its status level stays 3 (review)
-  AgentIdeMissing = { link = 'Comment' },
-  AgentIdeAge = { link = 'Comment' },
+  AgentIdeMissing = M.dim,
+  AgentIdeAge = M.dim,
   AgentIdeSection = { link = 'Directory' },
 }
 
 local function apply()
   for name, def in pairs(GROUPS) do
+    if type(def) == 'function' then def = def() end
     vim.api.nvim_set_hl(0, name, vim.tbl_extend('force', def, { default = true }))
   end
 end
