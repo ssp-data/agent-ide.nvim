@@ -268,7 +268,7 @@ T['enter on project expands; enter on session opens its history in the chat view
   eq(in_transcript('vim.bo.filetype'), 'markdown')
   eq(in_transcript('vim.fn.line(".") == vim.fn.line("$")'), true)
   -- running in another Claude (live: waiting): the history shows, the winbar says so
-  eq(in_transcript('vim.wo.winbar'), 'alpha · Alpha basics · model ? · mode:? · waiting')
+  eq(in_transcript('vim.wo.winbar'), '%#AgentIdeWaiting#W%* %#AgentIdeWaiting#input%* · %#AgentIdeProject#alpha%* · Alpha basics')
 end
 
 T['history of a session with unknown records shows an unknown fold'] = function()
