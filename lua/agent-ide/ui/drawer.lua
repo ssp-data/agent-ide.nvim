@@ -257,6 +257,12 @@ function actions.open()
     if not s then
       s = session.open({ cwd = dir })
       model.add_unsaved(s.id, p.key)
+      -- a draft an earlier Neovim left for an unsent new session here: this one takes it
+      local listed = {}
+      for _, pr in ipairs(S.projects) do
+        for _, m in ipairs(pr.sessions) do listed[m.id] = true end
+      end
+      require('agent-ide.ui.drafts').adopt(s, dir, function(id) return listed[id] or session.get(id) ~= nil end)
     end
     require('agent-ide.ui.chat').open(s, p)
   elseif node.type == 'scope' or node.type == 'others' then
