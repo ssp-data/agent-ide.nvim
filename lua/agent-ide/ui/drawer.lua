@@ -588,17 +588,33 @@ local function ensure_buf()
   vim.bo[buf].bufhidden = 'hide'
   vim.bo[buf].filetype = 'agent-ide'
   vim.bo[buf].modifiable = false
-  local function map(lhs, fn, desc) vim.keymap.set('n', lhs, fn, { buffer = buf, nowait = true, silent = true, desc = desc }) end
   local keys = drawer_keys()
   OWN = {}
+  local all = {} -- every lhs mapped here (keycodes): a key that starts another one waits for it
   for _, a in ipairs(ACTIONS) do
     for _, lhs in ipairs(keylist.list(keys[a[1]])) do
       OWN[vim.keycode(lhs)] = true
-      map(lhs, function() press(a, lhs) end, 'Agent-IDE drawer: ' .. a[2])
+      all[#all + 1] = vim.keycode(lhs)
     end
   end
+  local providers = provider_keys()
+  for _, k in ipairs(providers) do all[#all + 1] = vim.keycode(k.lhs) end
+  -- `z` (search) is the start of `za`, `z0` and `z9`: it acts after 'timeoutlen', the others at once
+  local function prefix_of_other(code)
+    for _, other in ipairs(all) do
+      if other ~= code and vim.startswith(other, code) then return true end
+    end
+    return false
+  end
+  local function map(lhs, fn, desc)
+    local code = vim.keycode(lhs)
+    vim.keymap.set('n', lhs, fn, { buffer = buf, nowait = not prefix_of_other(code), silent = true, desc = desc })
+  end
+  for _, a in ipairs(ACTIONS) do
+    for _, lhs in ipairs(keylist.list(keys[a[1]])) do map(lhs, function() press(a, lhs) end, 'Agent-IDE drawer: ' .. a[2]) end
+  end
   -- provider row keys with an lhs of their own (the others reach their rows through `press`)
-  for _, k in ipairs(provider_keys()) do map(k.lhs, function() actions.row_key(k.lhs) end, 'Agent-IDE drawer: ' .. k.desc) end
+  for _, k in ipairs(providers) do map(k.lhs, function() actions.row_key(k.lhs) end, 'Agent-IDE drawer: ' .. k.desc) end
   require('agent-ide.ui.drawer_session_keys').map(buf, OWN, current_node) -- the chat's keys on session rows
   api.nvim_create_autocmd('BufEnter', { buffer = buf, callback = function() sections.focus() end })
   S.buf = buf

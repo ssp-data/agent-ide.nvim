@@ -160,7 +160,7 @@ require('agent-ide').setup({
     -- the drawer's own keys (see Drawer); on a row that has its own handler for a key (the
     -- prompt row keys below) that handler runs instead
     drawer = { open = { '<CR>', 'o' }, fold = 'za', collapse_all = 'z0', expand_all = 'z9', refresh = 'R',
-      tmux = { 'gT', '<leader>aT' }, search = { 'Z', '<leader>ff', '<leader>Z' }, park = 'sP', hide = 'H',
+      tmux = { 'gT', '<leader>aT' }, search = { 'z', '<leader>ff', '<leader>z' }, park = 'sP', hide = 'H',
       delete = 'D', yank = 'y', lazygit = 'glg', close = 'q', help = { '?', 'g?' }, graph = 'G', scope = '<S-Tab>',
       legend = { 'gL', '<leader>aL' }, close_tmux = 'X' },
     -- drawer, on prompt rows (elsewhere these keys keep their normal meaning)
@@ -226,7 +226,7 @@ With many sessions across many repositories, large ones can bury the session you
 
 In project scope the drawer has no project row. Its first, dimmed line names the project and branch and says `<S-Tab>: all` (`<CR>` on it goes back to all). Below it come the Prompts node, then `+ New session`, `Sessions (n)` (open), `Saved prompts`, `Changes` and `Commits`, all at the top level. Every drawer key works as usual on these rows. Sessions of other projects keep running in this Neovim, they are just not listed. When one of them needs you (waiting, done unread, failed, also a Claude in a terminal that waits for input), a dimmed last line says so, for example `1 session in other projects needs you · <S-Tab>`, and `<leader>an` with nothing to do in the project says `nothing in this project; 1 in other projects (<S-Tab>)`. Each scope remembers its own open folds.
 
-Search (`<leader>as`, `<leader>aP`, `Z` outside a project row) opens on `project <name>`, and `<Tab>` widens it to all sessions. The status file for the desktop bar keeps listing all sessions of this Neovim. `:AgentsCloseIdle` closes only the project's idle terminal sessions (its confirm names the project); `:AgentsCloseIdle!` closes those of every project. The prompt history (`<C-p>`, `<C-n>`) is the session's own in either scope, so it never shows prompts of another project.
+Search (`<leader>as`, `<leader>aP`, `z` outside a project row) opens on `project <name>`, and `<Tab>` widens it to all sessions. The status file for the desktop bar keeps listing all sessions of this Neovim. `:AgentsCloseIdle` closes only the project's idle terminal sessions (its confirm names the project); `:AgentsCloseIdle!` closes those of every project. The prompt history (`<C-p>`, `<C-n>`) is the session's own in either scope, so it never shows prompts of another project.
 
 Open a terminal straight into a project:
 
@@ -259,7 +259,7 @@ In the drawer (`keys.drawer`; the prompt row keys are `keys.prompts`, the sessio
 | `z9` | Expand all projects with their `Sessions`; `Changes`, `Commits`, `Saved prompts`, `Hidden` and the Prompts node stay as they are (opening them loads git or prompts for every project). `z9` again, with nothing changed in between, opens everything (a commit's own file list excepted). Git counts of closed sections load a few projects at a time |
 | `R` | Rescan sessions and refresh running state |
 | `gT`, `<leader>aT` | To tmux: on a session running elsewhere, jump to its tmux pane; on any other session, continue it in native Claude in a tmux pane (see [Native Claude](#chat)) |
-| `Z`, `<leader>ff`, `<leader>Z` | Search the sessions of the project under the cursor |
+| `z`, `<leader>ff`, `<leader>z` | Search the sessions of the project under the cursor (`z` alone acts after the key timeout, since `za`, `z0` and `z9` start with it) |
 | `sP` | Park the session: stop the Claude process this Neovim runs for it |
 | `H` | Hide the session into its project's `Hidden (n)` group; on a hidden session: show it again (Vim's `H` motion is not available in the drawer) |
 | `D` | Session row: delete an inactive session, moving it to the plugin's trash after a confirm (see [Deleting sessions](#deleting-sessions)). Prompt row: delete the file (asks first) |
@@ -463,7 +463,7 @@ opts = { prompts = { library_dir = '~/notes/prompts' } }
 
 ## Search
 
-`<leader>as` (or `:AgentsSearch [query]`, or `require('agent-ide').search()`) opens a floating picker that searches the titles, your prompts and Claude's answers of every session, live as you type. `<leader>aP` opens the same picker on your prompts only, newest first: the prompt history of all sessions. In the drawer, `Z` searches the project under the cursor.
+`<leader>as` (or `:AgentsSearch [query]`, or `require('agent-ide').search()`) opens a floating picker that searches the titles, your prompts and Claude's answers of every session, live as you type. `<leader>aP` opens the same picker on your prompts only, newest first: the prompt history of all sessions. In the drawer, `z` searches the project under the cursor.
 
 With the Rust helper the search is fuzzy and typo-tolerant ([neo_frizbee](https://crates.io/crates/neo_frizbee)): exact and word-start matches come first, then titles before prompts before answers, then the newest; a fuzzy match must keep its letters close together. Words match in any order; a word with a capital letter matches case-sensitively; umlauts match regardless of case (`über` finds `Über`). A session found only through a word of its project's name is listed last (`proj`). The index is built in the background on first use, kept on disk and updated when a transcript changes. Without the helper the picker says it is limited: titles and prompts only, exact words only.
 

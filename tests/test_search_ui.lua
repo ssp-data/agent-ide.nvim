@@ -224,7 +224,14 @@ T['scope: drawer s searches the project, <Tab> cycles to all; / stays built-in; 
   local row
   for i, l in ipairs(rows) do if l:find(' beta ', 1, true) then row = i end end
   child.lua('local s = require("agent-ide.ui.drawer").state(); vim.api.nvim_set_current_win(s.win); vim.api.nvim_win_set_cursor(s.win, { ..., 0 })', { row })
-  child.type_keys('Z')
+  child.lua('vim.o.timeoutlen = 150')
+  -- za still folds at once (z is the start of za, so z alone acts after 'timeoutlen')
+  child.type_keys('za')
+  vim.wait(50)
+  eq(state(), vim.NIL)
+  child.type_keys('za')
+  child.type_keys('z')
+  vim.wait(400) -- the child waits out 'timeoutlen' before z acts; it cannot answer meanwhile
   wait_for(function() local s = state(); return s ~= vim.NIL and s.backend ~= nil end, 'picker')
   eq(state().scope, 'project')
   eq(title():find('project beta', 1, true) ~= nil, true)
@@ -237,7 +244,7 @@ T['scope: drawer s searches the project, <Tab> cycles to all; / stays built-in; 
   child.lua('local s = require("agent-ide.ui.drawer").state(); vim.api.nvim_set_current_win(s.win)')
   child.type_keys('?')
   local help = child.lua_get("vim.api.nvim_buf_get_lines(require('agent-ide.ui.help')._state().lbuf, 0, -1, false)")
-  eq(vim.iter(help):any(function(l) return l:match('^Z / <leader>ff / <leader>Z%s+search') ~= nil end), true)
+  eq(vim.iter(help):any(function(l) return l:match('^z / <leader>ff / <leader>z%s+search') ~= nil end), true)
 end
 
 T['entry points: keys, :AgentsSearch, prompt history newest first; stale results are dropped'] = function()
