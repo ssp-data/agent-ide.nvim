@@ -132,9 +132,16 @@ local function emit(events, results, known, out, nested)
   end
 end
 
----@param events table[]
----@return { lines: string[], folds: { first: integer, last: integer }[] }
-function M.render(events)
+---True when `ev` starts a turn: a main-thread prompt. Events before the first one form turn 0.
+---@param ev table
+---@return boolean
+function M.starts_turn(ev)
+  return ev.kind == 'prompt' and not ev.sidechain
+end
+
+---Render one turn's events into `out`. Results attach only to calls of the same turn, so a
+---turn renders the same whatever follows it.
+local function emit_turn(events, out)
   local results, known = {}, {}
   for _, ev in ipairs(events) do
     if ev.kind == 'tool_call' and ev.id ~= nil then known[ev.id] = true end
@@ -145,8 +152,21 @@ function M.render(events)
       table.insert(results[ev.id], ev)
     end
   end
-  local out = { lines = {}, folds = {} }
   emit(events, results, known, out)
+end
+
+---Render events turn by turn; the result is the concatenation of each turn rendered alone.
+---@param events table[]
+---@return { lines: string[], folds: { first: integer, last: integer }[] }
+function M.render(events)
+  local out = { lines = {}, folds = {} }
+  local first = 1
+  for i = 2, #events + 1 do
+    if i > #events or M.starts_turn(events[i]) then
+      emit_turn(vim.list_slice(events, first, i - 1), out)
+      first = i
+    end
+  end
   return out
 end
 

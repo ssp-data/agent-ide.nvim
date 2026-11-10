@@ -54,14 +54,11 @@ local function refresh_windows(buf, reset_folds)
   end
 end
 
-local function get_buf(session)
-  local name = 'agent-ide://history/' .. session.id
-  local buf = vim.fn.bufnr(name)
-  if buf > 0 and bufs[buf] then return buf end
-  if buf <= 0 then
-    buf = api.nvim_create_buf(false, true)
-    api.nvim_buf_set_name(buf, name)
-  end
+---Make `buf` a read-only transcript buffer whose windows fold with the levels from `set_folds`.
+---Idempotent.
+---@param buf integer
+function M.setup_buf(buf)
+  if bufs[buf] then return end
   vim.bo[buf].bufhidden = 'hide'
   vim.bo[buf].undolevels = -1
   vim.bo[buf].modifiable = false
@@ -72,6 +69,31 @@ local function get_buf(session)
     callback = function(ev) apply_win(api.nvim_get_current_win(), ev.buf) end })
   api.nvim_create_autocmd('BufWipeout', { group = augroup, buffer = buf,
     callback = function(ev) bufs[ev.buf] = nil end })
+end
+
+---Store the per-line fold levels (as from `render.fold_levels`) read by `foldexpr` for `buf`.
+---The table is kept by reference: a caller may update it in place before changing lines.
+---@param buf integer
+---@param levels string[]
+function M.set_folds(buf, levels)
+  M.setup_buf(buf)
+  bufs[buf].levels = levels
+end
+
+---Stored fold levels of `buf` (tests).
+function M._levels(buf)
+  return bufs[buf] and bufs[buf].levels
+end
+
+local function get_buf(session)
+  local name = 'agent-ide://history/' .. session.id
+  local buf = vim.fn.bufnr(name)
+  if buf > 0 and bufs[buf] then return buf end
+  if buf <= 0 then
+    buf = api.nvim_create_buf(false, true)
+    api.nvim_buf_set_name(buf, name)
+  end
+  M.setup_buf(buf)
   return buf
 end
 
