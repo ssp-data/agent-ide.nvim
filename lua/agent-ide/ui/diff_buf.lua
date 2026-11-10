@@ -52,6 +52,13 @@ function M.is_ours(buf) return ours[buf] == true end
 
 local saved = {} -- buf -> { [lhs] = maparg dict|false }
 
+local function local_map(buf, lhs)
+  return api.nvim_buf_call(buf, function()
+    local m = vim.fn.maparg(lhs, 'n', false, true)
+    return (type(m) == 'table' and m.buffer == 1) and m or nil
+  end)
+end
+
 ---Keys of a config value: a key, a list of keys, or false/nil (none).
 ---@param v string|string[]|false|nil
 ---@return string[]
@@ -68,18 +75,13 @@ function M.map(buf, lhs, fn, desc)
   if not ours[buf] then
     saved[buf] = saved[buf] or {}
     if saved[buf][lhs] == nil then
-      local m = vim.fn.maparg(lhs, 'n', false, true)
-      saved[buf][lhs] = (type(m) == 'table' and m.buffer == 1) and m or false
+      -- read from `buf`, not the current buffer: the current window may show another one
+      local m = local_map(buf, lhs)
+      local ours_already = m and type(m.desc) == 'string' and vim.startswith(m.desc, 'Agent-IDE:')
+      saved[buf][lhs] = (m and not ours_already) and m or false
     end
   end
   vim.keymap.set('n', lhs, fn, { buffer = buf, nowait = true, silent = true, desc = 'Agent-IDE: ' .. desc })
-end
-
-local function local_map(buf, lhs)
-  return api.nvim_buf_call(buf, function()
-    local m = vim.fn.maparg(lhs, 'n', false, true)
-    return (type(m) == 'table' and m.buffer == 1) and m or nil
-  end)
 end
 
 ---Remove the keys mapped by `map` from `buf` and restore what they replaced. A key another

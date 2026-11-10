@@ -269,6 +269,52 @@ T['gb picks a commit of this file, gB goes back to the branch view'] = function(
   eq({ view().path, view().right.name }, { 'a.lua', repo .. '/a.lua' })
 end
 
+-- The user's own buffer-local `]c` (with a description) on new.lua, the file after del.txt; the
+-- step to it starts while `where` ('left' or 'third') is the current window, the async git call
+-- ends there, then the view closes from the left window: the user's map is back, ours are gone.
+local function maps_survive_step_from(where)
+  start()
+  child.lua([[vim.api.nvim_buf_call(vim.fn.bufadd(...), function()
+    vim.fn.bufload(vim.api.nvim_get_current_buf())
+    vim.keymap.set('n', ']c', function() _G.mine = (_G.mine or 0) + 1 end, { buffer = true, desc = 'user: next change' })
+  end)]], { repo .. '/new.lua' })
+  open_file('D del.txt')
+  child.lua([[
+    local d = require('agent-ide.ui.diff')
+    if ... == 'left' then
+      vim.api.nvim_set_current_win(d.state().left)
+    else
+      vim.cmd('botright new')
+      vim.keymap.set('n', ']c', function() end, { buffer = true, desc = 'third window map' })
+    end
+    d.step(1) -- the git call is async: the window is still the one set above when it is applied
+  ]], { where })
+  wait_for(function() local v = view(); return v ~= vim.NIL and v.path == 'new.lua' and v.right.name == repo .. '/new.lua' and v.right.diff end, 'new.lua')
+  child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.diff").state().left); require("agent-ide.ui.diff").close()')
+  wait_for(function() return view() == vim.NIL end, 'closed')
+  local r = child.lua_get([[(function(path)
+    local b = vim.fn.bufnr(path)
+    local out = { ours = {}, mine = vim.NIL }
+    for _, m in ipairs(vim.api.nvim_buf_get_keymap(b, 'n')) do
+      if type(m.desc) == 'string' and vim.startswith(m.desc, 'Agent-IDE:') then out.ours[#out.ours + 1] = m.lhs end
+      if m.lhs == ']c' then out.mine = m.desc end
+    end
+    _G.mine = 0
+    vim.api.nvim_buf_call(b, function() vim.cmd('normal ]c') end)
+    out.called = _G.mine
+    return out
+  end)(...)]], { repo .. '/new.lua' })
+  eq(r, { ours = {}, mine = 'user: next change', called = 1 })
+end
+
+T['the user\'s buffer-local map survives a step started from the left window'] = function()
+  maps_survive_step_from('left')
+end
+
+T['the user\'s buffer-local map survives a step finishing while a third window is current'] = function()
+  maps_survive_step_from('third')
+end
+
 T['q returns to the chat that was open; keys and diff options are gone from the real buffer'] = function()
   start()
   child.lua([[vim.api.nvim_buf_call(vim.fn.bufadd(...), function()

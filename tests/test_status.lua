@@ -191,6 +191,57 @@ T['quota.file: its limits replace the own values; missing, malformed or old fall
   if not ok then error(err, 0) end
 end
 
+T['quota.file: a FIFO (or a symlink to one) is never opened; once it is a regular file the next read works'] = function()
+  if vim.fn.executable('mkfifo') == 0 then return MiniTest.skip('mkfifo is missing') end
+  local config = require('agent-ide.config')
+  local fifo, link = dir .. '/usage.fifo', dir .. '/usage.link'
+  vim.fn.system({ 'mkfifo', fifo })
+  eq(vim.v.shell_error, 0)
+  local now = os.time()
+  use({})
+  status._src.now = function() return now end
+  local function iso(t) return os.date('!%Y-%m-%dT%H:%M:%SZ', t) end
+  local function line() return status.statusline() end
+  local function wait_line(want)
+    if vim.wait(2000, function() return line() == want end, 10) then return true end
+    error('want ' .. want .. ', have ' .. line(), 2)
+  end
+  local ext = 'agents ok · Session ▰▰▰▱▱ 50%%'
+  local own = 'agents ok · 5h ▰▱▱▱▱ 10%%'
+  config.setup({ quota = { file = link } })
+  local ok, err = pcall(function()
+    set_quota({ five_hour = { utilization = 0.1 } })
+    status._src.now = function() return now end
+    -- the link points to a FIFO: the footer shows its own values and stays responsive
+    vim.uv.fs_symlink(fifo, link)
+    eq(line(), own)
+    vim.wait(300)
+    eq(line(), own)
+    -- the FIFO replaced by a regular file: the next read (60 s later) works
+    os.remove(link)
+    os.remove(fifo)
+    vim.fn.writefile({ vim.json.encode({ limits = { { label = 'Session', percent = 0.5 } }, updatedAt = iso(now) }) }, link)
+    now = now + 61
+    line()
+    eq(wait_line(ext), true)
+    -- the path itself a FIFO
+    os.remove(link)
+    config.setup({ quota = { file = fifo } })
+    vim.fn.system({ 'mkfifo', fifo })
+    now = now + 61
+    line()
+    vim.wait(300)
+    eq(wait_line(own), true)
+    os.remove(fifo)
+    vim.fn.writefile({ vim.json.encode({ limits = { { label = 'Session', percent = 0.5 } }, updatedAt = iso(now) }) }, fifo)
+    now = now + 61
+    line()
+    eq(wait_line(ext), true)
+  end)
+  config.setup({})
+  if not ok then error(err, 0) end
+end
+
 T['statusline never raises without setup or with broken sources'] = function()
   status._src.sessions = function() error('boom') end
   eq(type(status.statusline()), 'string')

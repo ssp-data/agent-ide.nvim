@@ -9,6 +9,7 @@ local STALE_SECONDS = 3600 -- quota values older than this are shown dimmed with
 local AGE_SHOWN_SECONDS = 600 -- older than this: the footer says how old
 local QUOTA_FILE_READ_SECONDS = 60 -- `quota.file` is read at most this often
 local QUOTA_FILE_MAX_AGE = 30 * 60 -- an older `quota.file` is not used
+local QUOTA_FILE_MAX_BYTES = 1024 * 1024 -- a larger one is not read
 local FILE_THROTTLE_MS = 200
 local REDRAW_THROTTLE_MS = 100
 local QUOTA_DEBOUNCE_MS = 1000
@@ -163,13 +164,17 @@ local function read_quota_file(path, now)
       if vim.json.encode(ext or {}) ~= before then M.refresh() end
     end)
   end
-  vim.uv.fs_open(path, 'r', 438, function(err, fd)
-    if err then return done(nil) end
-    vim.uv.fs_fstat(fd, function(_, st)
-      if not st or st.size > 1024 * 1024 then return vim.uv.fs_close(fd, function() done(nil) end) end
-      vim.uv.fs_read(fd, st.size, 0, function(_, data)
-        vim.uv.fs_close(fd, function()
-          vim.schedule(function() done(M._parse_quota_file(data, st.mtime.sec)) end)
+  -- stat first (it follows symlinks): opening a FIFO would block a threadpool thread forever
+  vim.uv.fs_stat(path, function(serr, st0)
+    if serr or not st0 or st0.type ~= 'file' or st0.size > QUOTA_FILE_MAX_BYTES then return done(nil) end
+    vim.uv.fs_open(path, 'r', 438, function(err, fd)
+      if err then return done(nil) end
+      vim.uv.fs_fstat(fd, function(_, st)
+        if not st or st.size > QUOTA_FILE_MAX_BYTES then return vim.uv.fs_close(fd, function() done(nil) end) end
+        vim.uv.fs_read(fd, st.size, 0, function(_, data)
+          vim.uv.fs_close(fd, function()
+            vim.schedule(function() done(M._parse_quota_file(data, st.mtime.sec)) end)
+          end)
         end)
       end)
     end)

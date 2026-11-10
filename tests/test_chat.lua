@@ -471,6 +471,86 @@ T['drawer hidden: a send asks afresh and starts Claude when no other Claude runs
   eq(prompt_lines(), { '' })
 end
 
+-- The live command takes `secs` seconds: the pre-send check is still running when the test acts.
+local function slow_live(secs)
+  child.lua('require("agent-ide").setup(vim.tbl_deep_extend("force", require("agent-ide.config").get(), { live = { interval_ms = 2000, cmd = { "sh", "-c", "sleep " .. ... .. "; echo []" } } }))', { secs })
+  open_fixture()
+  child.lua('require("agent-ide.ui.drawer").close()')
+  child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.chat")._windows().prompt)')
+end
+
+local function checking()
+  return child.lua_get('(function() for _, c in pairs(require("agent-ide.ui.chat")._chats()) do if c.checking then return true end end return false end)()')
+end
+
+local function last_note() local n = child.lua_get('_G.notes'); return n[#n] end
+
+T['drawer hidden: a prompt edited during the live check is not sent; the text stays, a later send works'] = function()
+  start(turn('Hello more', 'Fine.'))
+  slow_live(1)
+  type_prompt('Hello')
+  child.type_keys('<C-CR>')
+  eq(checking(), true)
+  wait_for(function() return last_note() == 'Agent-IDE: checking where this session runs…' end, 'slow-check notice')
+  child.type_keys(' more')
+  wait_for(function() return not checking() end, 'check done')
+  eq(last_note(), 'Agent-IDE: not sent: the prompt changed while checking; send again')
+  child.type_keys('<Esc>')
+  eq(prompt_lines(), { 'Hello more' })
+  eq(fake.log(log), {})
+  child.type_keys('i', '<C-CR>', '<Esc>')
+  wait_for(function() return has_line(transcript(), 'Fine.') ~= nil end, 'answer')
+  eq(prompt_lines(), { '' })
+end
+
+T['drawer hidden: <C-c> during the live check sends nothing'] = function()
+  start({})
+  slow_live(1)
+  type_prompt('Hold')
+  child.type_keys('<C-CR>')
+  eq(checking(), true)
+  child.type_keys('<Esc>', '<C-c>')
+  eq(checking(), false)
+  eq(last_note(), 'Agent-IDE: not sent: interrupted while checking; send again')
+  vim.wait(1500)
+  eq(fake.log(log), {})
+  eq(prompt_lines(), { 'Hold' })
+end
+
+T['drawer hidden: a fast live check shows no notice'] = function()
+  start(turn('Quick', 'Fine.'))
+  slow_live(0)
+  type_prompt('Quick')
+  child.type_keys('<C-CR>', '<Esc>')
+  wait_for(function() return has_line(transcript(), 'Fine.') ~= nil end, 'answer')
+  eq(child.lua_get('_G.notes'), {})
+end
+
+T['drawer hidden: an unchanged prompt is sent once after the live check'] = function()
+  start(turn('Once', 'Fine.'))
+  slow_live(1)
+  type_prompt('Once')
+  child.type_keys('<C-CR>', '<Esc>')
+  wait_for(function() return has_line(transcript(), 'Fine.') ~= nil end, 'answer')
+  eq(prompt_lines(), { '' })
+  eq(#fake_ins(), 1) -- one user message, not two
+end
+
+T['drawer hidden: a live check whose answer never comes is dropped after the guard; the next send works'] = function()
+  start(turn('Again', 'Fine.'))
+  slow_live(0)
+  child.lua('_G.real_query = require("agent-ide.live").query; require("agent-ide.live").query = function() end')
+  type_prompt('Again')
+  child.type_keys('<C-CR>', '<Esc>')
+  eq(checking(), true)
+  wait_for(function() return not checking() end, 'guard', 7000)
+  eq(last_note(), 'Agent-IDE: could not tell where this session runs (no answer); send again')
+  eq(prompt_lines(), { 'Again' })
+  child.lua('require("agent-ide.live").query = _G.real_query')
+  child.type_keys('i', '<C-CR>', '<Esc>')
+  wait_for(function() return has_line(transcript(), 'Fine.') ~= nil end, 'answer')
+end
+
 T['+ New session on a project without a folder key is refused'] = function()
   vim.fn.mkdir(projects .. '/-nocwd', 'p')
   vim.fn.writefile({ vim.json.encode({ type = 'user', uuid = 'q', message = { role = 'user', content = 'No cwd here' } }) },
