@@ -595,6 +595,32 @@ T['gd on an Edit or Write fold in the chat opens the branch diff of that file'] 
   eq({ view().index, view().n }, { 1, 5 })
 end
 
+T['q returns to a parked or handed-off session\'s chat; the hand-off key outside tmux keeps working'] = function()
+  start()
+  child.lua('require("agent-ide").toggle()')
+  press_on('P r  ')
+  press_on('Work on it')
+  wait_for(function() return child.lua_get('require("agent-ide.ui.chat")._windows().prompt ~= nil') end, 'chat')
+  -- outside tmux <leader>at parks the session and shows the command
+  child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.chat")._windows().transcript); _G.notes = {}')
+  child.type_keys('\\at')
+  wait_for(function() return #child.lua_get('_G.notes') > 0 end, 'hand-off notice')
+  press_on('Changes vs main (5)')
+  press_on('M a.lua')
+  wait_for(function() local v = view(); return v ~= vim.NIL and v.right.diff end, 'diff')
+  -- while the session is away in native Claude
+  child.lua([[local h = require('agent-ide.ui.handoff'); _G.orig_away = h.away; h.away = function() return true end]])
+  child.type_keys('q')
+  wait_for(function() return view() == vim.NIL end, 'closed')
+  wait_for(function() return child.lua_get('require("agent-ide.ui.chat")._windows().prompt ~= nil') end, 'chat back')
+  local w = child.lua_get('require("agent-ide.ui.chat")._windows().transcript')
+  eq(child.lua_get('vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(...))', { w }), 'agent-ide://chat/' .. ID)
+  eq(child.lua_get('vim.wo[...].winbar', { w }):find('in native Claude', 1, true) ~= nil, true)
+  eq(child.lua_get('require("agent-ide.session").get(...).state', { ID }), 'parked')
+  child.lua('require("agent-ide.ui.handoff").away = _G.orig_away')
+  eq(child.lua_get('vim.tbl_contains(vim.tbl_map(function(x) return vim.wo[x].diff end, vim.api.nvim_tabpage_list_wins(0)), true)'), false)
+end
+
 T['keys: every default is a list with a <leader>g twin that never takes one of the user\'s keys'] = function()
   start()
   local keys = child.lua_get('require("agent-ide.config").get().keys')
