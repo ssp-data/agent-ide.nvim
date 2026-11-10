@@ -177,14 +177,19 @@ local function send(c)
     c.check_n = (c.check_n or 0) + 1
     local n = c.check_n
     local cfg = require('agent-ide.config').get()
-    notify('Agent-IDE: checking where this session runs…')
-    -- the live command is killed after max(interval, 2 s); should its callback still not come,
-    -- the chat must not stay stuck
+    -- One timer: after 300 ms a check still running says so; then it waits out the live command
+    -- (killed after max(interval, 2 s)) plus 2 s, so a callback that never comes cannot leave the
+    -- chat stuck.
+    local limit = math.max(cfg.live.interval_ms, 2000) + 2000
     local guard = vim.uv.new_timer()
     c.check_timer = guard
-    guard:start(math.max(cfg.live.interval_ms, 2000) + 2000, 0, vim.schedule_wrap(function()
+    guard:start(300, 0, vim.schedule_wrap(function()
       if c.check_n ~= n then return end
-      cancel_check(c, 'Agent-IDE: could not tell where this session runs (no answer); send again')
+      notify('Agent-IDE: checking where this session runs…')
+      guard:start(limit - 300, 0, vim.schedule_wrap(function()
+        if c.check_n ~= n then return end
+        cancel_check(c, 'Agent-IDE: could not tell where this session runs (no answer); send again')
+      end))
     end))
     require('agent-ide.live').query({ cmd = cfg.live.cmd, interval_ms = cfg.live.interval_ms }, function()
       if c.check_n ~= n then return end -- cancelled or timed out meanwhile

@@ -4,8 +4,6 @@
 local fake = dofile(vim.fn.getcwd() .. '/tests/fake.lua')
 local eq = MiniTest.expect.equality
 local child = MiniTest.new_child_neovim()
--- the notices, without the one a first send shows while it checks where the session runs
-local NOTES = 'vim.tbl_filter(function(m) return not m:find("checking where", 1, true) end, _G.notes)'
 
 local FIXTURE_ID = '11111111-1111-4111-8111-111111111111'
 local FIXTURE = vim.fn.getcwd() .. '/tests/fixtures/projects/-home-u-git-alpha/' .. FIXTURE_ID .. '.jsonl'
@@ -308,7 +306,7 @@ T['session B asks while the user types in session A: nothing interrupts; next_wa
   wait_for(function() return child.lua_get('require("agent-ide.session").get(...).state', { b }) == 'waiting' end, 'B waiting')
   vim.wait(400) -- scheduled work in the child runs meanwhile
   eq(#selects(), 0)
-  eq(child.lua_get(NOTES), {})
+  eq(child.lua_get('_G.notes'), {})
   eq(float_count(), floats)
   eq(mode(), 'i')
   eq(child.lua_get('{ win = vim.api.nvim_get_current_win(), cursor = vim.api.nvim_win_get_cursor(0), buf = vim.api.nvim_get_current_buf() }'), before)
@@ -349,7 +347,7 @@ T['ask while typing in the same session prompt: echo only; the select opens on <
   eq(mode(), 'i')
   eq(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), { 'next' })
   eq(child.lua_get('vim.fn.execute("messages")'):find('Claude asks: Write: /x/a.txt  (<leader>ay to answer)', 1, true) ~= nil, true)
-  eq(child.lua_get(NOTES), {})
+  eq(child.lua_get('_G.notes'), {})
   child.type_keys('<Esc>')
   wait_for(function() return #selects() == 1 end, 'select after <Esc>')
   vim.wait(200)

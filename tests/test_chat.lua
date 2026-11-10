@@ -2,8 +2,6 @@
 local fake = dofile(vim.fn.getcwd() .. '/tests/fake.lua')
 local eq = MiniTest.expect.equality
 local child = MiniTest.new_child_neovim()
--- the notices, without the one a first send shows while it checks where the session runs
-local NOTES = 'vim.tbl_filter(function(m) return not m:find("checking where", 1, true) end, _G.notes)'
 
 local FIXTURE_ID = '11111111-1111-4111-8111-111111111111'
 local FIXTURE = vim.fn.getcwd() .. '/tests/fixtures/projects/-home-u-git-alpha/' .. FIXTURE_ID .. '.jsonl'
@@ -356,7 +354,7 @@ T[':bd on the transcript, then reopen: a fresh buffer equal to a full render; li
   child.type_keys('<C-CR>')
   wait_for(function() return current().state == 'idle' and has_line(transcript(), 'Still rendering') ~= nil end, 'turn')
   eq(equals_render(), true)
-  eq(#child.lua_get(NOTES), 0)
+  eq(#child.lua_get('_G.notes'), 0)
 end
 
 T[':bd on the prompt, then reopen: a fresh prompt buffer with its keys'] = function()
@@ -386,7 +384,7 @@ T[':bd on the transcript while a turn streams does not raise; the session goes o
   wait_for(function() return child.lua_get('require("agent-ide.session").all()[1].state') ~= 'busy' end, 'turn end')
   eq(child.lua_get('require("agent-ide.session").all()[1].owned'), true)
   eq(child.lua_get('vim.v.errmsg'), '')
-  eq(#child.lua_get(NOTES), 0)
+  eq(#child.lua_get('_G.notes'), 0)
   -- reopening shows the whole turn
   expand('repo')
   drawer_cursor_to('Streaming')
@@ -493,7 +491,7 @@ T['drawer hidden: a prompt edited during the live check is not sent; the text st
   type_prompt('Hello')
   child.type_keys('<C-CR>')
   eq(checking(), true)
-  eq(last_note(), 'Agent-IDE: checking where this session runs…')
+  wait_for(function() return last_note() == 'Agent-IDE: checking where this session runs…' end, 'slow-check notice')
   child.type_keys(' more')
   wait_for(function() return not checking() end, 'check done')
   eq(last_note(), 'Agent-IDE: not sent: the prompt changed while checking; send again')
@@ -517,6 +515,15 @@ T['drawer hidden: <C-c> during the live check sends nothing'] = function()
   vim.wait(1500)
   eq(fake.log(log), {})
   eq(prompt_lines(), { 'Hold' })
+end
+
+T['drawer hidden: a fast live check shows no notice'] = function()
+  start(turn('Quick', 'Fine.'))
+  slow_live(0)
+  type_prompt('Quick')
+  child.type_keys('<C-CR>', '<Esc>')
+  wait_for(function() return has_line(transcript(), 'Fine.') ~= nil end, 'answer')
+  eq(child.lua_get('_G.notes'), {})
 end
 
 T['drawer hidden: an unchanged prompt is sent once after the live check'] = function()
