@@ -25,6 +25,9 @@ The search across all sessions, with a rendered preview of the hit:
 
 The screenshots use synthetic demo sessions and repositories.
 
+![Omarchy Plugin](docs/images/omarchy-plugin.webp)
+
+s
 ## Focus
 The features and focus are on managing all agent sessions in a single drawer, as I use [Query databases in vim (vim-dadbod)](https://www.ssp.sh/brain/query-databases-in-vim-vim-dadbod/) to query databases within nvim, that's why it's called the **Agents IDE** because it's my IDE for agents.
 
