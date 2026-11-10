@@ -12,6 +12,18 @@ local GROUPS = {
   AgentIdeGitDeleted = { link = 'AgentIdeGitDel' },
   AgentIdeGitRenamed = { link = 'AgentIdeGitModified' },
   AgentIdeGitUntracked = require('agent-ide.ui.highlights').dim,
+  -- commit graph: one colour per lane column (rotating), ref badges, the hash dim
+  AgentIdeGraph1 = { fg = '#7aa2f7', ctermfg = 111 }, -- blue
+  AgentIdeGraph2 = { fg = '#bb9af7', ctermfg = 141 }, -- violet
+  AgentIdeGraph3 = { fg = '#7dcfff', ctermfg = 117 }, -- cyan
+  AgentIdeGraph4 = { fg = '#9ece6a', ctermfg = 114 }, -- green
+  AgentIdeGraph5 = { fg = '#e0af68', ctermfg = 179 }, -- yellow
+  AgentIdeGraph6 = { fg = '#ff9e64', ctermfg = 215 }, -- orange
+  AgentIdeGraphBranch = { fg = '#9ece6a', ctermfg = 114, bold = true },
+  AgentIdeGraphRemote = require('agent-ide.ui.highlights').dim,
+  AgentIdeGraphTag = { fg = '#e0af68', ctermfg = 179 },
+  AgentIdeGraphHead = { bold = true },
+  AgentIdeGraphHash = require('agent-ide.ui.highlights').dim,
 }
 
 local function apply()

@@ -10,6 +10,7 @@ local MAX_ROWS = 500
 
 local STATUS_HL = { M = 'AgentIdeGitModified', A = 'AgentIdeGitAdded', D = 'AgentIdeGitDeleted', R = 'AgentIdeGitRenamed',
   C = 'AgentIdeGitRenamed', ['?'] = 'AgentIdeGitUntracked', T = 'AgentIdeGitModified', U = 'AgentIdeGitDeleted' }
+M.STATUS_HL = STATUS_HL -- also the commit graph's file lines
 
 local function drawer() return require('agent-ide.ui.drawer') end
 

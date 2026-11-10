@@ -292,4 +292,21 @@ T['changes arrive before the untracked line counts; nested repositories are dirs
   eq({ m['u1.txt'].added, m['nested/'].dir, m['nested/'].added }, { 2, true, nil })
 end
 
+T['graph: all branches without the stash, the current branch, a limit, an unborn branch'] = function()
+  local d = feature_repo()
+  R.write(d, 'a.txt', { 'stashed' })
+  R.git(d, { 'stash', '-q' })
+  local res = R.await(function(cb) git.graph(d, { all = true, limit = 10 }, cb) end)
+  local subjects = vim.tbl_map(function(r) return r.subject end, vim.tbl_filter(function(r) return r.hash end, res.rows))
+  eq({ subjects, res.more }, { { 'feat two', 'feat one', 'init' }, false })
+  eq(res.rows[1].refs, { { name = 'feat', kind = 'branch' }, { name = 'HEAD', kind = 'head' } })
+  res = R.await(function(cb) git.graph(d, { all = false, limit = 2 }, cb) end)
+  eq({ #res.rows, res.more }, { 2, true })
+  local empty = R.init(tmp .. '/empty')
+  eq(R.await(function(cb) git.graph(empty, { all = false, limit = 10 }, cb) end), { empty = true })
+  eq(R.await(function(cb) git.graph(empty, { all = true, limit = 10 }, cb) end), { empty = true })
+  eq(R.await(function(cb) git.toplevel(d .. '/', cb) end), d)
+  eq(R.await(function(cb) git.toplevel(tmp, cb) end), nil)
+end
+
 return T

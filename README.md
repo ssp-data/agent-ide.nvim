@@ -333,6 +333,38 @@ Each git project in the drawer has two more sections below its sessions: `Change
 
 The right side is your own file, so the one-character keys `q`, `?` and `R` are mapped only on the left (base) side; on your file they stay macro recording, backward search and Replace mode, and the `<leader>g…` and `g?` forms work on both sides. Your own buffer-local mappings on the right side are put back when the diff closes. The keys are under `keys.diff` (and `keys.chat.diff`) in the configuration; each value is a key, a list of keys, or `false`. Git is only read (`git --no-optional-locks`, never a command that writes); acting is left to lazygit.
 
+## Commit graph
+
+`gG` on any row of a git project in the drawer (the project row, its sections, a session) opens the project's history as a graph in the main window, the way GitKraken or SourceTree show branches and merges. On a session that works in a linked worktree it shows that worktree. `:AgentsGraph` opens it for the current context: the chat's session, the diff view's repository, the drawer row, else the current file's (or the working directory's) repository. Outside a git repository you get a notice and nothing opens.
+
+```
+ myapp · graph · all branches                                       (winbar)
+ ●   a1b2c3d main HEAD origin/main Merge branch 'retry'                8m  ben
+ ├─╮
+ ● │ 9f8e7d6 chore: drop the old poller                               28m  ben
+ │ ● 77aa001 feat/retry test: retry with a fake server                 2h  ana
+ │ ● 4c5d6e7 feat: retry loop                                          2h  ana
+ ├─╯
+ ● 1e2f3a4 v0.3.0 release notes                                        1d  ben
+```
+
+Git draws the graph (`git log --graph --date-order`); the view turns its characters into box-drawing ones and colours each lane column. Branches, remote branches (dim), tags and `HEAD` show as badges after the hash; a long subject is cut with `…` so the age and the author stay visible. It shows the newest 300 commits of every branch, tag and remote (the stash left out); when there are more, the last line says so and `L` loads 300 more. The graph reloads when the project's git data does (a session's turn ends, `R` in the drawer or here), keeping the cursor on its commit, and never takes the focus.
+
+| Key (graph) | Action |
+|---|---|
+| `gG` (drawer) | Open the graph of the row's repository |
+| `<CR>` | On a commit: show / hide its changed files below it. On a file: the diff of that commit only (a merge against its first parent, the first commit against nothing); closing the diff comes back to the graph |
+| `]]` / `[[` | Next / previous commit |
+| `a` | All branches / the current branch only |
+| `R` | Refresh |
+| `L` | Load 300 more commits |
+| `y` | Yank the commit's full hash (unnamed and `+` registers) |
+| `glg` | lazygit for this repository |
+| `q` | Close, back to what was shown before |
+| `g?` | Help |
+
+Vim motions and `/` search work as usual. The keys are under `keys.graph` (`open`, `next_commit`, `prev_commit`, `all`, `refresh`, `more`, `yank`, `lazygit`, `close`, `help`), each a key, a list of keys, or `false`; the number of commits per load is `git = { graph_limit = 300 }`. Highlight groups: `AgentIdeGraph1` to `AgentIdeGraph6` (the lane colours), `AgentIdeGraphBranch`, `AgentIdeGraphRemote`, `AgentIdeGraphTag`, `AgentIdeGraphHead` and `AgentIdeGraphHash`, all overridable by a colorscheme.
+
 ## Prompts
 
 Reusable prompts one keypress away, in a `Prompts` node at the top of the drawer (it reads its folders only when you open it) and in a picker (`<leader>al` in the chat, or `require('agent-ide').prompts()`):

@@ -115,4 +115,66 @@ end
 ---@return string first line without the line end
 function M.line(s) return ((s or ''):match('^[^\r\n]*')) end
 
+-- Ref badges of one `%D` (with `--decorate=full`): `HEAD -> refs/heads/x` gives the branch, then
+-- HEAD; a remote's symbolic HEAD (`refs/remotes/origin/HEAD`) is left out.
+local function graph_refs(d)
+  local refs = {}
+  if d == '' then return refs end
+  for item in vim.gsplit(d, ', ', { plain = true }) do
+    local head_of = item:match('^HEAD %-> (.+)$')
+    local name = head_of or item
+    local tag = name:match('^tag: refs/tags/(.+)$') or name:match('^tag: (.+)$')
+    if tag then
+      refs[#refs + 1] = { name = tag, kind = 'tag' }
+    elseif name == 'HEAD' then
+      refs[#refs + 1] = { name = 'HEAD', kind = 'head' }
+    elseif name:find('^refs/heads/') then
+      refs[#refs + 1] = { name = name:sub(12), kind = 'branch' }
+    elseif name:find('^refs/remotes/') then
+      if not name:find('/HEAD$') then refs[#refs + 1] = { name = name:sub(14), kind = 'remote' } end
+    else
+      refs[#refs + 1] = { name = (name:gsub('^refs/', '')), kind = 'other' } -- e.g. grafted
+    end
+    if head_of then refs[#refs + 1] = { name = 'HEAD', kind = 'head' } end
+  end
+  return refs
+end
+
+---Rows of `git log --graph --format=%x1e%H%x1f%h%x1f%D%x1f%at%x1f%an%x1f%P%x1f%s` (with
+---`--decorate=full`): a commit row per commit, its `graph` the prefix git drew; a graph-only line
+---is a connector row `{ graph }` (trailing spaces cut). With `limit`, the commits after the first
+---`limit` are cut off (and what follows them); `more` tells whether there were any.
+---@param out string
+---@param limit? integer
+---@return table[] rows, boolean more
+function M.graph(out, limit)
+  local rows, n = {}, 0
+  for line in (out or ''):gmatch('[^\n]+') do
+    local graph, rest = line:match('^([^\30]*)\30(.*)$')
+    if not graph then
+      rows[#rows + 1] = { graph = (line:gsub('%s+$', '')) }
+    else
+      n = n + 1
+      if limit and n > limit then return rows, true end
+      -- six fields, then the subject (which may hold the separator itself)
+      local f, at = {}, 1
+      for i = 1, 6 do
+        local s = rest:find('\31', at, true)
+        if not s then break end
+        f[i] = rest:sub(at, s - 1)
+        at = s + 1
+      end
+      if #f == 6 then
+        local parents = {}
+        for p in f[6]:gmatch('%x+') do parents[#parents + 1] = p end
+        rows[#rows + 1] = { graph = graph, hash = f[1], short = f[2], refs = graph_refs(f[3]), time = tonumber(f[4]) or 0,
+          author = f[5], parents = parents, subject = (rest:sub(at):gsub('[%c]', ' ')) }
+      else
+        rows[#rows + 1] = { graph = (graph:gsub('%s+$', '')) }
+      end
+    end
+  end
+  return rows, false
+end
+
 return M

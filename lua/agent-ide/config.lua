@@ -40,7 +40,12 @@ local function defaults()
         refresh = { 'R', '<leader>gR' }, lazygit = 'glg' },
       -- drawer, on prompt rows (elsewhere these keys keep their normal meaning)
       prompts = { edit = 'e', rename = 'r', delete = 'd', yank = 'y', to_library = 'L' },
+      -- commit graph view, buffer-local; each a key, a list of keys, or false
+      graph = { open = '<CR>', next_commit = ']]', prev_commit = '[[', all = 'a', refresh = 'R', more = 'L', yank = 'y',
+        lazygit = 'glg', close = 'q', help = 'g?' },
     },
+    -- graph_limit: commits the commit graph loads at first (and L loads more of)
+    git = { graph_limit = 300 },
     -- Prompts: Claude's commands and skills (read only), the library of templates and per-project
     -- saved prompts. nil dirs: stdpath('data') .. '/agent-ide/library' and '/agent-ide/prompts'
     prompts = { library_dir = nil, saved_dir = nil, command_dirs = { '~/.claude/commands' },
