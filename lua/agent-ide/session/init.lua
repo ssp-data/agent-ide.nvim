@@ -112,6 +112,7 @@ function M._reset()
   require('agent-ide.session.commands')._reset()
   require('agent-ide.claude.models')._reset()
   require('agent-ide.ui.mode')._reset()
+  require('agent-ide.agents')._reset()
   object._reset_ids()
 end
 

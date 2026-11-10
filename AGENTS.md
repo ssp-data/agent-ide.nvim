@@ -21,7 +21,8 @@ A Neovim plugin that manages Claude Code sessions from inside Neovim: a drawer w
 | `lua/agent-ide/sound.lua` | the chime when a session needs you (`chime.wav` in the cache folder, a system player) |
 | `lua/agent-ide/claude/` | starting Claude Code (directly or through a keeper), stream parsing, version guard |
 | `lua/agent-ide/keeper/` | the keeper (`main.lua`, run by `nvim -l`, owns a Claude's pipes and outlives Neovim), its client, discovery; `session/attach.lua` reattaches a Session |
-| `lua/agent-ide/session/` | session object, states, prompt queue, actions |
+| `lua/agent-ide/agents/` | the adapters a Session drives an agent through: `claude.lua` (Claude's wire, keepers), `acp/` (any agent speaking the Agent Client Protocol: JSON-RPC client, translation to Actions, client-side file methods), `log.lua` (the plugin's own event log for sessions without a Claude transcript); `init.lua` is the registry (`config.agents`, `default_agent`) |
+| `lua/agent-ide/session/` | session object, states, prompt queue, actions; agent-agnostic (`s.adapter`, `s.capabilities`) |
 | `lua/agent-ide/transcript/` | parsing transcripts into events, rendering events into lines and folds |
 | `lua/agent-ide/index/`, `search/` | talking to the helper, Lua fallbacks |
 | `lua/agent-ide/git*.lua` | read-only, asynchronous git queries, parsing, cache |

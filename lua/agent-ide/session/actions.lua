@@ -29,9 +29,12 @@ end
 
 function H.init(s, a)
   s.model, s.slash_commands = a.model, a.slash_commands
-  require('agent-ide.prefs').set('model', a.model) -- the model last used: new sessions start with it
-  if s.cwd and type(a.slash_commands) == 'table' and #a.slash_commands > 0 then
-    require('agent-ide.session.commands').record(s.cwd, a.slash_commands) -- for new sessions
+  -- prefs.json and commands.json are Claude's (its model names, its command list per project)
+  if s.agent == 'claude' then
+    require('agent-ide.prefs').set('model', a.model) -- the model last used: new sessions start with it
+    if s.cwd and type(a.slash_commands) == 'table' and #a.slash_commands > 0 then
+      require('agent-ide.session.commands').record(s.cwd, a.slash_commands) -- for new sessions
+    end
   end
   mode_is(s, a.mode)
   s:_emit('meta')
@@ -220,7 +223,7 @@ function M.on_exit(s, code, tail)
   if parking then
     s:_set_state('parked')
   elseif s.state == 'busy' or s.state == 'waiting' then
-    local text = ('Claude exited (code %s)'):format(tostring(code))
+    local text = ('%s exited (code %s)'):format(s.adapter.label, tostring(code))
     tail = vim.trim(tail or '')
     if tail ~= '' then text = text .. '\n' .. tail end
     s:_append(live_meta('error', text))

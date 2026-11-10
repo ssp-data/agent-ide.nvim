@@ -90,6 +90,12 @@ defaults = function()
     -- leaves it running and a new Neovim reattaches; idle_minutes: an idle Claude with no Neovim
     -- attached is closed after that long (false: never). enabled = false: a child of Neovim
     keeper = { enabled = true, idle_minutes = 30 },
+    -- the agents a session can run (see Other agents in the README): `claude` is built in and
+    -- configured under `claude` above; any other entry is an ACP agent `{ kind = 'acp', cmd = {…},
+    -- env = {}, fs = 'cwd'|'any'|false, replay_context = false }`. default_agent: what
+    -- `+ New session` starts
+    agents = { claude = {} },
+    default_agent = 'claude',
     -- 'nerd' (needs a Nerd Font in the terminal) or 'plain'; `icons` overrides single entries
     -- of that set (see ui/icons.lua for the keys); an empty string hides an icon
     icons_style = 'nerd',
