@@ -177,11 +177,15 @@ local function score(name, query)
   return first, pos - first
 end
 
----Claude's command list for session `s`: its own, else the last one seen for its project, else
----the most recent one of any project (session/commands.lua); nil when none is known.
-local function claude_commands(s)
+local function is_claude(s) return s == nil or s.agent == nil or s.agent == 'claude' end
+
+---The agent's command list for session `s`: its own, else (Claude) the last one seen for its
+---project, else the most recent one of any project (session/commands.lua); nil when none is
+---known. Another agent's list is only what it announced in this session.
+local function agent_commands(s)
   local own = s and s.slash_commands
   if own and #own > 0 then return own end
+  if not is_claude(s) then return nil end
   return require('agent-ide.session.commands').fallback(s and s.cwd)
 end
 
@@ -200,13 +204,13 @@ local function discovered_names()
 end
 
 ---Menu entries for `base` (`/` and what follows): the plugin's own commands first, then
----Claude's (see `claude_commands`) merged with the commands and skills found on disk.
+---the agent's (see `agent_commands`), for Claude merged with the commands and skills found on disk.
 ---@param s table|nil Session
 ---@param base string
 ---@return table[] complete-items
 function M.matches(s, base)
   local query = (base or ''):gsub('^/', '')
-  local commands = claude_commands(s)
+  local commands = agent_commands(s)
   local found, seen = {}, {}
   local function add(name, kind, info, rank)
     if seen[name] then return end
@@ -217,11 +221,17 @@ function M.matches(s, base)
         info = info or '', icase = 1, user_data = kind == 'plugin' and { agent_ide = name } or nil } }
     end
   end
-  for _, c in ipairs(PLUGIN_COMMANDS) do add(c.name, 'plugin', c.info, 0) end
+  for _, c in ipairs(PLUGIN_COMMANDS) do
+    -- `/model` only where the agent offers models
+    if c.name ~= 'model' or s == nil or s.capabilities == nil or s.capabilities.models then add(c.name, 'plugin', c.info, 0) end
+  end
   for _, c in ipairs(commands or {}) do
     if type(c) == 'string' then add(c, '', nil, 1) end
   end
-  for _, name in ipairs(discovered_names()) do add(name, '', nil, 1) end
+  -- the commands and skills on disk are Claude's
+  if is_claude(s) then
+    for _, name in ipairs(discovered_names()) do add(name, '', nil, 1) end
+  end
   table.sort(found, function(a, b)
     if a.sc ~= b.sc then return a.sc < b.sc end
     if a.span ~= b.span then return a.span < b.span end
@@ -240,7 +250,7 @@ function M.complete(findstart, base)
   if findstart == 1 then return line:match(SLASH) and 0 or -2 end
   local st = bufs[api.nvim_get_current_buf()]
   local s = st and st.s
-  if not claude_commands(s) and not hinted then
+  if not agent_commands(s) and not hinted then
     hinted = true
     vim.notify(HINT, vim.log.levels.INFO)
   end

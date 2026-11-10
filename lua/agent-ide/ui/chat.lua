@@ -82,16 +82,19 @@ local function winbar_text(s, project, width)
   -- the model it runs with, else the one it would start with here; none for a session another
   -- Claude runs (elsewhere, native: nothing starts here)
   local away = not s.model and (s:_elsewhere() or require('agent-ide.ui.handoff').away(s))
-  local model = not away and one_line(model_label) or nil
+  local model = not away and model_label and one_line(model_label) or nil
   local mode = (s.mode or s.mode_requested) and ('[' .. mode_label:gsub('^mode:', '') .. ']') or nil
   local hot = mode and not (quiet_mode(s.mode) and quiet_mode(s.mode_requested))
   local queued = #s.queue > 0 and ('queued:' .. #s.queue) or nil
   local name = one_line(project and project.name or '?')
   local title = one_line(s.title or 'new session')
+  -- another agent's session says which agent, first (a Claude session looks as it always did)
+  local agent = s.agent ~= 'claude' and one_line(s.adapter.label) or nil
   local W = vim.fn.strdisplaywidth
   local truncate = require('agent-ide.ui.layout').truncate
   local function lw()
     local n = (st.mark ~= '' and W(st.mark) + 1 or 0) + W(st.word) + (queued and W(SEP) + #queued or 0)
+    if agent then n = n + W(agent) + W(SEP) end
     if name ~= '' then n = n + W(SEP) + W(name) end
     return n
   end
@@ -117,6 +120,7 @@ local function winbar_text(s, project, width)
     if full ~= '' and spare >= 2 then name = truncate(full, spare) end
   end
   local out = {}
+  if agent then out[#out + 1] = seg('AgentIdeAgent', agent) .. SEP end
   if st.mark ~= '' then out[#out + 1] = seg(st.group, st.mark) .. ' ' end
   out[#out + 1] = seg(st.word_group, st.word)
   if queued then out[#out + 1] = SEP .. esc(queued) end
@@ -270,7 +274,7 @@ local function send(c)
   -- (the cached map may be old): two Claudes must never drive one session. The text stays in
   -- the prompt meanwhile (typing goes on); what the prompt holds when the answer comes is sent.
   -- (A session the polled map lists as elsewhere is refused at once, below.)
-  if not c.live_checked and c.s:needs_start() and not c.s:_elsewhere() then
+  if not c.live_checked and c.s.capabilities.live and c.s:needs_start() and not c.s:_elsewhere() then
     if c.checking then return end -- one question at a time; the answer sends the prompt
     c.checking = true
     local tick = api.nvim_buf_get_changedtick(c.pbuf)
@@ -441,6 +445,7 @@ end
 ---When it is back, reload it from disk in the background: never a focus or mode change; a chat
 ---on screen is refreshed in place, otherwise a notice says it is back.
 function ACT.native(c)
+  if not require('agent-ide.ui.mode').offers(c.s, 'native', 'a native screen in a tmux pane') then return end
   require('agent-ide.ui.handoff').start(c.s, {
     away = function()
       update_winbar(c)

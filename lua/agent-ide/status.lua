@@ -242,6 +242,8 @@ local function compute_text()
       local name = mode.model_name(cur, model)
       text = text .. ' · ' .. (name or model:gsub('^claude%-', ''))
     end
+    -- the quota windows are Claude's: not shown while another agent's chat has the focus
+    if type(cur.capabilities) == 'table' and not cur.capabilities.quota then return text end
   end
   return text .. quota_text()
 end
@@ -379,6 +381,8 @@ function M.snapshot()
         title = s.title or '',
         state = s.state,
         reason = (s.state == 'waiting' and first and first.tool_name) or '',
+        -- the agent of a session that is not Claude's (absent: Claude, as every row was before)
+        agent = (s.agent ~= nil and s.agent ~= 'claude') and s.agent or nil,
       }
     end
   end

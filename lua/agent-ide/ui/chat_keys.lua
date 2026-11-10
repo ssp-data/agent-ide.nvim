@@ -34,7 +34,9 @@ local HELP = {
   { 'diff', 'transcript: on an Edit/Write fold, the branch diff of its file' },
 }
 
-function M.help()
+---The chat help; `s` (the chat's session) adds what its agent does not offer.
+---@param s? table Session
+function M.help(s)
   local keys = M.keys()
   local rows = {}
   for _, h in ipairs(HELP) do
@@ -53,7 +55,34 @@ function M.help()
   rows[#rows + 1] = { key = 'ZZ', desc = 'prompt: save it, then hide the window' }
   rows[#rows + 1] = { key = ':q', desc = 'prompt: hide the window, the draft stays' }
   rows[#rows + 1] = { key = ':q!', desc = 'prompt: hide the window and discard the draft' }
+  vim.list_extend(rows, M.unsupported_rows(s))
   require('agent-ide.ui.help').open('Agent-IDE chat', rows)
+end
+
+-- What a key cannot do in a session of another agent, by capability.
+local UNSUPPORTED = {
+  { 'modes', 'mode', 'permission modes' },
+  { 'models', 'model', 'a choice of models' },
+  { 'native', 'native', 'a native screen in a tmux pane' },
+}
+
+---Help rows naming the features the agent of `s` does not offer (none for Claude).
+---@param s table|nil Session
+---@return table[]
+function M.unsupported_rows(s)
+  local rows = {}
+  if not s or type(s.capabilities) ~= 'table' or s.agent == 'claude' then return rows end
+  local keys = M.keys()
+  for _, u in ipairs(UNSUPPORTED) do
+    local k = keylist.label(keys[u[2]])
+    if k and not s.capabilities[u[1]] then
+      rows[#rows + 1] = { key = k, desc = ('%s does not offer %s through ACP'):format(s.adapter.label, u[3]) }
+    end
+  end
+  if not s.capabilities.commands then
+    rows[#rows + 1] = { key = '/', desc = ('%s announced no commands; the menu has the plugin\'s own'):format(s.adapter.label) }
+  end
+  return rows
 end
 
 ---Map the chat keys in `buf`.
@@ -72,7 +101,7 @@ function M.map(c, buf, is_transcript, act)
   map('n', keys.send_alt, function() act.send(c) end, 'send prompt')
   map('n', keys.interrupt, function() act.interrupt(c) end, 'interrupt')
   map('n', keys.prompt, function() act.focus_prompt(c, false) end, 'focus prompt')
-  map('n', keys.help, M.help, 'chat help')
+  map('n', keys.help, function() M.help(c.s) end, 'chat help')
   map('n', keys.answer, function() require('agent-ide.ui.permission').answer(c.s) end, 'answer Claude')
   map('n', keys.mode, function() require('agent-ide.ui.mode').cycle(c.s) end, 'next permission mode')
   map('n', keys.model, function() require('agent-ide.ui.mode').pick_model(c.s) end, 'pick model')
