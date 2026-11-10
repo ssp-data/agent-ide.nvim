@@ -445,6 +445,67 @@ T['history in insert mode only when the menu is closed and at the first/last lin
   wait_for(function() return vim.deep_equal(lines_of('prompt'), { 'a', 'b' }) end, 'history step forward')
 end
 
+T['insert-mode arrows step the history on the first/last line only, keep the draft, yield to a menu'] = function()
+  start()
+  -- keyword completion looks in this buffer only (not in every buffer of the child)
+  child.lua("vim.o.complete = '.'")
+  set_events({ { kind = 'prompt', text = 'one' }, { kind = 'prompt', text = 'two\nlines' } })
+  local function mode() return child.lua_get('vim.api.nvim_get_mode().mode') end
+  local function pum() return child.lua_get('vim.fn.pumvisible()') end
+  local function cur() return child.lua_get('vim.api.nvim_win_get_cursor(0)') end
+  child.type_keys('i', 'draft a', '<CR>', 'draft b', '<CR>', 'draft c')
+  wait_for(function() return mode() == 'i' and pum() == 0 end, 'insert mode, no menu')
+  -- not on the first line: the cursor moves
+  child.type_keys('<Up>')
+  eq(cur(), { 2, 7 })
+  eq(lines_of('prompt'), { 'draft a', 'draft b', 'draft c' })
+  child.type_keys('<Up>')
+  eq(cur(), { 1, 7 })
+  -- first line: older prompt, still in insert mode
+  child.type_keys('<Up>')
+  wait_for(function() return vim.deep_equal(lines_of('prompt'), { 'two', 'lines' }) end, 'step back')
+  eq(mode(), 'i')
+  eq(cur(), { 1, 3 })
+  child.type_keys('<Up>')
+  wait_for(function() return vim.deep_equal(lines_of('prompt'), { 'one' }) end, 'step back again')
+  child.type_keys('<Up>') -- oldest: native, nothing changes
+  eq(lines_of('prompt'), { 'one' })
+  -- last line: newer prompt, the cursor on its last line
+  child.type_keys('<Down>')
+  wait_for(function() return vim.deep_equal(lines_of('prompt'), { 'two', 'lines' }) end, 'step forward')
+  eq(cur(), { 2, 5 })
+  -- past the newest: the draft comes back, the cursor on its last line
+  child.type_keys('<Down>')
+  wait_for(function() return vim.deep_equal(lines_of('prompt'), { 'draft a', 'draft b', 'draft c' }) end, 'draft back')
+  eq(cur(), { 3, 7 })
+  eq(mode(), 'i')
+  -- on the last line of the draft with nothing newer: native (no change)
+  child.type_keys('<Down>')
+  eq(lines_of('prompt'), { 'draft a', 'draft b', 'draft c' })
+
+  -- a completion menu is open on the first line: <Up> moves in the menu, no history step
+  child.type_keys('<Esc>')
+  wait_for(function() return mode() == 'n' end, 'normal mode')
+  child.lua("vim.o.completeopt = 'menuone'") -- a menu for the one match
+  child.type_keys('gg', 'A', ' dr')
+  wait_for(function() return mode() == 'i' and pum() == 0 end, 'insert mode on the first line')
+  child.type_keys('<C-n>') -- native on the first line (no newer entry): keyword completion
+  wait_for(function() return pum() == 1 end, 'keyword menu')
+  child.type_keys('<Up>')
+  eq(pum(), 1)
+  eq(child.lua_get('vim.api.nvim_buf_line_count(0)'), 3)
+  eq(child.lua_get('vim.api.nvim_buf_get_lines(0, 1, -1, false)'), { 'draft b', 'draft c' })
+  child.type_keys('<C-e>')
+  wait_for(function() return pum() == 0 end, 'menu closed')
+  -- a plugin's menu: the arrow goes through as well
+  child.lua("package.loaded.cmp = { visible = function() return true end }")
+  child.type_keys('<Up>')
+  eq(lines_of('prompt'), { 'draft a dr', 'draft b', 'draft c' })
+  child.lua("package.loaded.cmp = nil")
+  child.type_keys('<Up>')
+  wait_for(function() return vim.deep_equal(lines_of('prompt'), { 'two', 'lines' }) end, 'step back after the menu')
+end
+
 T['insert-mode history keys keep their native action when no step is possible or a plugin menu is open'] = function()
   start()
   -- no history: <C-p> is native (completion), the buffer is untouched

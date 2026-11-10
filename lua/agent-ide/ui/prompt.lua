@@ -598,9 +598,11 @@ function M.setup_buf(buf, s)
       map('n', lhs, edge_key(buf, dir, lhs, false), desc)
       map('i', lhs, edge_key(buf, dir, lhs, true), desc)
     end
+    -- the arrows step too, on the first (last) line, under the same conditions
     if #l > 0 then
       local arrow = dir < 0 and '<Up>' or '<Down>'
       map('n', arrow, edge_key(buf, dir, arrow, false), desc)
+      map('i', arrow, edge_key(buf, dir, arrow, true), desc)
     end
   end
 end
