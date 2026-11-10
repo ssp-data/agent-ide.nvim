@@ -1,0 +1,22 @@
+[package]
+name = "agent-ide-helper"
+version = "0.1.0"
+edition = "2021"
+description = "Fast session scanner, transcript parser and file watcher for Agent-IDE.nvim"
+
+[lib]
+name = "agent_ide_helper"
+path = "src/lib.rs"
+
+[[bin]]
+name = "agent-ide-helper"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+rayon = "1"
+notify = "6"
+
+[profile.release]
+opt-level = 3

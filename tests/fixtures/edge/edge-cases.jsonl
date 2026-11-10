@@ -1,0 +1,24 @@
+[1, 2]
+{}
+{"type":5,"x":1}
+"just a string"
+42
+{"type":"user","message":{"content":"line one\n  \nline two"}}
+{"type":"user","message":{"content":"  <local-command-stdout>  out \n</local-command-stdout>  \n"}}
+{"type":"user","message":{"content":"<local-command-stdout>a</local-command-stdout> tail"}}
+{"type":"user","message":{"content":"<command-name> /review </command-name>\n<command-args>  pr 7 </command-args>"}}
+{"type":"user","isMeta":true,"message":{"content":[{"type":"text","text":"meta text"},{"type":"text"}]}}
+{"type":"user","message":{"content":[{"type":"text","text":"from list"},{"type":"tool_result","tool_use_id":"q1","content":[{"type":"text","text":"a"},{"type":"image","source":{}},{"text":"no type"},"bare",7,true,{"type":"text","text":5}]}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","content":{"k":"v"}},{"type":"tool_result","tool_use_id":"q2","content":"plain","is_error":"yes"}]}}
+{"type":"assistant","message":{"content":"assistant plain string"}}
+{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"hmm"},{"type":"thinking","thinking":""},{"type":"tool_use","name":"Read"},{"type":"tool_use","id":"u1","name":"Write","input":false},{"type":"tool_use","id":"u2","name":"Glob","input":{"pattern":"*.lua","nested":{"a":[1,2.5,"x"]}}}]}}
+{"type":"assistant","message":{"content":[{"type": "weird",  "a" : [1, 2, "}\"]"],"z":{"q":null}},{"type":5},{"nope":true},{"type":"text","text":"after unknowns"}]}}
+{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"mystery"}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"before null"},null,{"type":"text","text":"after null"}]}}
+{"type":"user","message":{"content":5}}
+{"type":"user","message":{"content":{"a":1}}}
+{"type":"user","message":"not an object"}
+{"type":"assistant","message":{"content":[]}}
+{"type":"summary","summary":"bookkeeping"}
+{"type":"future-thing","isSidechain":true,"payload":{"k":[1,2]}}
+{"type":"user","message":{"content":"cut off here
