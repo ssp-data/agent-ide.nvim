@@ -67,6 +67,7 @@ Panel {
   readonly property var groups: agg ? agg.groups : []
   readonly property var palette: hostWidget ? hostWidget.colors : Model.FALLBACK_COLORS
   property int selIndex: 0
+  property string selId: ""
 
   function stateColor(state) {
     return state === "waiting" ? palette.violet : state === "review" ? palette.orange : palette.yellow
@@ -87,9 +88,15 @@ Panel {
     root.close()
   }
 
-  onRowsChanged: selIndex = Math.max(0, Math.min(selIndex, rows.length - 1))
+  function select(i) {
+    selIndex = i
+    selId = rows.length > i ? rows[i].id : ""
+  }
+
+  // Keep the highlight on the same session when rows reorder or disappear.
+  onRowsChanged: selIndex = Model.selectedIndex(rows, selId, selIndex)
   onOpenedChanged: if (opened) {
-    selIndex = 0
+    select(0)
     refresh()
   }
 
@@ -112,7 +119,7 @@ Panel {
       // j/k move · Enter or l focus the tmux pane · r refresh · Esc close
       onMoveRequested: function(dx, dy) {
         if (dy !== 0 && root.rows.length > 0)
-          root.selIndex = Math.max(0, Math.min(root.selIndex + dy, root.rows.length - 1))
+          root.select(Math.max(0, Math.min(root.selIndex + dy, root.rows.length - 1)))
         else if (dx > 0 && root.rows.length > 0)
           root.activate(root.rows[root.selIndex])
       }
@@ -215,7 +222,7 @@ Panel {
                   enabled: true
                   cursorShape: sessionRow.jumpable ? Qt.PointingHandCursor : Qt.ArrowCursor
                   onClicked: {
-                    root.selIndex = sessionRow.modelData.flat
+                    root.select(sessionRow.modelData.flat)
                     root.activate(sessionRow.modelData)
                   }
                 }

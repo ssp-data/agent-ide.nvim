@@ -159,7 +159,7 @@ test("groups: one per Neovim, tmux last; rows keep their order inside a group", 
   const f1 = file(20, [sess("a", "busy")], { level: 2 })
   const f2 = file(10, [sess("b", "waiting"), sess("c", "done")], { level: 4 })
   const a = M.aggregate([f1, f2], [outs("t", "busy")], NOW)
-  assert.deepStrictEqual(a.groups.map((g) => g.label), ["Neovim 10", "Neovim 20", "tmux / other"])
+  assert.deepStrictEqual(a.groups.map((g) => g.label), ["Neovim · proj-b, proj-c", "Neovim · proj-a", "tmux / other"])
   assert.deepStrictEqual(a.groups[0].rows.map((r) => r.id), ["b", "c"])
   assert.strictEqual(a.groups[2].rows[0].source, "tmux")
 })
@@ -215,4 +215,30 @@ test("parseThemeColors: palette keys with fallbacks", () => {
 test("colorFor maps levels", () => {
   const c = { green: "g", yellow: "y", orange: "o", violet: "v" }
   assert.deepStrictEqual([1, 2, 3, 4, 9].map((l) => M.colorFor(l, c)), ["g", "y", "o", "v", "g"])
+})
+
+test("aggregate does not depend on time while nothing is stale", () => {
+  const f = file(1, [sess("a", "waiting"), sess("b", "busy")], { level: 4, updated: NOW })
+  const o = [outs("t", "busy")]
+  assert.deepStrictEqual(M.aggregate([f], o, NOW), M.aggregate([f], o, NOW + 60))
+  assert.deepStrictEqual(M.aggregate([f], o, NOW), M.aggregate([f], o, NOW - 60))
+})
+
+test("groupLabel: one or two projects by name, more by count", () => {
+  const r = (...p) => p.map((x) => ({ project: x }))
+  assert.strictEqual(M.groupLabel(r("b", "a", "b")), "Neovim · a, b")
+  assert.strictEqual(M.groupLabel(r("only")), "Neovim · only")
+  assert.strictEqual(M.groupLabel(r("a", "b", "c")), "Neovim · 3 projects")
+  assert.strictEqual(M.groupLabel(r("", "")), "Neovim")
+  assert.strictEqual(M.groupLabel([]), "Neovim")
+})
+
+test("selectedIndex follows the id, else the nearest valid index", () => {
+  const rows = [{ id: "a" }, { id: "b" }, { id: "c" }]
+  assert.strictEqual(M.selectedIndex(rows, "c", 0), 2)
+  assert.strictEqual(M.selectedIndex(rows, "gone", 1), 1)
+  assert.strictEqual(M.selectedIndex(rows, "gone", 9), 2)
+  assert.strictEqual(M.selectedIndex(rows, "gone", -3), 0)
+  assert.strictEqual(M.selectedIndex([], "a", 4), 0)
+  assert.strictEqual(M.selectedIndex(null, "a", 4), 0)
 })

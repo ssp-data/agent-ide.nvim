@@ -14,7 +14,7 @@ BarWidget {
   moduleName: "io.github.sspaeti.agent-ide"
 
   readonly property int statusIntervalMs: 2000
-  readonly property int outsideIntervalMs: 5000
+  readonly property int outsideIntervalMs: 10000
   readonly property int outsideFailuresKept: 3 // keep the last list over this many failed polls (~15 s)
 
   // ---- State.
@@ -23,9 +23,20 @@ BarWidget {
   property int outsideFailures: 0
   property double nowSec: Date.now() / 1000
   property var colors: Model.FALLBACK_COLORS
-  readonly property var agg: Model.aggregate(files, outside, nowSec)
+  // Plain property, assigned only when the content changed: a fresh object on every tick would make the panel's
+  // Repeaters rebuild all rows (hover flicker, lost clicks). The aggregate holds nothing derived from the time.
+  property var agg: Model.aggregate([], [], 0)
+  property string aggSig: ""
   readonly property string badge: Model.badge(agg)
   readonly property color dotColor: Model.colorFor(agg.level, colors)
+
+  function recompute() {
+    var a = Model.aggregate(files, outside, nowSec)
+    var sig = JSON.stringify(a)
+    if (sig === aggSig) return
+    aggSig = sig
+    agg = a
+  }
 
   function scriptPath(name) {
     return Qt.resolvedUrl(name).toString().replace(/^file:\/\//, "")
@@ -64,6 +75,7 @@ BarWidget {
       onStreamFinished: {
         root.files = Model.parseStatusLines(text)
         root.nowSec = Date.now() / 1000
+        root.recompute()
       }
     }
   }
@@ -82,6 +94,7 @@ BarWidget {
           // `claude` missing or failing: the source is empty after a few polls
           if (root.outsideFailures >= root.outsideFailuresKept) root.outside = []
         }
+        root.recompute()
       }
     }
   }
@@ -93,6 +106,7 @@ BarWidget {
     triggeredOnStart: true
     onTriggered: {
       root.nowSec = Date.now() / 1000 // also ages out files while the script finds nothing new
+      root.recompute()
       root.pollStatus()
     }
   }

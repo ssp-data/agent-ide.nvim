@@ -32,7 +32,8 @@ test("empty directory: no output", () => {
 
 test("alive, dead, junk and temp files", () => {
   const dir = tmp()
-  const dead = 2 ** 22 + 12345 // above the default pid_max
+  const pidMax = Number(fs.readFileSync("/proc/sys/kernel/pid_max", "utf8").trim()) || 4194304
+  const dead = pidMax + 12345 // above pid_max, so no process can have it
   fs.writeFileSync(path.join(dir, `status-${process.pid}.json`), status(process.pid, 4))
   fs.writeFileSync(path.join(dir, `status-${dead}.json`), status(dead, 4))
   fs.writeFileSync(path.join(dir, "status-abc.json"), "{}")

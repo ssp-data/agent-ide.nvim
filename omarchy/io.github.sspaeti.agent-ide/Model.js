@@ -191,9 +191,35 @@ function groupRows(rows) {
     byPid[row.nvimPid].push(row)
   }
   pids.sort(function (a, b) { return a - b })
-  var groups = pids.map(function (p) { return { label: "Neovim " + p, rows: byPid[p] } })
+  var groups = pids.map(function (p) { return { label: groupLabel(byPid[p]), rows: byPid[p] } })
   if (tmux.length) groups.push({ label: "tmux / other", rows: tmux })
   return groups
+}
+
+// "Neovim · proj" / "Neovim · a, b" for one or two distinct projects, else "Neovim · n projects".
+function groupLabel(rows) {
+  var seen = {}
+  var names = []
+  for (var i = 0; i < rows.length; i++) {
+    var p = rows[i].project
+    if (p !== "" && !seen[p]) {
+      seen[p] = true
+      names.push(p)
+    }
+  }
+  names.sort()
+  if (names.length === 0) return "Neovim"
+  if (names.length <= 2) return "Neovim · " + names.join(", ")
+  return "Neovim · " + names.length + " projects"
+}
+
+// Index of the selected row after the rows changed: follow the session id; if it is gone, the nearest valid index.
+function selectedIndex(rows, id, prevIndex) {
+  var list = Array.isArray(rows) ? rows : []
+  if (list.length === 0) return 0
+  for (var i = 0; i < list.length; i++) if (list[i].id === id) return i
+  var p = typeof prevIndex === "number" ? prevIndex : 0
+  return Math.max(0, Math.min(p, list.length - 1))
 }
 
 // Text next to the dot: the waiting count at level 4, the review count at level 3, nothing otherwise.
@@ -242,6 +268,8 @@ if (typeof module !== "undefined") {
     parseOutside: parseOutside,
     aggregate: aggregate,
     badge: badge,
+    groupLabel: groupLabel,
+    selectedIndex: selectedIndex,
     tooltip: tooltip,
     parseThemeColors: parseThemeColors,
     colorFor: colorFor,

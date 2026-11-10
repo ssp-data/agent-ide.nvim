@@ -16,10 +16,10 @@ Level 4 wins over 3, 3 over 2, 2 over 1. Hover for the summary ("1 waiting for i
 ## Panel
 
 Left click opens it. Rows are sorted by urgency (waiting with the tool name as reason, then review, then
-running), then by project, and grouped by source: one block per Neovim (`Neovim <pid>`), then `tmux / other`.
+running), then by project, and grouped by source: one block per Neovim (labelled `Neovim · <project>`, `Neovim · <a>, <b>` or `Neovim · <n> projects`), then `tmux / other`.
 Each row shows project, session title and state. `j`/`k` move, `Enter` or a click focuses the tmux pane of that
 session (same steps as the Neovim plugin: `ps -o tty=`, `tmux list-panes -a`, `tmux switch-client`), `r`
-refreshes, `Esc` closes. Middle click on the dot refreshes. The panel shows at most 20 rows.
+refreshes, `Esc` closes. Jumping only changes tmux's selection (window, pane, client); it does not raise or focus the terminal window in Hyprland. Middle click on the dot refreshes. The panel shows at most 20 rows.
 
 ## Install
 
@@ -37,7 +37,7 @@ code on save. Then put the widget on the bar (Omarchy bar settings, category "AI
   by `lua/agent-ide/status.lua`). A file counts only if its pid is alive and, while its level is above 1, its
   `updated` is at most 90 s old (Neovim rewrites it every 30 s while something is going on). Half-written or
   malformed files are skipped.
-- `outside.sh`, every 5 s: `claude agents --json` (4 s timeout). Sessions with the same id as one in a status
+- `outside.sh`, every 10 s: `claude agents --json` (4 s timeout). Sessions with the same id as one in a status
   file are counted once. If the call fails the last answer is kept for three polls, then this source is empty.
 - `Model.js` combines both (pure JavaScript, tested with `make test-omarchy`). The counts are derived from the
   de-duplicated session rows, not from the counters in the status files, because those counters already include
@@ -59,6 +59,7 @@ passes once those annotations are ignored. The QML is otherwise unverified until
 
 ## Troubleshooting
 
+- **Brief green dot after suspend/resume**: the status files look stale (older than 90 s) until each Neovim writes its next heartbeat, up to 30 s later, so the dot can be green for a moment although agents are working.
 - **Green dot, nothing else**: no status files, or Neovim is not running the plugin. Check
   `ls $XDG_RUNTIME_DIR/agent-ide/` and that `require('agent-ide.status').setup()` ran. An empty or missing directory is
   "all good" on purpose.
