@@ -36,6 +36,12 @@ function M.apply_win(win, buf)
   end
   local b = bufs[buf]
   api.nvim_set_option_value('winbar', b and b.winbar or '', { scope = 'local', win = win })
+  -- 'list' as it was before the raw view (ui/raw.lua) turned it off in this window
+  local list = vim.w[win].agent_ide_list
+  if list ~= nil then
+    api.nvim_set_option_value('list', list, { scope = 'local', win = win })
+    vim.w[win].agent_ide_list = nil
+  end
 end
 
 ---Make `buf` a read-only transcript buffer whose windows fold with the levels from `set_folds`.

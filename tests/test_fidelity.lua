@@ -450,6 +450,26 @@ T['the raw view has no folds; the transcript folds are back after q'] = function
   eq(child.lua_get('vim.fn.foldclosed(...)', { header }), header)
 end
 
+T['the raw view does not wrap (long lines); the transcript wraps again after q and after :b'] = function()
+  start(flat({ expect = 'Go' }, raw(INIT), raw(SAY), raw(RESULT)))
+  open_chat()
+  send('Go')
+  wait_for(function() return state() ~= 'busy' end, 'turn end')
+  child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.chat")._windows().transcript); vim.wo.list = true')
+  local opts = '{ vim.wo.wrap, vim.wo.linebreak, vim.wo.list }'
+  eq(child.lua_get(opts), { true, true, true })
+  child.type_keys('gr')
+  eq(child.lua_get(opts), { false, false, false })
+  child.type_keys('q')
+  eq({ 'after q', child.lua_get(opts) }, { 'after q', { true, true, true } })
+  -- the other way back: :b to the transcript buffer
+  local tbuf = child.lua_get('vim.api.nvim_get_current_buf()')
+  child.type_keys('gr')
+  eq(child.lua_get(opts), { false, false, false })
+  child.cmd('buffer ' .. tbuf)
+  eq(child.lua_get(opts), { true, true, true })
+end
+
 T['while the raw view is shown the chat is not on screen; q marks it seen'] = function()
   start(flat({ expect = 'Go' }, raw(INIT), { sleep_ms = 300 }, raw(RESULT)))
   open_chat()
