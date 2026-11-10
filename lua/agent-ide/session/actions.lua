@@ -19,15 +19,24 @@ end
 
 local H = {}
 
+local function plugin_mode(m) return m == 'default' and 'manual' or m end
+
+-- Claude reports mode `m`: a request for it is fulfilled.
+local function mode_is(s, m)
+  s.mode = m
+  if s.mode_requested == m then s.mode_requested = nil end
+end
+
 function H.init(s, a)
-  s.model, s.mode, s.slash_commands = a.model, a.mode, a.slash_commands
+  s.model, s.slash_commands = a.model, a.slash_commands
+  mode_is(s, a.mode)
   s:_emit('meta')
   turn_begins(s)
 end
 
 function H.status(s, a)
   if a.mode then
-    s.mode = a.mode
+    mode_is(s, a.mode)
     s:_emit('meta')
   end
   if a.busy then turn_begins(s) end
@@ -73,15 +82,37 @@ function H.control_ok(s, a)
   s.requests[a.request_id] = nil
   if req.subtype == 'set_model' then
     s.model = req.model
+    if s.model_requested == req.model then s.model_requested = nil end
+    s:_emit('meta')
+  elseif req.subtype == 'set_permission_mode' then
+    local m = type(a.response) == 'table' and type(a.response.mode) == 'string' and a.response.mode or req.mode
+    mode_is(s, plugin_mode(m))
     s:_emit('meta')
   end
 end
+
+-- What a refused mode or model request was for: { field, value, what } (nil for others).
+local SETTING = {
+  set_permission_mode = function(req) return 'mode_requested', plugin_mode(req.mode), 'mode' end,
+  set_model = function(req) return 'model_requested', req.model, 'model' end,
+}
 
 function H.control_error(s, a)
   local req = s.requests[a.request_id]
   if not req then return end
   s.requests[a.request_id] = nil
   s:_append(live_meta('error', req.subtype .. ': ' .. tostring(a.error)))
+  local setting = SETTING[req.subtype]
+  if not setting then return end
+  local field, value, what = setting(req)
+  if s[field] == value then
+    s[field] = nil
+    s:_emit('meta')
+  end
+  -- only the session on screen speaks up; others keep the error in their transcript
+  if s.visible then
+    vim.notify(('Agent-IDE: cannot switch %s to %s: %s'):format(what, tostring(value), tostring(a.error)), vim.log.levels.WARN)
+  end
 end
 
 function H.quota(s, a)
@@ -126,6 +157,11 @@ end
 ---@param tail string|nil stderr tail
 function M.on_exit(s, code, tail)
   s.proc, s.owned, s.echo_expected, s.interrupted = nil, false, nil, false
+  -- requests in flight die with the process (deferred ones were sent at its start)
+  if s.mode_requested or s.model_requested then
+    s.mode_requested, s.model_requested = nil, nil
+    s:_emit('meta')
+  end
   s:_flush_streaming()
   clear_permissions(s)
   local parking, cbs = s.parking, s.park_cbs

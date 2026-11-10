@@ -185,13 +185,26 @@ function Session:_setting(request)
   return true
 end
 
+---Ask Claude for another mode. Until Claude confirms or refuses, `mode_requested` holds the
+---mode asked for (plugin name: `manual` for Claude's `default`).
 ---@param mode string Claude's mode name ('plan', 'acceptEdits', 'default', ...)
 ---@return boolean
-function Session:set_mode(mode) return self:_setting({ subtype = 'set_permission_mode', mode = mode }) end
+function Session:set_mode(mode)
+  if not self:_setting({ subtype = 'set_permission_mode', mode = mode }) then return false end
+  self.mode_requested = mode == 'default' and 'manual' or mode
+  self:_emit('meta')
+  return true
+end
 
+---Ask Claude for another model; `model_requested` holds it until Claude answers.
 ---@param model string
 ---@return boolean
-function Session:set_model(model) return self:_setting({ subtype = 'set_model', model = model }) end
+function Session:set_model(model)
+  if not self:_setting({ subtype = 'set_model', model = model }) then return false end
+  self.model_requested = model
+  self:_emit('meta')
+  return true
+end
 
 ---Answer an open permission ask (also user questions and plan approvals).
 ---@param request_id string

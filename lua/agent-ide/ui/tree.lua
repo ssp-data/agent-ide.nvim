@@ -29,7 +29,8 @@ end
 ---@param now integer
 ---@param icons table
 ---@param projects_dir string|nil
-function M.build(projects, state_of, expanded, now, icons, projects_dir)
+---@param waits_for? fun(session_id: string): string|nil what a waiting session waits for (a tool name)
+function M.build(projects, state_of, expanded, now, icons, projects_dir, waits_for)
   local lines, nodes, hl = {}, {}, {}
 
   -- Append a line made of { text, group|nil } pieces; records byte ranges of grouped pieces.
@@ -81,6 +82,8 @@ function M.build(projects, state_of, expanded, now, icons, projects_dir)
             { icons[state], STATE_GROUP[state] },
             { ' ' .. title },
           }
+          local what = state == 'waiting' and waits_for and waits_for(s.id)
+          if what then sp[#sp + 1] = { ' — ' .. what } end
           if s.subpath and s.subpath ~= '' then sp[#sp + 1] = { '  [' .. s.subpath .. ']' } end
           sp[#sp + 1] = { '  ' }
           sp[#sp + 1] = { M.ago(s.activity, now), 'AgentIdeAge' }

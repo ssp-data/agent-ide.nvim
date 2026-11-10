@@ -209,7 +209,6 @@ T['streaming text ends when a tool call arrives instead'] = function()
   push(s, { kind = 'prompt', text = 'hi' })
   view:sync('events')
   s.streaming = 'partial'
-  s.pending_permissions = { { request_id = 'r' } }
   view:sync('delta')
   s.streaming = ''
   push(s, { kind = 'tool_call', id = 'x', name = 'Bash', input = { command = 'ls' } })
@@ -218,6 +217,36 @@ T['streaming text ends when a tool call arrives instead'] = function()
   view:sync('delta') -- no stream: nothing to show, nothing changes
   expect_full(buf, s)
   view:sync('bogus')
+  expect_full(buf, s)
+end
+
+T['open asks show below the events and the streaming lines, unfolded, and go when answered'] = function()
+  local ask = require('agent-ide.transcript.ask')
+  local s, buf = stub(), new_buf()
+  local view = live_render.attach(buf, s)
+  push(s, { kind = 'prompt', text = 'hi' })
+  push(s, { kind = 'tool_call', id = 'x', name = 'Bash', input = { command = 'ls' } })
+  view:sync('events')
+  s.pending_permissions = { { request_id = 'r', tool_name = 'Bash', input = { command = 'ls' } } }
+  view:sync('permission')
+  local rendered = render.render(s.events).lines
+  local block = { '▸ Permission needed: Bash: ls', '│ $ ls' }
+  eq(ask.lines(s), block)
+  eq(api.nvim_buf_get_lines(buf, 0, -1, false), vim.list_extend(vim.list_slice(rendered), block))
+  local lv = levels_of(buf)
+  eq(vim.list_slice(lv, #rendered + 1), { '0', '0' })
+  -- streaming text goes between the events and the block; a new event keeps the block last
+  s.streaming = 'part'
+  view:sync('delta')
+  local lines = api.nvim_buf_get_lines(buf, 0, -1, false)
+  eq(vim.list_slice(lines, #lines - 2), { 'part', block[1], block[2] })
+  s.streaming = ''
+  push(s, { kind = 'text', text = 'more' })
+  view:sync('events')
+  rendered = render.render(s.events).lines
+  eq(api.nvim_buf_get_lines(buf, 0, -1, false), vim.list_extend(vim.list_slice(rendered), block))
+  s.pending_permissions = {}
+  view:sync('permission')
   expect_full(buf, s)
 end
 

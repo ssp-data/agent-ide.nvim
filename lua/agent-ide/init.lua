@@ -2,26 +2,39 @@
 local config = require('agent-ide.config')
 local M = {}
 
-local mapped_key -- the toggle key this module mapped last, if any
+local mapped = {} -- global keys this module mapped last: name -> lhs
 
 ---@param opts? table
 function M.setup(opts)
   local cfg = config.setup(opts)
   require('agent-ide.ui.highlights').setup()
-  if mapped_key then
-    pcall(vim.keymap.del, 'n', mapped_key)
-    mapped_key = nil
+  for name, lhs in pairs(mapped) do
+    pcall(vim.keymap.del, 'n', lhs)
+    mapped[name] = nil
   end
-  local key = cfg.keys and cfg.keys.toggle
-  if key then
-    vim.keymap.set('n', key, M.toggle, { desc = 'Agent-IDE: toggle Agents tab' })
-    mapped_key = key
+  local keys = type(cfg.keys) == 'table' and cfg.keys or {}
+  local globals = {
+    toggle = { M.toggle, 'toggle Agents tab' },
+    next_waiting = { M.next_waiting, 'next session that needs you' },
+  }
+  for name, g in pairs(globals) do
+    if keys[name] then
+      vim.keymap.set('n', keys[name], g[1], { desc = 'Agent-IDE: ' .. g[2] })
+      mapped[name] = keys[name]
+    end
   end
 end
 
 function M.toggle()
   require('agent-ide.ui.highlights').setup()
   require('agent-ide.ui.drawer').toggle()
+end
+
+---Open the next session that needs you: waiting for an answer (oldest ask first), then a
+---failed, then a finished turn you have not seen. Notifies when there is none.
+function M.next_waiting()
+  require('agent-ide.ui.highlights').setup()
+  require('agent-ide.ui.permission').next_waiting()
 end
 
 return M

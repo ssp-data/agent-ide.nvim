@@ -132,6 +132,18 @@ local function emit(events, results, known, out, nested)
   end
 end
 
+---Header summary and body lines of a tool call block (the body without results or the `│ `
+---prefix), for blocks that show a tool's input outside the events, e.g. a pending ask.
+---@param name string
+---@param input any
+---@return string summary, string[] body
+function M.tool_parts(name, input)
+  return summary(input), call_body({ name = name, input = input })
+end
+
+---First line of `s` (`\n`, `\r\n` or `\r` end a line).
+M.first_line = first_line
+
 ---True when `ev` starts a turn: a main-thread prompt. Events before the first one form turn 0.
 ---@param ev table
 ---@return boolean

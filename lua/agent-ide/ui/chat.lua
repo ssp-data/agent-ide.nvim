@@ -3,7 +3,7 @@
 -- reused for whichever session is opened. Session events only update buffers, the winbar and
 -- the drawer: they never move focus or open a window.
 local api = vim.api
-local config = require('agent-ide.config')
+local chat_keys = require('agent-ide.ui.chat_keys')
 local history = require('agent-ide.ui.history')
 local live_render = require('agent-ide.transcript.live')
 local prompt = require('agent-ide.ui.prompt')
@@ -31,29 +31,18 @@ local subscribed = false
 
 local function drawer() return require('agent-ide.ui.drawer') end
 
----`config.keys.chat` (name -> lhs or false); `keys = false` disables them all.
-local function chat_keys()
-  local keys = config.get().keys
-  return type(keys) == 'table' and type(keys.chat) == 'table' and keys.chat or {}
-end
-
 local function valid_buf(b) return b ~= nil and api.nvim_buf_is_valid(b) and api.nvim_buf_is_loaded(b) end
 
 -- Winbar ----------------------------------------------------------------------------------
 
----`claude-haiku-5-5-20261001` -> `haiku-5-5`.
-local function short_model(model)
-  if not model then return 'model ?' end
-  return (model:gsub('^claude%-', ''):gsub('%-%d%d%d%d%d%d%d%d$', ''))
-end
-
 local function winbar_text(c)
   local s = c.s
+  local model, mode = require('agent-ide.ui.mode').labels(s)
   local parts = {
     c.project and c.project.name or '?',
     s.title and (s.title:gsub('[\r\n]+', ' ')) or 'new session',
-    short_model(s.model),
-    'mode:' .. (s.mode or '?'),
+    model,
+    mode,
     drawer().state_of(s.id),
   }
   if #s.queue > 0 then parts[#parts + 1] = 'queued:' .. #s.queue end
@@ -102,14 +91,20 @@ end
 
 -- Session changes ----------------------------------------------------------------------------
 
+local function permission() return require('agent-ide.ui.permission') end
+
 local function on_change(s, what)
   local c = chats[s.id]
-  if c and (what == 'events' or what == 'delta') then
+  if c and (what == 'events' or what == 'delta' or what == 'permission') then
     if c.loading then
       c.dirty = true
     elseif c.view then
       c.view:sync(what)
     end
+  end
+  if what == 'permission' then
+    drawer().refresh()
+    permission().on_permission(s)
   elseif what == 'state' or what == 'meta' then
     if c then update_winbar(c) end
     drawer().refresh()
@@ -121,6 +116,7 @@ local function subscribe()
   subscribed = true
   session.on_change(on_change)
   setup_autocmds()
+  permission().setup()
 end
 
 -- Actions ----------------------------------------------------------------------------------
@@ -167,51 +163,9 @@ local function focus_prompt(c, insert)
   if insert then vim.cmd('startinsert') end
 end
 
-local HELP = {
-  { 'send', 'send the prompt (normal and insert mode)' },
-  { 'send_alt', 'send the prompt' },
-  { 'interrupt', 'interrupt Claude; queued prompts return to the prompt buffer' },
-  { 'prompt', 'focus the prompt' },
-  { 'help', 'this help' },
-  { 'history_prev', 'prompt: older prompt (also <Up>) on the first line' },
-  { 'history_next', 'prompt: newer prompt (also <Down>) on the last line' },
-  { 'attach', 'prompt: pick a file and add an [attach] line' },
-  { 'answer_inner', 'transcript: text object, one Claude answer' },
-  { 'answer_outer', 'transcript: text object, one Claude answer with its header' },
-}
+local ACT = { send = send, interrupt = interrupt, focus_prompt = focus_prompt }
 
-local function help()
-  local keys = chat_keys()
-  local rows = {}
-  for _, h in ipairs(HELP) do
-    if keys[h[1]] then rows[#rows + 1] = { key = keys[h[1]], desc = h[2] } end
-  end
-  rows[#rows + 1] = { key = '/', desc = 'prompt, at line start: Claude commands (menu)' }
-  rows[#rows + 1] = { key = '@', desc = 'prompt, after a space: pick a file to attach' }
-  rows[#rows + 1] = { key = 'i / a / o', desc = 'in the transcript: write in the prompt' }
-  rows[#rows + 1] = { key = 'za', desc = 'toggle fold' }
-  rows[#rows + 1] = { key = ':w', desc = 'save prompt (later; does nothing yet)' }
-  rows[#rows + 1] = { key = ':q / ZZ', desc = 'prompt: hide the window, the draft stays' }
-  rows[#rows + 1] = { key = ':q!', desc = 'prompt: hide the window and discard the draft' }
-  require('agent-ide.ui.help').open('Agent-IDE chat', rows)
-end
-
-local function map_keys(c, buf, is_transcript)
-  local keys = chat_keys()
-  local function map(modes, lhs, fn, desc)
-    if not lhs then return end
-    vim.keymap.set(modes, lhs, fn, { buffer = buf, nowait = true, silent = true, desc = 'Agent-IDE: ' .. desc })
-  end
-  map({ 'n', 'i' }, keys.send, function() send(c) end, 'send prompt')
-  map('n', keys.send_alt, function() send(c) end, 'send prompt')
-  map('n', keys.interrupt, function() interrupt(c) end, 'interrupt')
-  map('n', keys.prompt, function() focus_prompt(c, false) end, 'focus prompt')
-  map('n', keys.help, help, 'chat help')
-  if is_transcript then
-    require('agent-ide.ui.textobj').map(buf, c.s, keys)
-    for _, lhs in ipairs({ 'i', 'a', 'o' }) do map('n', lhs, function() focus_prompt(c, true) end, 'write in the prompt') end
-  end
-end
+local function map_keys(c, buf, is_transcript) chat_keys.map(c, buf, is_transcript, ACT) end
 
 -- Buffers ----------------------------------------------------------------------------------
 
@@ -348,6 +302,30 @@ end
 function M.session_of(buf)
   local c = by_buf[buf]
   return c and c.s
+end
+
+---Transcript and prompt buffers of the chat of `s` (nil when it has none).
+---@param s table Session
+---@return integer|nil tbuf, integer|nil pbuf
+function M.buffers(s)
+  local c = chats[s.id]
+  if not c then return nil, nil end
+  return valid_buf(c.tbuf) and c.tbuf or nil, valid_buf(c.pbuf) and c.pbuf or nil
+end
+
+---Project the chat of `s` was opened with, else the drawer's project listing it, else one made
+---from its folder.
+---@param s table Session
+---@return table Project
+function M.project_of(s)
+  local c = chats[s.id]
+  if c and c.project then return c.project end
+  for _, p in ipairs(drawer().state().projects or {}) do
+    for _, m in ipairs(p.sessions or {}) do
+      if m.id == s.id then return p end
+    end
+  end
+  return { key = s.cwd, name = vim.fn.fnamemodify(s.cwd or '?', ':t'), root = s.cwd, sessions = {} }
 end
 
 ---Chat windows (tests): { transcript = win|nil, prompt = win|nil }, only those still valid.

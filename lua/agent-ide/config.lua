@@ -7,15 +7,20 @@ local function defaults()
     drawer = { width = 44, side = 'right' },
     live = { interval_ms = 5000, cmd = { 'claude', 'agents', '--json' } },
     helper = { enabled = true, path = nil }, -- nil: <plugin root>/helper/target/release/agent-ide-helper
-    claude = { cmd = { 'claude' }, strip_api_key = true, model = nil },
+    -- modes: what <S-Tab> cycles through (plugin names; `manual` is Claude's `default`);
+    -- default_mode: where the cycle starts before Claude reports a mode (nil: as if manual)
+    claude = { cmd = { 'claude' }, strip_api_key = true, model = nil,
+      modes = { 'manual', 'acceptEdits', 'plan', 'auto' }, default_mode = nil,
+      models = { 'fable', 'opus', 'sonnet', 'haiku' } },
     tcd = true,
     -- false disables a mapping
     keys = {
       toggle = '<leader>aa',
+      next_waiting = '<leader>an', -- global: the next session that needs you
       -- chat view, buffer-local in the transcript and the prompt
       chat = { send = '<C-CR>', send_alt = '<leader><CR>', interrupt = '<C-c>', prompt = '<leader>ap', help = '?',
         history_prev = '<C-p>', history_next = '<C-n>', attach = '<leader>af',
-        answer_inner = 'ir', answer_outer = 'ar' },
+        answer_inner = 'ir', answer_outer = 'ar', mode = '<S-Tab>', model = '<leader>aM', answer = '<leader>ay' },
     },
     -- prompt buffer: `/` opens the command menu, `@` opens the file picker
     chat = { auto_slash = true, at_picker = true },

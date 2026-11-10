@@ -1,6 +1,9 @@
 -- Keeps a transcript buffer equal to `render.render(s.events)` while a session grows, rewriting
--- only the current turn (and the streaming answer below it).
+-- only the current turn (and the streaming answer below it). Below everything, after the events
+-- and the streaming lines, come the lines of the session's open asks (`transcript/ask.lua`):
+-- buffer = render(events) ++ streaming lines ++ ask lines. The ask lines are never folded.
 local api = vim.api
+local ask = require('agent-ide.transcript.ask')
 local history = require('agent-ide.ui.history')
 local render = require('agent-ide.transcript.render')
 
@@ -97,13 +100,15 @@ function View:sync_events()
   render_range(events, self.start, start - 1, lines, levels)
   local done = #lines
   render_range(events, start, #events, lines, levels)
-  local old = vim.list_extend(vim.list_slice(self.turn), self.stream)
-  local old_lv = vim.list_extend(vim.list_slice(self.turn_lv), zeros(#self.stream))
+  local below = vim.list_extend(vim.list_slice(self.stream), self.tail)
+  local old = vim.list_extend(vim.list_slice(self.turn), below)
+  local old_lv = vim.list_extend(vim.list_slice(self.turn_lv), zeros(#below))
   self.start, self.header = start, nil
   self.turn, self.turn_lv = vim.list_slice(lines, done + 1), vim.list_slice(levels, done + 1)
-  self.stream = self:stream_lines()
-  vim.list_extend(lines, self.stream)
-  vim.list_extend(levels, zeros(#self.stream))
+  self.stream, self.tail = self:stream_lines(), ask.lines(self.s)
+  below = vim.list_extend(vim.list_slice(self.stream), self.tail)
+  vim.list_extend(lines, below)
+  vim.list_extend(levels, zeros(#below))
   local follow = self:followers()
   self:write(self.offset, old, old_lv, lines, levels)
   self:close_new_folds(self.offset, old_lv, levels)
@@ -136,29 +141,32 @@ function View:close_new_folds(row, old_lv, new_lv)
   end
 end
 
-function View:sync_delta()
-  local new = self:stream_lines()
+-- Rewrite what lies below the current turn: the streaming lines and the ask lines.
+function View:sync_below()
+  local stream, tail = self:stream_lines(), ask.lines(self.s)
+  local old = vim.list_extend(vim.list_slice(self.stream), self.tail)
+  local new = vim.list_extend(vim.list_slice(stream), tail)
   local follow = self:followers()
-  self:write(self.offset + #self.turn, self.stream, zeros(#self.stream), new, zeros(#new))
+  self:write(self.offset + #self.turn, old, zeros(#old), new, zeros(#new))
   self:follow(follow)
-  self.stream = new
+  self.stream, self.tail = stream, tail
 end
 
 function View:sync_reset()
   self.start, self.offset, self.seen, self.header = 1, 0, 0, nil
   -- the whole buffer counts as the current turn with unknown levels, so all of it is rewritten
-  self.turn, self.turn_lv, self.stream = api.nvim_buf_get_lines(self.buf, 0, -1, false), {}, {}
+  self.turn, self.turn_lv, self.stream, self.tail = api.nvim_buf_get_lines(self.buf, 0, -1, false), {}, {}, {}
   self:sync_events()
 end
 
 ---Bring the buffer up to date with the session.
----@param what 'events'|'delta'|'reset' anything else is ignored
+---@param what 'events'|'delta'|'permission'|'reset' anything else is ignored
 function View:sync(what)
   if self.detached or not api.nvim_buf_is_valid(self.buf) then return end
   if what == 'events' then
     self:sync_events()
-  elseif what == 'delta' then
-    self:sync_delta()
+  elseif what == 'delta' or what == 'permission' then
+    self:sync_below()
   elseif what == 'reset' then
     self:sync_reset()
   end
@@ -173,7 +181,7 @@ end
 ---`sync('events')` assumes `s.events` only grew (the last turn may change); after replacing
 ---`s.events` (a reload from disk) callers must use `sync('reset')`.
 ---@param buf integer
----@param s table Session (`events`, `turn_start`, `streaming`)
+---@param s table Session (`events`, `streaming`, `pending_permissions`)
 ---@return table view
 function M.attach(buf, s)
   history.setup_buf(buf)

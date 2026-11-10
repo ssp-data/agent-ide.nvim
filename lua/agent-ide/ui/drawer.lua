@@ -48,6 +48,13 @@ function M.state_of(id)
   return live.state_of(live.get(), id)
 end
 
+-- Tool a waiting Session of this Neovim waits for (its oldest open ask).
+local function waits_for(id)
+  local s = session.get(id)
+  local p = s and s.state == 'waiting' and s.pending_permissions[1]
+  return p and (tostring(p.tool_name):gsub('[\r\n]', ' ')) or nil
+end
+
 local function first_line(text) return (text or ''):match('^%s*([^\r\n]*)') end
 
 ---Projects with the unsaved new sessions (once they have a prompt) added to their project.
@@ -97,7 +104,7 @@ local function render(focus)
   sync()
   if not S.buf then return end
   local cfg = config.get()
-  local t = tree.build(with_unsaved(S.projects), M.state_of, S.expanded, os.time(), cfg.icons, cfg.projects_dir)
+  local t = tree.build(with_unsaved(S.projects), M.state_of, S.expanded, os.time(), cfg.icons, cfg.projects_dir, waits_for)
   local row = S.win and api.nvim_win_get_cursor(S.win)[1]
   focus = focus or (row and node_key(S.nodes[row]))
   vim.bo[S.buf].modifiable = true
