@@ -122,6 +122,16 @@ end
 
 local function age(date, now) return require('agent-ide.ui.tree').ago(date, now) end
 
+-- The first row of an open Commits section: the commit graph of the work tree (ui/graph.lua),
+-- dimmed, named with the drawer's graph key; <CR> opens it.
+local function graph_row(out, w, ctx, parent)
+  local key = require('agent-ide.util.keys').get('drawer', 'graph')[1]
+  local node = { type = 'git_graph', project = w.project, root = w.root, id = w.root .. '#graph',
+    fold = { key = parent.fold.key, default = false, focus = parent.id },
+    open = function(n) require('agent-ide.ui.graph').open({ root = n.root, project = n.project }) end }
+  out[#out + 1] = { pieces = { { w.indent .. '    commit graph' .. (key and (' · ' .. key) or ''), 'AgentIdeAge' } }, node = node }
+end
+
 local function commit_rows(out, w, ctx, commits)
   local ind = w.indent .. '    '
   for i, c in ipairs(commits) do
@@ -199,6 +209,7 @@ local function tree_rows(out, w, ctx)
   label = base and (base.mode == 'branch' and 'Commits on branch' or 'Recent commits') or 'Commits'
   open, node = section(out, w, ctx, 'commits', label, commits and #commits)
   if open then
+    graph_row(out, w, ctx, node)
     if not commits then
       out[#out + 1] = hint(w.indent .. '    ', 'loading…', w.project)
     else
