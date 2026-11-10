@@ -12,6 +12,7 @@ local notified = false
 local visible = false
 local watching = false -- `watch` sent to the current helper process
 local handler_set = false
+local watch_dir
 local timer
 
 local function projects_dir() return require('agent-ide.config').get().projects_dir end
@@ -52,8 +53,10 @@ end
 local function ensure_watch(dir)
   if watching or M.backend() ~= 'helper' then return end
   watching = true
+  watch_dir = dir
   if not handler_set then
     handler_set = true
+    helper.on_exit(function(reason) fail(reason) end)
     helper.on('changed', function() if on_change_cb then on_change_cb() end end)
   end
   helper.request('watch', { projects_dir = dir }, function(err)
@@ -67,11 +70,18 @@ local function ensure_watch(dir)
   end)
 end
 
+-- A stopped helper restarts lazily on the next request without its watch: re-arm it first.
+local function rearm()
+  if watching and not helper.running() then watching = false end
+  if on_change_cb and not watching then ensure_watch(watch_dir or projects_dir()) end
+end
+
 ---@param cb fun(sessions: table[])
 ---@param projects_dir? string defaults to the `projects_dir` setting
 function M.scan(cb, dir)
   dir = dir or projects_dir()
   if M.backend() ~= 'helper' then return lua_scan.scan(dir, cb) end
+  rearm()
   helper.request('scan', { projects_dir = dir }, function(err, result)
     if err then
       if err ~= 'stopped' then fail(err) end
@@ -85,6 +95,7 @@ end
 ---@param cb fun(events: table[])
 function M.history(path, cb)
   if M.backend() ~= 'helper' then return lua_scan.history(path, cb) end
+  rearm()
   helper.request('history', { path = path }, function(err, result)
     if err then
       -- a file that does not exist is not a helper failure; Lua yields the same empty result
@@ -115,7 +126,7 @@ end
 ---Test-only: forget failure, notice, callbacks and the helper process.
 function M._reset()
   helper._reset()
-  failed, notified, visible, watching, handler_set = false, false, false, false, false
+  failed, notified, visible, watching, handler_set, watch_dir = false, false, false, false, false, nil
   on_change_cb = nil
   M._tick_ms = 5000
   sync_timer()

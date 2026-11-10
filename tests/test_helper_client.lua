@@ -194,4 +194,79 @@ T['lua backend runs the change timer only while visible'] = function()
   index.on_change(nil)
 end
 
+local function pgrep(pat) vim.fn.system({ 'pgrep', '-f', pat }); return vim.v.shell_error == 0 end
+
+T['idle crash falls back; on_change keeps firing from the Lua timer'] = function()
+  local ack = script([[read l; printf '{"id":1,"result":{}}\n'; exit 0]])
+  config.setup({ helper = { enabled = true, path = ack } })
+  index._tick_ms = 30
+  index.set_visible(true)
+  local n = 0
+  index.on_change(function() n = n + 1 end, dir)
+  eq(wait(function() return n >= 2 end, 2000), true)
+  eq(index.backend(), 'lua')
+  eq(#notes, 1)
+  eq(notes[1].msg:find('process exited', 1, true) ~= nil, true)
+end
+
+T['watch is re-armed after stop and lazy restart'] = function()
+  need_helper()
+  local tmp = vim.fn.tempname()
+  vim.fn.mkdir(tmp .. '/-p', 'p')
+  local file = tmp .. '/-p/abc.jsonl'
+  vim.fn.writefile({ '{"type":"user","cwd":"/x","message":{"role":"user","content":"hi"}}' }, file)
+  local hit = false
+  index.on_change(function() hit = true end, tmp)
+  eq(#scan(dir), 4) -- sequential: the watch request has been answered
+  helper.stop()
+  eq(#scan(dir), 4) -- lazy restart
+  hit = false
+  local ok = wait(function()
+    local f = io.open(file, 'a'); f:write('{"type":"ai-title","aiTitle":"t"}\n'); f:close()
+    return hit
+  end, 4000)
+  index.on_change(nil)
+  vim.fn.delete(tmp, 'rf')
+  eq(ok, true)
+  eq(index.backend(), 'helper')
+  eq(#notes, 0)
+end
+
+T['helper that ignores stdin is terminated after a timeout failure'] = function()
+  local pidfile = vim.fn.tempname()
+  config.setup({ helper = { enabled = true, path = script('echo $$ > ' .. pidfile .. '; exec sleep 30') } })
+  helper._timeout_ms = 200
+  helper._grace_ms = 100
+  eq(#scan(dir), 4)
+  eq(index.backend(), 'lua')
+  local pid = tonumber(vim.fn.readfile(pidfile)[1])
+  eq(wait(function() return not vim.uv.kill(pid, 0) end, 3000), true)
+end
+
+T['a response split across two chunks is assembled'] = function()
+  config.setup({ helper = { enabled = true, path = script([[read l; printf '{"id":1,"result":{"a'; sleep 0.2; printf 'bc":7}}\n'; cat >/dev/null]]) } })
+  local err, res
+  helper.request('x', {}, function(e, r) err, res = e or false, r end)
+  wait(function() return err ~= nil end)
+  eq({ err, res }, { false, { abc = 7 } })
+end
+
+T['two responses in one chunk are both delivered'] = function()
+  config.setup({ helper = { enabled = true, path = script([[read l; read l; printf '{"id":2,"result":{"n":2}}\n{"id":1,"result":{"n":1}}\n'; cat >/dev/null]]) } })
+  local a, b
+  helper.request('x', {}, function(_, r) a = r end)
+  helper.request('x', {}, function(_, r) b = r end)
+  wait(function() return a and b end)
+  eq({ a, b }, { { n = 1 }, { n = 2 } })
+end
+
+T['no helper or fake process is left behind'] = function()
+  need_helper()
+  scan(dir)
+  helper._reset()
+  local gone = wait(function() return not pgrep('^[^ ]*/agent-ide-helper( |$)') end, 2000)
+  if not gone then print(vim.fn.system({ 'pgrep', '-fa', '^[^ ]*/agent-ide-helper( |$)' })) end
+  eq(gone, true)
+end
+
 return T

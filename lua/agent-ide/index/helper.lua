@@ -4,8 +4,9 @@
 local M = {}
 
 M._timeout_ms = 5000 -- tests shorten it
+M._grace_ms = 500 -- after closing stdin, wait this long before SIGTERM
 
-local state = { proc = nil, gen = 0, next_id = 1, pending = {}, buf = '', handlers = {} }
+local state = { proc = nil, cur = nil, exit_fns = {}, gen = 0, next_id = 1, pending = {}, buf = '', handlers = {} }
 local augroup
 
 local DECODE_OPTS = { luanil = { object = true, array = true } }
@@ -80,13 +81,18 @@ local function start()
   pcall(vim.fn.mkdir, cache, 'p')
   state.gen = state.gen + 1
   local gen = state.gen
+  local cur = { exited = false }
+  state.cur = cur
   state.buf = ''
   local ok, proc = pcall(vim.system, { M.path(), '--cache-dir', cache }, {
     stdin = true, stdout = on_stdout(gen), stderr = false,
   }, vim.schedule_wrap(function(obj)
+    cur.exited = true
     if gen ~= state.gen then return end -- stopped on purpose
     state.proc = nil
-    fail_all('process exited (' .. tostring(obj.signal ~= 0 and ('signal ' .. obj.signal) or ('code ' .. obj.code)) .. ')')
+    local reason = 'process exited (' .. tostring(obj.signal ~= 0 and ('signal ' .. obj.signal) or ('code ' .. obj.code)) .. ')'
+    fail_all(reason)
+    for _, fn in ipairs(state.exit_fns) do pcall(fn, reason) end
   end))
   if not ok then
     state.gen = state.gen + 1
@@ -95,7 +101,7 @@ local function start()
   state.proc = proc
   if not augroup then
     augroup = vim.api.nvim_create_augroup('agent-ide.helper', { clear = true })
-    vim.api.nvim_create_autocmd('VimLeavePre', { group = augroup, callback = function() M.stop() end })
+    vim.api.nvim_create_autocmd('VimLeavePre', { group = augroup, callback = function() M.stop(true) end })
   end
   return true
 end
@@ -142,14 +148,30 @@ function M.on(method, fn)
   table.insert(state.handlers[method], fn)
 end
 
+---Register a handler for an unexpected process exit (not caused by `stop`), after pending requests were answered.
+---@param fn fun(reason: string)
+function M.on_exit(fn) table.insert(state.exit_fns, fn) end
+
+---@return boolean
+function M.running() return state.proc ~= nil end
+
 ---Close the helper's stdin so it exits; pending requests are answered with 'stopped'. Idempotent.
-function M.stop()
-  local proc = state.proc
+---A process still alive after the grace period (or at once with `now`) gets SIGTERM.
+---@param now? boolean
+function M.stop(now)
+  local proc, cur = state.proc, state.cur
   if not proc then return end
   state.proc = nil
+  state.cur = nil
   state.gen = state.gen + 1
   state.buf = ''
   pcall(proc.write, proc, nil)
+  local function terminate() if not cur.exited then pcall(proc.kill, proc, 15) end end
+  if now then
+    terminate()
+  else
+    vim.defer_fn(terminate, M._grace_ms)
+  end
   fail_all('stopped')
 end
 
@@ -159,9 +181,11 @@ function M._reset()
   M.stop()
   if proc then pcall(proc.kill, proc, 15) end
   state.handlers = {}
+  state.exit_fns = {}
   state.pending = {}
   state.next_id = 1
   M._timeout_ms = 5000
+  M._grace_ms = 500
 end
 
 return M
