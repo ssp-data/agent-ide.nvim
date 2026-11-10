@@ -1,4 +1,4 @@
--- Project scope (scope.lua): the setting, `:Agents project|all`, `S`, the drawer in project
+-- Project scope (scope.lua): the setting, `:Agents project|all`, `<S-Tab>`, the drawer in project
 -- scope, search, <leader>an and the footer. Synthetic repositories and sessions only.
 local eq = MiniTest.expect.equality
 local tree = require('agent-ide.ui.tree')
@@ -138,16 +138,16 @@ T['tree: project scope has a scope line, no project row, its rows one level up; 
   end
   local top = function() return { { pieces = { { '> Prompts' } }, node = { type = 'prompts', id = 'pr' } } } end
   local t = tree.build(p, states({ s1 = 'busy' }), {}, 1060, ICONS, nil, nil, extra,
-    { top = top, width = 52, scope = { branch = 'main', others = 1, key = 'S' } })
+    { top = top, width = 52, scope = { branch = 'main', others = 1, key = '<S-Tab>' } })
   eq(t.lines, {
-    'alpha  main' .. (' '):rep(52 - 11 - 16) .. 'project · S: all',
+    'alpha  main' .. (' '):rep(52 - 11 - 12) .. '<S-Tab>: all',
     '> Prompts',
     '  + New session',
     'v Sessions (2)',
     '    B Fix login                                  now',
     '    . docs/ · Docs                               11m',
     '> Changes (2)',
-    '1 session in other projects needs you · S',
+    '1 session in other projects needs you · <S-Tab>',
   })
   eq({ t.nodes[1].type, t.nodes[1].project == p[1] }, { 'scope', true })
   eq(t.nodes[3].type, 'new')
@@ -155,12 +155,12 @@ T['tree: project scope has a scope line, no project row, its rows one level up; 
   for _, h in ipairs(t.hl) do
     if h.line == 1 or h.line == 8 then eq(h.group, 'AgentIdeAge') end
   end
-  t = tree.build(p, states({}), {}, 1060, ICONS, nil, nil, nil, { width = 52, scope = { others = 3, key = 'S' } })
-  eq(t.lines[1], 'alpha' .. (' '):rep(52 - 5 - 16) .. 'project · S: all')
-  eq(t.lines[#t.lines], '3 sessions in other projects need you · S')
+  t = tree.build(p, states({}), {}, 1060, ICONS, nil, nil, nil, { width = 52, scope = { others = 3, key = '<S-Tab>' } })
+  eq(t.lines[1], 'alpha' .. (' '):rep(52 - 5 - 12) .. '<S-Tab>: all')
+  eq(t.lines[#t.lines], '3 sessions in other projects need you · <S-Tab>')
   -- the Sessions section closes as in all scope
-  t = tree.build(p, states({}), { ['/r/alpha/sessions'] = false }, 1060, ICONS, nil, nil, nil, { width = 52, scope = { key = 'S' } })
-  eq(t.lines, { 'alpha' .. (' '):rep(52 - 5 - 16) .. 'project · S: all', '  + New session', '> Sessions (2)' })
+  t = tree.build(p, states({}), { ['/r/alpha/sessions'] = false }, 1060, ICONS, nil, nil, nil, { width = 52, scope = { key = '<S-Tab>' } })
+  eq(t.lines, { 'alpha' .. (' '):rep(52 - 5 - 12) .. '<S-Tab>: all', '  + New session', '> Sessions (2)' })
   -- all scope: unchanged, no scope line
   t = tree.build(sample(), states({}), {}, 1060, ICONS, nil, nil, nil, { width = 52 })
   eq(t.lines, { '> alpha' .. (' '):rep(52 - 7 - 5) .. '. now', '> beta' .. (' '):rep(52 - 6 - 4) .. '. 2m' })
@@ -173,14 +173,14 @@ T['config: the scope starts as all; scope = project starts on the repository of 
   eq(child.lua_get('require("agent-ide.scope").get()'), 'all')
   open_drawer()
   wait_for(function() return find('> beta') ~= nil end, 'all projects')
-  eq(find('project · S'), nil)
+  eq(find('<S-Tab>: all'), nil)
   start({ scope = 'project' }) -- cwd: alpha/sub
   eq(child.lua_get('require("agent-ide.scope").get()'), 'project')
   eq(scope_key(), w .. '/alpha')
   open_drawer()
   wait_for(function() return find('Sessions (3)') ~= nil end, 'project rows')
   eq(lines()[1]:match('^alpha') ~= nil, true)
-  eq(lines()[1]:find('project · S: all', 1, true) ~= nil, true)
+  eq(lines()[1]:find('<S-Tab>: all', 1, true) ~= nil, true)
   eq(find('beta'), nil)
   eq(find('plain'), nil)
 end
@@ -190,7 +190,7 @@ T['project scope rows: sub-folder and worktree sessions in one project, Sessions
   open_drawer()
   wait_for(function() return find('alpha release worktree') ~= nil end, 'sessions')
   local l = lines()
-  ok(l[1]:match('^alpha  main%s+project · S: all$') ~= nil or l[1]:match('^alpha%s+project · S: all$') ~= nil, 'scope line')
+  ok(l[1]:match('^alpha  main%s+<S%-Tab>: all$') ~= nil or l[1]:match('^alpha%s+<S%-Tab>: all$') ~= nil, 'scope line')
   wait_for(function() return lines()[1]:find('alpha  main', 1, true) ~= nil end, 'branch on the scope line')
   ok(find('^> Prompts', false) ~= nil, 'prompts')
   ok(find('^  %+ New session', false) ~= nil, 'new')
@@ -205,7 +205,7 @@ T['project scope: a folder without git is its own project; a fresh repository sh
   start({ scope = 'project' }, w .. '/plain')
   open_drawer()
   wait_for(function() return find('plain release') ~= nil end, 'plain session')
-  eq(lines()[1]:match('^plain%s+project · S: all$') ~= nil, true)
+  eq(lines()[1]:match('^plain%s+<S%-Tab>: all$') ~= nil, true)
   eq(find('Sessions (1)') ~= nil, true)
   eq(find('alpha'), nil)
 
@@ -220,7 +220,7 @@ T['project scope: a folder without git is its own project; a fresh repository sh
   eq(child.lua_get('require("agent-ide.session").all()[1].cwd'), w .. '/fresh')
 end
 
-T[':Agents project / :Agents all switch and complete; S on a row of another project anchors there'] = function()
+T[':Agents project / :Agents all switch and complete; <S-Tab> on a row of another project anchors there'] = function()
   start()
   eq(child.lua_get('vim.fn.getcompletion("Agents ", "cmdline")'), { 'project', 'all' })
   eq(child.lua_get('vim.fn.getcompletion("Agents p", "cmdline")'), { 'project' })
@@ -229,15 +229,15 @@ T[':Agents project / :Agents all switch and complete; S on a row of another proj
   eq(scope_key(), w .. '/alpha')
   child.cmd('Agents all')
   wait_for(function() return find('> beta') ~= nil end, 'all scope')
-  eq(find('project · S'), nil)
-  -- S on beta's row: scoped to beta, not to the cwd's alpha
+  eq(find('<S-Tab>: all'), nil)
+  -- <S-Tab> on beta's row: scoped to beta, not to the cwd's alpha
   cursor_to('> beta')
-  child.type_keys('S')
+  child.type_keys('<S-Tab>')
   eq(scope_key(), w .. '/beta')
   wait_for(function() return find('beta release') ~= nil end, 'beta scope')
   eq(find('alpha'), nil)
-  -- S again: all, the cursor back on beta's project row
-  child.type_keys('S')
+  -- <S-Tab> again: all, the cursor back on beta's project row
+  child.type_keys('<S-Tab>')
   wait_for(function() return find('> alpha') ~= nil end, 'all again')
   eq(current_line():find('^> beta') ~= nil, true)
   -- :Agents project re-resolves from the cwd every time
@@ -247,14 +247,14 @@ T[':Agents project / :Agents all switch and complete; S on a row of another proj
   child.cmd('Agents project')
   eq(scope_key(), w .. '/plain')
   -- <CR> on the scope line: all
-  cursor_to('project · S: all')
+  cursor_to('<S-Tab>: all')
   child.type_keys('<CR>')
   eq(child.lua_get('require("agent-ide.scope").get()'), 'all')
-  -- help lists S
+  -- help lists <S-Tab>
   child.lua('local s = require("agent-ide.ui.drawer").state(); vim.api.nvim_set_current_win(s.win)')
   child.type_keys('?')
   local help = child.lua_get("vim.api.nvim_buf_get_lines(require('agent-ide.ui.help')._state().lbuf, 0, -1, false)")
-  eq(vim.iter(help):any(function(l) return l:match('^S%s+scope') ~= nil end), true)
+  eq(vim.iter(help):any(function(l) return l:match('^<S%-Tab>%s+scope') ~= nil end), true)
 end
 
 T['the other-projects line appears while one of them needs you, and goes away'] = function()
@@ -268,7 +268,7 @@ T['the other-projects line appears while one of them needs you, and goes away'] 
     _G.b:_set_state('waiting')
     require('agent-ide.ui.drawer').refresh()
   ]], { w .. '/beta' })
-  wait_for(function() return find('1 session in other projects needs you · S') ~= nil end, 'others line')
+  wait_for(function() return find('1 session in other projects needs you · <S-Tab>') ~= nil end, 'others line')
   eq(find('1 session in other projects') == #lines(), true)
   eq(find('beta release'), nil) -- still not listed
   child.lua([[
@@ -276,7 +276,7 @@ T['the other-projects line appears while one of them needs you, and goes away'] 
     s:_set_state('done')
     require('agent-ide.ui.drawer').refresh()
   ]], { w .. '/plain' })
-  wait_for(function() return find('2 sessions in other projects need you · S') ~= nil end, 'two')
+  wait_for(function() return find('2 sessions in other projects need you · <S-Tab>') ~= nil end, 'two')
   -- a session of this project does not count
   child.lua([[
     local s = require('agent-ide.session').open({ id = 'a1', cwd = ... })
@@ -331,7 +331,7 @@ T['<leader>an and the statusline ignore other projects; the status file still li
   eq(child.lua_get('require("agent-ide").statusline()'):match('^agents ok') ~= nil, true)
   eq(child.lua_get('require("agent-ide").statusline_hl()'), 'AgentIdeLevel1')
   child.lua('require("agent-ide").next_waiting()')
-  eq(child.lua_get('_G.notes[#_G.notes]'), 'Agent-IDE: nothing in this project; 1 in other projects (S)')
+  eq(child.lua_get('_G.notes[#_G.notes]'), 'Agent-IDE: nothing in this project; 1 in other projects (<S-Tab>)')
   local snap = child.lua_get('require("agent-ide.status").snapshot()')
   eq({ snap.level, snap.waiting, snap.sessions[1].id, snap.sessions[1].state }, { 4, 1, 'b1', 'waiting' })
   local file = child.lua_get('require("agent-ide.status").file()')
@@ -364,9 +364,9 @@ T['live entries of other projects are not counted in project scope'] = function(
   eq(child.lua_get('require("agent-ide.status").level(nil, nil, require("agent-ide.scope").matches).waiting'), 0)
   eq(child.lua_get('require("agent-ide.status").level().waiting'), 1)
   -- but they are not hidden without a hint: the drawer's last line and <leader>an say so
-  wait_for(function() return find('1 session in other projects needs you · S') ~= nil end, 'others line')
+  wait_for(function() return find('1 session in other projects needs you · <S-Tab>') ~= nil end, 'others line')
   child.lua('require("agent-ide").next_waiting()')
-  eq(child.lua_get('_G.notes[#_G.notes]'), 'Agent-IDE: nothing in this project; 1 in other projects (S)')
+  eq(child.lua_get('_G.notes[#_G.notes]'), 'Agent-IDE: nothing in this project; 1 in other projects (<S-Tab>)')
   -- in all scope it is simply the next one
   child.lua('require("agent-ide.scope").set("all")')
   eq(child.lua_get('#require("agent-ide.ui.waiting").needing()'), 1)
@@ -384,17 +384,17 @@ T['each scope keeps its own open folds; the cursor stays on its node; focus does
   -- cursor on a session of alpha: still on it after the flip
   cursor_to('alpha release sub')
   child.cmd('Agents project')
-  wait_for(function() return find('project · S: all') ~= nil end, 'project scope')
+  wait_for(function() return find('<S-Tab>: all') ~= nil end, 'project scope')
   ok(current_line():find('alpha release sub', 1, true) ~= nil, 'cursor kept')
   -- close Sessions in project scope
   cursor_to('v Sessions (3)')
   child.type_keys('za')
   wait_for(function() return find('> Sessions (3)') ~= nil end, 'closed')
-  child.type_keys('S')
+  child.type_keys('<S-Tab>')
   wait_for(function() return find('beta release') ~= nil end, 'all: beta still open')
   ok(find('alpha release sub') ~= nil, 'alpha open') -- alpha's Sessions still open in all scope
   ok(current_line():find('^  v Sessions %(3%)') ~= nil, 'cursor on the same section')
-  child.type_keys('S')
+  child.type_keys('<S-Tab>')
   wait_for(function() return find('> Sessions (3)') ~= nil end, 'project: Sessions still closed')
   -- from the main window: the scope changes, focus stays where it is
   child.lua([[

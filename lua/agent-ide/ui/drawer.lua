@@ -447,7 +447,7 @@ end
 
 function actions.close() M.close() end
 
--- `S`: project scope <-> all. From all, the row's project (any row under a project), else the
+-- `<S-Tab>`: project scope <-> all. From all, the row's project (any row under a project), else the
 -- project of the working directory.
 function actions.scope()
   if scope.get() == 'project' then return M.set_scope('all') end

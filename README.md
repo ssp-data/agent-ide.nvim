@@ -161,7 +161,7 @@ require('agent-ide').setup({
     -- prompt row keys below) that handler runs instead
     drawer = { open = { '<CR>', 'o' }, fold = 'za', collapse_all = 'z0', expand_all = 'z9', refresh = 'R',
       tmux = { 'gT', '<leader>aT' }, search = { 'Z', '<leader>ff', '<leader>Z' }, park = 'sP', hide = 'H',
-      delete = 'D', yank = 'y', lazygit = 'glg', close = 'q', help = { '?', 'g?' }, graph = 'G', scope = 'S',
+      delete = 'D', yank = 'y', lazygit = 'glg', close = 'q', help = { '?', 'g?' }, graph = 'G', scope = '<S-Tab>',
       legend = { 'gL', '<leader>aL' }, close_tmux = 'X' },
     -- drawer, on prompt rows (elsewhere these keys keep their normal meaning)
     prompts = { edit = 'e', rename = 'r', delete = 'D', yank = 'y', to_library = 'sL' },
@@ -221,10 +221,10 @@ With many sessions across many repositories, large ones can bury the session you
 
 - **Setting.** `scope = 'all'` (the default) or `scope = 'project'` in `setup()` decides how each Neovim starts. The scope belongs to one Neovim and is not saved.
 - **Commands.** `:Agents project` switches to the project of Neovim's working directory (the global one, `:pwd`) and opens the drawer if it is closed. Each run looks at the working directory again, so after a `:cd` it re-anchors. `:Agents all` goes back to every project. `:Agents` alone toggles the drawer as before, in the current scope.
-- **Key.** `S` in the drawer flips between the two. From `all`, on a row of a project (its row, a session, a section), it narrows to that project; elsewhere to the working directory's.
+- **Key.** `<S-Tab>` in the drawer flips between the two. From `all`, on a row of a project (its row, a session, a section), it narrows to that project; elsewhere to the working directory's.
 - **Which project.** The same one the drawer groups by: the git repository root, with its sub-folders and linked worktrees folded in; a folder without git is its own project. A repository without sessions yet shows `Sessions (0)`, and `+ New session` starts in its root.
 
-In project scope the drawer has no project row. Its first, dimmed line names the project and branch and says `project · S: all` (`<CR>` on it goes back to all). Below it come the Prompts node, then `+ New session`, `Sessions (n)` (open), `Saved prompts`, `Changes` and `Commits`, all at the top level. Every drawer key works as usual on these rows. Sessions of other projects keep running in this Neovim, they are just not listed. When one of them needs you (waiting, done unread, failed, also a Claude in a terminal that waits for input), a dimmed last line says so, for example `1 session in other projects needs you · S`, and `<leader>an` with nothing to do in the project says `nothing in this project; 1 in other projects (S)`. Each scope remembers its own open folds.
+In project scope the drawer has no project row. Its first, dimmed line names the project and branch and says `<S-Tab>: all` (`<CR>` on it goes back to all). Below it come the Prompts node, then `+ New session`, `Sessions (n)` (open), `Saved prompts`, `Changes` and `Commits`, all at the top level. Every drawer key works as usual on these rows. Sessions of other projects keep running in this Neovim, they are just not listed. When one of them needs you (waiting, done unread, failed, also a Claude in a terminal that waits for input), a dimmed last line says so, for example `1 session in other projects needs you · <S-Tab>`, and `<leader>an` with nothing to do in the project says `nothing in this project; 1 in other projects (<S-Tab>)`. Each scope remembers its own open folds.
 
 Search (`<leader>as`, `<leader>aP`, `Z` outside a project row) opens on `project <name>`, and `<Tab>` widens it to all sessions. The status file for the desktop bar keeps listing all sessions of this Neovim. `:AgentsCloseIdle` closes only the project's idle terminal sessions (its confirm names the project); `:AgentsCloseIdle!` closes those of every project. The prompt history (`<C-p>`, `<C-n>`) is the session's own in either scope, so it never shows prompts of another project.
 
@@ -264,13 +264,13 @@ In the drawer (`keys.drawer`; the prompt row keys are `keys.prompts`, the sessio
 | `H` | Hide the session into its project's `Hidden (n)` group; on a hidden session: show it again (Vim's `H` motion is not available in the drawer) |
 | `D` | Session row: delete an inactive session, moving it to the plugin's trash after a confirm (see [Deleting sessions](#deleting-sessions)). Prompt row: delete the file (asks first) |
 | `y` | Session row: yank the last prompt sent in it. Prompt row: yank its text (unnamed and `+` registers). Elsewhere Vim's `y` |
-| `<leader>aM` / `<leader>M`, `<S-Tab>`, `<C-c>`, `gr` | On a session row, what they do in its chat, for that session and without opening it: pick the model, next permission mode, interrupt (only while Claude works, after a confirm), raw view in the main window. A session without a process takes the mode or model when it starts; one running in another Claude is refused (the raw view still opens). On other rows `<S-Tab>` and `<C-c>` keep their Vim meaning |
+| `<leader>aM` / `<leader>M`, `<C-c>`, `gr` | On a session row, what they do in its chat, for that session and without opening it: pick the model, interrupt (only while Claude works, after a confirm), raw view in the main window. A session without a process takes the model when it starts; one running in another Claude is refused (the raw view still opens). On other rows `<C-c>` keeps its Vim meaning. (The chat's mode key, `<S-Tab>`, is the drawer's scope key, so the mode cycle is not on the row; remap `keys.chat.mode` to have it there) |
 | `X` | Close the Claude that runs the session in a tmux pane, after a confirm (see [Closing terminal sessions](#closing-terminal-sessions)) |
 | `q` | Close the drawer |
 | `gL`, `<leader>aL` | Show or hide the legend of the state marks (remembered) |
 | `G` | Commit graph of the row's repository (a worktree session: that worktree; see [Commit graph](#commit-graph)) |
 | `glg` | Open lazygit for the row's repository (a worktree row or session: that worktree) |
-| `S` | Scope: only the row's project (else the working directory's), or back to all projects (see [Project scope](#project-scope)) |
+| `<S-Tab>` | Scope: only the row's project (else the working directory's), or back to all projects (see [Project scope](#project-scope)) |
 | `?`, `g?` | Help: a list of every key you can filter by typing; `<CR>` on a row presses that key (see [Help](#help)) |
 | `e` | Prompt row: edit its file in the main window (Claude's commands and skills open read-only) |
 | `r` | Prompt row: rename (library: `group/name` moves it to another group) |

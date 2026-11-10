@@ -125,7 +125,7 @@ function M.build(projects, state_of, expanded, now, icons, projects_dir, note_of
     local left = { { one_line(p.name), 'AgentIdeAge', fit = true } }
     if scoped.branch and scoped.branch ~= '' then left[2] = { '  ' .. one_line(scoped.branch), 'AgentIdeAge', fit = true } end
     if p.missing then left[#left + 1] = { ' (folder missing)', 'AgentIdeMissing', fit = 'last' } end
-    add_row(left, { { 'project · ' .. (scoped.key or '?') .. ': all', 'AgentIdeAge' } }, { type = 'scope', project = p })
+    add_row(left, { { (scoped.key or '?') .. ': all', 'AgentIdeAge' } }, { type = 'scope', project = p })
   end
 
   if opts.top then

@@ -22,7 +22,7 @@ defaults = function()
     tcd = true,
     -- 'all' (every project) or 'project' (the git repository of Neovim's working directory):
     -- what the drawer, search, <leader>an and the footer show at start; `:Agents all|project`
-    -- and `S` in the drawer switch it
+    -- and `<S-Tab>` in the drawer switch it
     scope = 'all',
     -- false disables a mapping
     keys = {
@@ -59,7 +59,7 @@ defaults = function()
       drawer = { open = { '<CR>', 'o' }, fold = 'za', collapse_all = 'z0', expand_all = 'z9', refresh = 'R',
         tmux = { 'gT', '<leader>aT' }, -- jump to the session's tmux pane, or continue it in native Claude there
         search = { 'Z', '<leader>ff', '<leader>Z' }, park = 'sP', hide = 'H', delete = 'D', yank = 'y',
-        lazygit = 'glg', close = 'q', help = { '?', 'g?' }, graph = 'G', scope = 'S',
+        lazygit = 'glg', close = 'q', help = { '?', 'g?' }, graph = 'G', scope = '<S-Tab>',
         legend = { 'gL', '<leader>aL' }, close_tmux = 'X' },
       -- drawer, on prompt rows (elsewhere these keys keep their normal meaning)
       prompts = { edit = 'e', rename = 'r', delete = 'D', yank = 'y', to_library = 'sL' },

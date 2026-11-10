@@ -155,13 +155,13 @@ end
 
 -- Tests -------------------------------------------------------------------------------------
 
-T['alive session: <S-Tab> and <leader>aM on its row ask its Claude; <C-c> only while it works'] = function()
+T['alive session: gm (mode, remapped) and <leader>aM on its row ask its Claude; <C-c> only while it works'] = function()
   start({ { expect = 'Hi' }, init(), say('Hello.'), result('Hello.'),
-    { expect = 'Second' }, { expect = 'interrupt' }, result('stopped', true) })
+    { expect = 'Second' }, { expect = 'interrupt' }, result('stopped', true) }, { keys = { chat = { mode = 'gm' } } })
   alive()
   wait_for(function() return sess().state == 'idle' end, 'turn end')
   drawer_cursor_to('Alpha basics')
-  child.type_keys('<S-Tab>')
+  child.type_keys('gm')
   wait_for(function() return #requests() == 1 end, 'mode request')
   eq(requests()[1], { subtype = 'set_permission_mode', mode = 'acceptEdits' })
   eq(last_note(), 'Agent-IDE: mode acceptEdits')
@@ -195,10 +195,10 @@ T['alive session: <S-Tab> and <leader>aM on its row ask its Claude; <C-c> only w
 end
 
 T['parked session without a process: mode and model wait for the start; <C-c> does nothing'] = function()
-  start()
+  start(nil, { keys = { chat = { mode = 'gm' } } })
   show_drawer()
   drawer_cursor_to('Alpha basics')
-  child.type_keys('<S-Tab>')
+  child.type_keys('gm')
   eq(sess().mode_requested, 'acceptEdits')
   eq(last_note(), 'Agent-IDE: mode acceptEdits' .. LATER)
   child.lua('_G.pick = 1')
@@ -218,12 +218,18 @@ T['session running elsewhere: refused with the usual notice; the raw view still 
   start(nil, { live_json = vim.json.encode({ { sessionId = FIXTURE_ID, pid = 4242, status = 'busy', cwd = '/x' } }) })
   show_drawer()
   wait_for(function() return has_line(drawer_lines(), 'elsewhere') ~= nil end, 'elsewhere row')
-  for _, k in ipairs({ '<S-Tab>', '\\aM', '<C-c>' }) do
+  for _, k in ipairs({ '\\aM', '<C-c>' }) do
     drawer_cursor_to('Alpha basics')
     child.lua('_G.notes = {}')
     child.type_keys(k)
     eq({ k, notes() }, { k, { ELSEWHERE } })
   end
+  -- <S-Tab> is the drawer's scope key, also on a session row: no mode request, the scope narrows
+  drawer_cursor_to('Alpha basics')
+  child.type_keys('<S-Tab>')
+  eq(child.lua_get('require("agent-ide.scope").get()'), 'project')
+  child.type_keys('<S-Tab>')
+  eq(child.lua_get('require("agent-ide.scope").get()'), 'all')
   -- the drawer's tmux key jumps to its pane instead (here: not in tmux)
   drawer_cursor_to('Alpha basics')
   child.lua('_G.notes = {}')
@@ -255,7 +261,7 @@ T['gr opens the raw view in the main window; gT hands an alive session to native
   eq(last_note():find('parked; not in tmux, so continue it by hand: ', 1, true) ~= nil, true)
 end
 
-T['on other rows the keys do nothing; <S-Tab> and <C-c> keep their Vim meaning'] = function()
+T['on other rows the keys do nothing; <C-c> keeps its Vim meaning'] = function()
   start()
   show_drawer()
   drawer_cursor_to('> Prompts')
@@ -265,9 +271,8 @@ T['on other rows the keys do nothing; <S-Tab> and <C-c> keep their Vim meaning']
   vim.wait(100)
   eq(child.lua_get('{ win = vim.api.nvim_get_current_win(), wins = #vim.api.nvim_list_wins() }'), before)
   eq(child.lua_get('_G.feeds'), {})
-  child.type_keys('<S-Tab>')
   child.type_keys('<C-c>')
-  eq(child.lua_get('_G.feeds'), { child.lua_get('vim.keycode("<S-Tab>")'), child.lua_get('vim.keycode("<C-c>")') })
+  eq(child.lua_get('_G.feeds'), { child.lua_get('vim.keycode("<C-c>")') })
   eq(notes(), {})
   eq(sess(), vim.NIL)
 end
@@ -276,7 +281,7 @@ T['a remapped chat key applies in the drawer too; the help lists them under a he
   start(nil, { keys = { chat = { mode = 'gm', raw = false } } })
   show_drawer()
   drawer_cursor_to('Alpha basics')
-  eq(child.lua_get('vim.fn.maparg("<S-Tab>", "n")'), '')
+  eq(child.lua_get('vim.fn.maparg("<S-Tab>", "n", false, true).desc'), 'Agent-IDE drawer: scope: only this project / all projects')
   child.type_keys('gm')
   eq(sess().mode_requested, 'acceptEdits')
   child.lua('_G.rows = {}; require("agent-ide.ui.help").open = function(_, rows) _G.rows = rows end')

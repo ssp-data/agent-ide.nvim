@@ -22,7 +22,7 @@ Every drawer key becomes configurable under `keys.drawer` (a key, a list, or `fa
 | close drawer | `q` | same |
 | help | `?`, `g?` | same |
 | commit graph | `gG` | `G` |
-| scope: this project / all | `gs` | `S` (**call**: the owner wrote "Shift-Toggle"; `<S-Tab>` is the mode cycle on session rows, so `S` for Scope; `keys.drawer.scope` changes it) |
+| scope: this project / all | `gs` | `<S-Tab>` (the owner's "Shift-Toggle" was Shift-Tab; on a session row the drawer's key wins, so the chat's mode cycle is not on the row) |
 | legend | `gL` | `gL`, `<leader>aL` |
 | close a tmux Claude | `X` | same |
 | yank | `y` on prompt rows only | `y` also on a session row: its last prompt (**call**: "the prompt's text" of a session is the last prompt sent in it) |
