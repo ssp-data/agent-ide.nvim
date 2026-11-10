@@ -30,7 +30,8 @@ end
 ---@param icons table
 ---@param projects_dir string|nil
 ---@param waits_for? fun(session_id: string): string|nil what a waiting session waits for (a tool name)
-function M.build(projects, state_of, expanded, now, icons, projects_dir, waits_for)
+---@param extra? fun(project: table, ctx: table): table[]|nil, table[]|nil extra rows and a project-row suffix (see ui/sections.lua)
+function M.build(projects, state_of, expanded, now, icons, projects_dir, waits_for, extra)
   local lines, nodes, hl = {}, {}, {}
 
   -- Append a line made of { text, group|nil } pieces; records byte ranges of grouped pieces.
@@ -65,6 +66,9 @@ function M.build(projects, state_of, expanded, now, icons, projects_dir, waits_f
       { M.ago(project.activity, now), 'AgentIdeAge' },
     }
     if project.missing then pieces[#pieces + 1] = { ' (gone)', 'AgentIdeMissing' } end
+    local rows, suffix
+    if extra then rows, suffix = extra(project, { open = is_open, expanded = expanded, icons = icons, now = now }) end
+    if suffix then vim.list_extend(pieces, suffix) end
     add(pieces, { type = 'project', project = project })
 
     if is_open then
@@ -90,6 +94,7 @@ function M.build(projects, state_of, expanded, now, icons, projects_dir, waits_f
           add(sp, { type = 'session', project = project, session = s, state = state })
         end
       end
+      for _, r in ipairs(rows or {}) do add(r.pieces, r.node) end
     end
   end
 
