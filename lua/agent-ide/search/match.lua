@@ -49,21 +49,63 @@ local function hay_of(p, w)
   return p.low
 end
 
+-- Start byte of the character that ends right before byte `s`.
+local function prev_char_start(text, s)
+  local i = s - 1
+  while i > 1 and text:byte(i) >= 0x80 and text:byte(i) < 0xC0 do i = i - 1 end
+  return i
+end
+
+-- A word start as in the helper: no letter or digit right before (Unicode-aware).
 local function word_start(text, s)
   if s <= 1 then return true end
   local b = text:byte(s - 1)
-  return not (b >= 0x80 or string.char(b):match('[%w]'))
+  if b < 0x80 then return not string.char(b):match('[%w]') end
+  return vim.fn.charclass(text:sub(prev_char_start(text, s), s - 1)) ~= 2
+end
+
+local function chars(s)
+  local out = {}
+  for c in s:gmatch('[%z\1-\127\194-\244][\128-\191]*') do out[#out + 1] = c end
+  return out
+end
+
+local low_cache = setmetatable({}, { __mode = 'k' })
+local function low_char(c)
+  if #c == 1 then return c:lower() end
+  local l = low_cache[c]
+  if not l then
+    l = vim.fn.tolower(c)
+    low_cache[c] = l
+  end
+  return l
+end
+
+-- Character by character on the original text, for texts whose lower-cased form has another
+-- byte length (a few rare characters): positions stay those of `text`.
+local function find_chars(text, w, init)
+  w.chars = w.chars or chars(w.needle)
+  local n = #w.chars
+  local s = init
+  while s <= #text do
+    local b = text:byte(s)
+    if b < 0x80 or b >= 0xC0 then
+      local i, ok = s, true
+      for k = 1, n do
+        local c = text:match('^[%z\1-\127\194-\244][\128-\191]*', i)
+        if not c or low_char(c) ~= w.chars[k] then ok = false; break end
+        i = i + #c
+      end
+      if ok then return s, i - 1 end
+    end
+    s = s + 1
+  end
 end
 
 ---First match of word `w` in prepared text `p` at or after byte `init`: 1-based start, end.
 function M.find(p, w, init)
   local hay = hay_of(p, w)
-  -- a lower-cased text of another length (rare characters) cannot give positions in `text`
-  -- (rare characters): report one match at the start, so callers stop after it
-  if #hay ~= #p.text then
-    if (init or 1) > 1 or not hay:find(w.needle, 1, true) then return nil end
-    return 1, math.min(1, #p.text)
-  end
+  if #hay ~= #p.text then return find_chars(p.text, w, init or 1) end
   return hay:find(w.needle, init or 1, true)
 end
 
@@ -81,20 +123,21 @@ function M.exact(p, w)
 end
 
 ---Quality of text `p` for `words`: 'prefix' | 'substring' | nil (a word does not match). A
----word may also match `project` (titles: the project's name).
+---word may also match `project` (titles: the project's name); the second value is then true.
+---@return string|nil quality, boolean via_project
 function M.match(p, words, project)
-  local worst = 'prefix'
+  local worst, via = 'prefix', false
   for _, w in ipairs(words) do
     local s, _, prefix = M.exact(p, w)
     if s then
       if not prefix then worst = 'substring' end
     elseif project and M.find(M.prepare(project), w, 1) then
-      worst = 'substring'
+      worst, via = 'substring', true
     else
-      return nil
+      return nil, false
     end
   end
-  return worst
+  return worst, via
 end
 
 ---Byte ranges (0-based, end exclusive) of every exact occurrence of `words` in `line`.

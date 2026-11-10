@@ -78,13 +78,14 @@ pub struct Hit {
 struct Cand<'a> {
     doc: &'a Doc,
     chunk: Option<&'a Chunk>,
+    kind: Kind,
     quality: Quality,
     score: u32,
 }
 
 impl Cand<'_> {
     fn kind(&self) -> Kind {
-        self.chunk.map_or(Kind::Title, |c| c.kind)
+        self.kind
     }
     fn ts(&self) -> Option<u64> {
         self.chunk.map_or(Some(self.doc.meta.activity), |c| c.ts)
@@ -116,14 +117,17 @@ fn fuzzies(words: &[Word], on: bool) -> Vec<Option<Fuzzy>> {
     words.iter().map(|w| if on { Fuzzy::new(w) } else { None }).collect()
 }
 
-/// The weakest word's quality and the fuzzy score, or `None` when a word does not match.
-fn match_text(text: &str, words: &[Word], fz: &mut [Option<Fuzzy>], project: Option<&str>) -> Option<(Quality, u32)> {
+/// The weakest word's quality, the fuzzy score and whether a word matched only the project
+/// name; `None` when a word does not match.
+fn match_text(text: &str, words: &[Word], fz: &mut [Option<Fuzzy>], project: Option<&str>) -> Option<(Quality, u32, bool)> {
     let mut worst = Quality::Prefix;
     let mut score = 0u32;
+    let mut via_project = false;
     for (i, w) in words.iter().enumerate() {
         let q = if let Some((_, _, prefix)) = w.exact(text) {
             if prefix { Quality::Prefix } else { Quality::Substring }
         } else if project.is_some_and(|p| w.find(p, 0).is_some()) {
+            via_project = true;
             Quality::Substring
         } else {
             let (s, _) = fz[i].as_mut()?.best(text)?;
@@ -132,33 +136,30 @@ fn match_text(text: &str, words: &[Word], fz: &mut [Option<Fuzzy>], project: Opt
         };
         worst = worst.min(q);
     }
-    Some((worst, score))
+    Some((worst, score, via_project))
 }
 
-fn match_doc<'a>(doc: &'a Doc, words: &[Word], p: &Params, kinds: &[bool; 4]) -> Vec<Cand<'a>> {
-    let mut out = Vec::new();
+/// One searchable text: a session's title (`chunk` = None) or one chunk.
+type Unit<'a> = (&'a Doc, Option<&'a Chunk>);
+
+fn match_unit<'a>(u: &Unit<'a>, words: &[Word], fz: &mut [Option<Fuzzy>], p: &Params) -> Option<Cand<'a>> {
+    let (doc, chunk) = *u;
     if words.is_empty() {
-        if kinds[Kind::Title as usize] {
-            out.push(Cand { doc, chunk: None, quality: Quality::Recent, score: 0 });
-        }
-        for c in doc.chunks.iter().filter(|c| kinds[c.kind as usize]) {
-            out.push(Cand { doc, chunk: Some(c), quality: Quality::Recent, score: 0 });
-        }
-        return out;
+        let kind = chunk.map_or(Kind::Title, |c| c.kind);
+        return Some(Cand { doc, chunk, kind, quality: Quality::Recent, score: 0 });
     }
-    let mut fz = fuzzies(words, p.fuzzy);
-    if kinds[Kind::Title as usize] {
-        let project = project_name(doc, &p.projects);
-        if let Some((quality, score)) = match_text(&doc.meta.title, words, &mut fz, Some(project)) {
-            out.push(Cand { doc, chunk: None, quality, score });
+    match chunk {
+        None => {
+            let project = project_name(doc, &p.projects);
+            let (quality, score, via) = match_text(&doc.meta.title, words, fz, Some(project))?;
+            // a session found through its project's name ranks after every other hit
+            Some(Cand { doc, chunk, kind: if via { Kind::Project } else { Kind::Title }, quality, score })
         }
-    }
-    for c in doc.chunks.iter().filter(|c| kinds[c.kind as usize]) {
-        if let Some((quality, score)) = match_text(&c.text, words, &mut fz, None) {
-            out.push(Cand { doc, chunk: Some(c), quality, score });
+        Some(c) => {
+            let (quality, score, _) = match_text(&c.text, words, fz, None)?;
+            Some(Cand { doc, chunk, kind: c.kind, quality, score })
         }
     }
-    out
 }
 
 fn order(a: &Cand, b: &Cand, empty: bool) -> Ordering {
@@ -215,19 +216,47 @@ fn hit(c: &Cand, words: &[Word], p: &Params) -> Hit {
 }
 
 pub fn search<'a>(docs: impl Iterator<Item = &'a Doc>, p: &Params) -> Vec<Hit> {
+    search_counted(docs, p).0
+}
+
+/// The hits and how many matched in all (the hits are the best `limit` of them; with fuzzy
+/// matching the count is a lower bound when the exact matches alone filled the limit).
+pub fn search_counted<'a>(docs: impl Iterator<Item = &'a Doc>, p: &Params) -> (Vec<Hit>, usize) {
     let words: Vec<Word> = p.query.split_whitespace().map(Word::new).collect();
-    let mut kinds = [false; 4];
+    let mut kinds = [false; 5];
     for k in &p.kinds {
         kinds[*k as usize] = true;
     }
-    let docs: Vec<&Doc> = docs.filter(|d| in_scope(d, &p.scope)).collect();
-    let mut cands: Vec<Cand> = docs.par_iter().flat_map_iter(|d| match_doc(d, &words, p, &kinds)).collect();
+    let mut units: Vec<Unit> = Vec::new();
+    for d in docs.filter(|d| in_scope(d, &p.scope)) {
+        if kinds[Kind::Title as usize] {
+            units.push((d, None));
+        }
+        units.extend(d.chunks.iter().filter(|c| kinds[c.kind as usize]).map(|c| (d, Some(c))));
+    }
     let empty = words.is_empty();
     let limit = p.limit.clamp(1, MAX_LIMIT);
+    // Exact matches rank before fuzzy ones: the fuzzy pass runs only when they leave room.
+    let exact: Vec<Option<Cand>> =
+        units.par_iter().map_init(|| fuzzies(&words, false), |fz, u| match_unit(u, &words, fz, p)).collect();
+    let mut cands: Vec<Cand> = Vec::new();
+    let mut missed: Vec<&Unit> = Vec::new();
+    for (u, c) in units.iter().zip(exact) {
+        match c {
+            Some(c) => cands.push(c),
+            None => missed.push(u),
+        }
+    }
+    if p.fuzzy && !empty && cands.len() < limit {
+        let fuzzy: Vec<Cand> =
+            missed.par_iter().map_init(|| fuzzies(&words, true), |fz, u| match_unit(u, &words, fz, p)).flatten().collect();
+        cands.extend(fuzzy);
+    }
+    let total = cands.len();
     if cands.len() > limit {
         cands.select_nth_unstable_by(limit - 1, |a, b| order(a, b, empty));
         cands.truncate(limit);
     }
     cands.sort_by(|a, b| order(a, b, empty));
-    cands.par_iter().map(|c| hit(c, &words, p)).collect()
+    (cands.par_iter().map(|c| hit(c, &words, p)).collect(), total)
 }

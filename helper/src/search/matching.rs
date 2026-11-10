@@ -4,7 +4,9 @@
 //! letter matches case-sensitively). Non-ASCII words compare characters lower-cased one by one,
 //! so `über` finds `Über`. Fuzzy matching uses `neo_frizbee` (Smith-Waterman, typo-tolerant) per
 //! line of the text; lines longer than `SEGMENT` bytes are matched in pieces so a match stays
-//! local, and a minimum score drops letters scattered over a line.
+//! local. A fuzzy match counts only when it scores at least a minimum and its matched letters
+//! lie close together (within the word's length plus its typos plus 2 bytes), so letters
+//! scattered over a line never match.
 use neo_frizbee::{CaseMatching, Config, Matcher, Matching, Pattern, PatternConfig, SortStrategy, UnicodeMatching};
 
 pub const SEGMENT: usize = 512;
@@ -131,6 +133,8 @@ pub fn segments(text: &str) -> impl Iterator<Item = (usize, usize)> + '_ {
 pub struct Fuzzy {
     m: Matcher,
     min: u16,
+    /// Largest distance in bytes from the first to the last matched letter.
+    span: usize,
 }
 
 impl Fuzzy {
@@ -150,7 +154,7 @@ impl Fuzzy {
         // A contiguous match scores 12 per character plus bonuses; letters scattered over a
         // line (`f....o....l....d` scores 49 for `fold`) stay below two thirds of that plus 20.
         let min = (n as u16).saturating_mul(8).saturating_add(20);
-        Some(Fuzzy { m, min })
+        Some(Fuzzy { m, min, span: w.raw.len() + typos as usize + 2 })
     }
 
     /// Best score over the segments of `text`, with the segment's start.
@@ -158,12 +162,21 @@ impl Fuzzy {
         let mut best: Option<(u16, usize)> = None;
         for (s, e) in segments(text) {
             if let Some(m) = self.m.match_one(&text[s..e], 0) {
-                if m.score >= self.min && best.map_or(true, |b| m.score > b.0) {
+                if m.score >= self.min && best.map_or(true, |b| m.score > b.0) && self.close(&text[s..e]) {
                     best = Some((m.score, s));
                 }
             }
         }
         best
+    }
+
+    /// The matched letters of the best alignment in `seg` lie within `span` bytes.
+    fn close(&mut self, seg: &str) -> bool {
+        let idx = self.indices(seg);
+        match (idx.first(), idx.last()) {
+            (Some(a), Some(b)) => b - a < self.span,
+            _ => false,
+        }
     }
 
     /// Byte offsets of the matched characters in `seg`, ascending.

@@ -32,10 +32,12 @@ pub enum Kind {
     Prompt,
     Answer,
     Tool,
+    /// A session found only through a word of its project's name (search hits only).
+    Project,
 }
 
 impl Kind {
-    /// Ranking order: title before prompt before answer before tool.
+    /// Ranking order: title before prompt before answer before tool before project.
     pub fn rank(self) -> u8 {
         self as u8
     }
@@ -45,6 +47,7 @@ impl Kind {
             Kind::Prompt => "prompt",
             Kind::Answer => "answer",
             Kind::Tool => "tool",
+            Kind::Project => "project",
         }
     }
     pub fn parse(s: &str) -> Option<Kind> {
@@ -86,6 +89,23 @@ pub struct Doc {
     pub events: u32,
     pub chunks: Vec<Chunk>,
     pub anchors: Vec<Anchor>,
+    /// Hash of the last `TAIL` bytes indexed: a file rewritten and grown past them is not
+    /// taken for an appended one.
+    #[serde(default)]
+    pub tail: u64,
+}
+
+const TAIL: u64 = 64;
+
+/// FNV-1a.
+fn hash(b: &[u8]) -> u64 {
+    b.iter().fold(0xcbf29ce484222325u64, |h, x| (h ^ *x as u64).wrapping_mul(0x100000001b3))
+}
+
+/// Hash of the `TAIL` bytes before `doc.indexed`, from `data` that starts at file offset `from`.
+fn set_tail(doc: &mut Doc, data: &[u8], from: u64) {
+    let end = (doc.indexed - from) as usize;
+    doc.tail = hash(&data[end.saturating_sub(TAIL as usize)..end]);
 }
 
 /// `s` cut to at most `max` bytes at a character boundary; `true` when it was cut.
@@ -109,7 +129,8 @@ fn tool_text(ev: &Event) -> String {
     let name = ev.get("name").and_then(Value::as_str).unwrap_or("?");
     let mut summary = String::new();
     if let Some(input) = ev.get("input").and_then(Value::as_object) {
-        if let Some(v) = SUMMARY_FIELDS.iter().find_map(|f| input.get(*f)) {
+        // as the renderer: a field that is JSON null is absent (decoded as nil)
+        if let Some(v) = SUMMARY_FIELDS.iter().find_map(|f| input.get(*f).filter(|v| !v.is_null())) {
             let s = match v {
                 Value::String(s) => s.clone(),
                 other => other.to_string(),
@@ -218,16 +239,20 @@ pub fn stat(path: &Path) -> Option<(u64, u64)> {
     Some((mtime, st.len()))
 }
 
-/// Reads the bytes after `prev.indexed`, or `None` when the file must be indexed again.
-fn appended(path: &Path, prev: &Doc, size: u64) -> Option<Vec<u8>> {
+/// The file from `TAIL` bytes before `prev.indexed` to its end, and that start offset, or
+/// `None` when the file must be indexed again (shrunk, or the indexed tail changed).
+fn appended(path: &Path, prev: &Doc, size: u64) -> Option<(Vec<u8>, u64)> {
     if prev.indexed == 0 || size < prev.indexed {
         return None;
     }
+    let from = prev.indexed.saturating_sub(TAIL);
     let mut f = std::fs::File::open(path).ok()?;
-    f.seek(SeekFrom::Start(prev.indexed - 1)).ok()?;
-    let mut buf = Vec::with_capacity((size - prev.indexed + 1) as usize);
+    f.seek(SeekFrom::Start(from)).ok()?;
+    let mut buf = Vec::with_capacity((size - from) as usize);
     f.read_to_end(&mut buf).ok()?;
-    (buf.first() == Some(&b'\n')).then(|| buf.split_off(1))
+    let k = (prev.indexed - from) as usize;
+    let same = buf.len() >= k && buf[k - 1] == b'\n' && hash(&buf[..k]) == prev.tail;
+    same.then_some((buf, from))
 }
 
 /// Indexes `path`, continuing from `prev` when the file only grew. `None` when unreadable.
@@ -235,17 +260,20 @@ pub fn index_file(path: &Path, prev: Option<&Doc>) -> Option<Doc> {
     let (mtime, size) = stat(path)?;
     let p = path.to_string_lossy().into_owned();
     if let Some(prev) = prev {
-        if let Some(rest) = appended(path, prev, size) {
+        if let Some((buf, from)) = appended(path, prev, size) {
             let mut doc = prev.clone();
-            index_bytes(&mut doc, &rest, prev.indexed);
+            let k = (prev.indexed - from) as usize;
+            index_bytes(&mut doc, &buf[k..], prev.indexed);
+            set_tail(&mut doc, &buf, from);
             doc.meta = scan::read_meta(path, mtime, size);
             return Some(doc);
         }
     }
     let data = std::fs::read(path).ok()?;
     let meta = scan::meta_from_bytes(&p, mtime, size, &data);
-    let mut doc = Doc { meta, indexed: 0, events: 0, chunks: Vec::new(), anchors: Vec::new() };
+    let mut doc = Doc { meta, indexed: 0, events: 0, chunks: Vec::new(), anchors: Vec::new(), tail: 0 };
     index_bytes(&mut doc, &data, 0);
+    set_tail(&mut doc, &data, 0);
     Some(doc)
 }
 

@@ -155,7 +155,7 @@ fn titles_match_the_project_name_and_hits_carry_it() {
     assert!(run(&docs, &p).is_empty());
     p.projects = [("/w/repo".to_string(), "agents-ide".to_string())].into();
     let hits = run(&docs, &p);
-    assert_eq!(ids(&hits), vec![("s".into(), Kind::Title)]);
+    assert_eq!(ids(&hits), vec![("s".into(), Kind::Project)]);
     assert_eq!(hits[0].project, "agents-ide");
     assert_eq!(hits[0].cwd.as_deref(), Some("/w/repo"));
     let plain = run(&docs, &params("hello"));
@@ -183,4 +183,44 @@ fn fuzzy_hits_mark_the_matched_letters_and_tolerate_typos() {
         assert!(h.snippet[*a..*b].chars().all(|c| "umlaut".contains(c)));
     }
     assert!(run(&docs, &params("zzzz")).is_empty());
+}
+
+#[test]
+fn a_project_name_match_ranks_after_title_and_prompt_hits() {
+    let docs = build(&[
+        ("-w-agents", "p1", title("Parser fixes") + &user("first", 1)),
+        ("-w-agents", "p2", title("Docs") + &user("second", 2)),
+        ("-w-other", "o1", title("Other") + &user("agents talk about the parser", 3)),
+        ("-w-other", "o2", title("Agents overview") + &user("x", 4)),
+    ]);
+    let p = Params { fuzzy: false, projects: [("/w/repo".to_string(), "agents".to_string())].into(), ..params("agents") };
+    let hits = run(&docs, &p);
+    // every session's cwd is /w/repo, named `agents`: titles and prompts first, then the
+    // sessions found only through the project name, newest first
+    assert_eq!(
+        ids(&hits),
+        vec![
+            ("o2".into(), Kind::Title),
+            ("o1".into(), Kind::Prompt),
+            ("o1".into(), Kind::Project),
+            ("p2".into(), Kind::Project),
+            ("p1".into(), Kind::Project),
+        ]
+    );
+}
+
+#[test]
+fn nonsense_queries_over_prose_find_nothing_and_typos_still_match() {
+    let mut files = Vec::new();
+    for i in 0..20 {
+        files.push(("-p", ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t"][i], user(&prose(i as u64, 300), 1) + &answer(&prose(i as u64 + 100, 4000), 2)));
+    }
+    let docs = build(&files);
+    for q in ["zzzzzz", "qxjvkw", "Donaudampfschifffahrtsgesellschaftskapitän", "xylophonequartz", "ßßßßßß"] {
+        let hits = run(&docs, &texts(q));
+        assert!(hits.is_empty(), "{q:?} gave {} hits, first {:?}", hits.len(), hits.first().map(|h| &h.snippet));
+    }
+    for q in ["migrte", "umlatu", "Übersetzng", "documentaton"] {
+        assert!(!run(&docs, &texts(q)).is_empty(), "{q:?} found nothing");
+    }
 }

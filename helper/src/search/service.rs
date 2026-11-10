@@ -237,12 +237,12 @@ impl Service {
         }
         let t0 = Instant::now();
         let st = self.inner.read();
-        let hits = query::search(st.docs.values(), &params);
+        let (hits, total) = query::search_counted(st.docs.values(), &params);
         let took = t0.elapsed().as_secs_f64() * 1000.0;
         let (sessions, chunks) = counts(&st);
         let text: usize = st.docs.values().flat_map(|d| d.chunks.iter()).map(|c| c.text.len()).sum();
         Ok(json!({
-            "hits": hits, "indexing": self.running() || !st.loaded, "sessions": sessions, "chunks": chunks,
+            "hits": hits, "total": total, "indexing": self.running() || !st.loaded, "sessions": sessions, "chunks": chunks,
             "took_ms": took, "build_ms": st.build_ms, "from_cache": st.from_cache, "text_bytes": text,
         }))
     }

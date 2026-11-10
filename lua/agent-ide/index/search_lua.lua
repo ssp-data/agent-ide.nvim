@@ -119,7 +119,7 @@ local function with_sessions(dir, cb)
   end)
 end
 
-local KIND_RANK = { title = 0, prompt = 1, answer = 2, tool = 3 }
+local KIND_RANK = { title = 0, prompt = 1, answer = 2, tool = 3, project = 4 }
 local QUALITY = { substring = 1, prefix = 2, recent = 3 }
 
 local function order(empty)
@@ -176,8 +176,10 @@ function M.search(params, cb)
         if in_scope(m, params.scope) then
           local project = project_of(m, projects)
           if kinds.title then
-            local q = empty and 'recent' or match.match(match.prepare(m.title), words, project)
-            if q then add(m, 'title', nil, q, m.title) end
+            local q, via = 'recent', false
+            if not empty then q, via = match.match(match.prepare(m.title), words, project) end
+            -- a session found through its project's name ranks after every other hit
+            if q then add(m, via and 'project' or 'title', nil, q, m.title) end
           end
           if kinds.prompt and doc then
             for _, pr in ipairs(doc.prompts) do

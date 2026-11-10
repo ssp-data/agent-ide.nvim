@@ -43,7 +43,7 @@ fn chunk_event_indexes_point_into_the_history_event_list() {
             Kind::Prompt => "prompt",
             Kind::Answer => "text",
             Kind::Tool => "tool_call",
-            Kind::Title => unreachable!(),
+            Kind::Title | Kind::Project => unreachable!(),
         };
         assert_eq!(ev["kind"], want);
         if c.kind != Kind::Tool {
@@ -102,6 +102,29 @@ fn a_rewritten_or_shrunk_file_is_indexed_again() {
 }
 
 #[test]
+fn a_file_rewritten_and_grown_is_indexed_again_not_append_parsed() {
+    let root = tmp("regrow");
+    let p = write(&root, "-w", "s", &user("one", 1));
+    let first = index_file(&p, None).unwrap();
+    // same length up to the old end (still ends with a newline there), different text, longer
+    std::fs::write(&p, user("two", 1) + &answer("more", 2)).unwrap();
+    let second = index_file(&p, Some(&first)).unwrap();
+    let texts: Vec<&str> = second.chunks.iter().map(|c| c.text.as_str()).collect();
+    assert_eq!(texts, vec!["two", "more"]);
+}
+
+#[test]
+fn a_null_tool_input_field_is_absent_as_in_the_renderer() {
+    let root = tmp("null");
+    let line = serde_json::json!({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t",
+        "name": "Bash", "input": {"command": null, "description": "list files"}}]}})
+    .to_string();
+    let p = write(&root, "-w", "s", &(line + "\n"));
+    let doc = index_file(&p, None).unwrap();
+    assert_eq!(doc.chunks[0].text, "Bash: list files");
+}
+
+#[test]
 fn refresh_reports_changed_and_removed_files_only() {
     let root = tmp("refresh");
     let a = write(&root, "-w-a", "a", &user("alpha", 1));
@@ -148,4 +171,56 @@ fn store_round_trip_and_other_versions_are_ignored() {
     std::fs::write(&file, "garbage").unwrap();
     assert!(store::load(&file, &dir).is_none());
     assert!(store::FILE_NAME.starts_with("search-v"));
+}
+
+#[test]
+fn store_with_other_rules_or_format_is_ignored() {
+    let root = tmp("rules");
+    write(&root, "-w", "s", &user("stored prompt", 1));
+    let docs = docs_of(&root);
+    let file = root.join("cache").join(store::FILE_NAME);
+    let dir = root.to_string_lossy().into_owned();
+    assert!(store::save(&file, &dir, docs.values()));
+    assert!(store::load(&file, &dir).is_some());
+    let changes = [
+        ("rules", serde_json::json!(crate::events::RULES_VERSION + 1)),
+        ("format", serde_json::json!(store::FORMAT + 1)),
+    ];
+    for (field, value) in changes {
+        let good = std::fs::read(&file).unwrap();
+        let mut v: serde_json::Value = serde_json::from_slice(&good).unwrap();
+        v[field] = value;
+        std::fs::write(&file, serde_json::to_vec(&v).unwrap()).unwrap();
+        assert!(store::load(&file, &dir).is_none(), "{field}");
+        std::fs::write(&file, good).unwrap();
+    }
+}
+
+#[test]
+fn the_store_is_private_and_leftover_temp_files_of_dead_helpers_are_removed() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tmp("private");
+    write(&root, "-w", "s", &user("secret prompt", 1));
+    let docs = docs_of(&root);
+    let cache = root.join("cache");
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::set_permissions(&cache, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let file = cache.join(store::FILE_NAME);
+    let dir = root.to_string_lossy().into_owned();
+    let dead = cache.join(format!("{}.tmp4000000000", store::FILE_NAME));
+    let live = cache.join(format!("{}.tmp1", store::FILE_NAME)); // pid 1 is always running
+    std::fs::write(&dead, "partial").unwrap();
+    std::fs::write(&live, "partial").unwrap();
+    assert!(store::save(&file, &dir, docs.values()));
+    let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(&file), 0o600);
+    assert_eq!(mode(&cache), 0o700, "an existing directory is tightened");
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(store::load(&file, &dir).is_some());
+    assert_eq!(mode(&file), 0o600, "an older, looser file is tightened");
+    assert!(!dead.exists(), "temp file of a dead helper removed");
+    assert!(live.exists(), "temp file of a running process kept");
+    let own = format!("tmp{}", std::process::id());
+    let names: Vec<String> = std::fs::read_dir(&cache).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    assert!(!names.iter().any(|n| n.ends_with(&own)), "{names:?}");
 }

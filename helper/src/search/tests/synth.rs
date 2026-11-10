@@ -82,3 +82,25 @@ pub fn session(rounds: u32, words: &str, pad: usize) -> String {
     }
     s
 }
+
+const WORDS: &[&str] = &[
+    "the", "parser", "index", "search", "migrate", "database", "umlaut", "Übersetzung", "Größe", "Brücke",
+    "function", "returns", "error", "handling", "documentation", "release", "notes", "window", "buffer",
+    "session", "transcript", "fold", "render", "query", "result", "with", "and", "for", "when", "über",
+    "test", "cargo", "build", "Neovim", "plugin", "should", "because", "können", "müssen", "Straße",
+    "jazz", "pizza", "fuzzy", "lazy", "zone", "quick", "xenon", "box", "zip", "quiz", "waltz", "zigzag",
+];
+
+/// Pseudo-random prose of about `bytes` bytes from a fixed vocabulary (deterministic per seed).
+pub fn prose(seed: u64, bytes: usize) -> String {
+    let mut x = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    let mut s = String::with_capacity(bytes + 16);
+    let mut n = 0;
+    while s.len() < bytes {
+        x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        s.push_str(WORDS[(x >> 33) as usize % WORDS.len()]);
+        n += 1;
+        s.push(if n % 14 == 0 { '\n' } else { ' ' });
+    }
+    s
+}

@@ -64,7 +64,8 @@ end
 local function sessions_of(hits, kinds)
   local set = {}
   for _, h in ipairs(hits) do
-    if kinds[h.kind] and h.match ~= 'fuzzy' then set[h.session] = true end
+    local k = h.kind == 'project' and 'title' or h.kind -- found through the project name: a title search
+    if kinds[k] and h.match ~= 'fuzzy' then set[h.session] = true end
   end
   local out = vim.tbl_keys(set)
   table.sort(out)
@@ -124,6 +125,29 @@ T['lua fallback indexes in slices without blocking the UI'] = function()
   eq(r.indexing, false)
   eq(#r.hits >= 1, true)
   if worst / 1e6 >= 50 then error(('UI blocked for %.1f ms'):format(worst / 1e6), 0) end
+end
+
+T['match: positions on the original text when lower-casing changes its length; Unicode word starts'] = function()
+  local match = require('agent-ide.search.match')
+  local text = 'Die STRAẞE ist lang' -- ẞ (3 bytes) lower-cases to ß (2 bytes)
+  local p = match.prepare(text)
+  local w = match.words('straße')[1]
+  local s, e = match.find(p, w, 1)
+  eq(text:sub(s, e), 'STRAẞE')
+  eq(match.find(p, w, s + 1), nil)
+  eq(match.positions(text, { w }), { { s - 1, e } })
+  local _, _, prefix = match.exact(match.prepare('darüber grünüber'), match.words('über')[1])
+  eq(prefix, false) -- after a letter (ü): inside a word
+  _, _, prefix = match.exact(match.prepare('–über'), match.words('über')[1])
+  eq(prefix, true) -- after a dash: a word start
+end
+
+T['lua fallback: a session found through its project name ranks last, as kind project'] = function()
+  local root = tmp .. '/proj'
+  S.write(root, '-w-a', 'a', { S.title('Parser fixes'), S.user('first', 1, '/w/agents') })
+  S.write(root, '-w-b', 'b', { S.title('Other'), S.user('agents talk', 2, '/w/b') })
+  local r = run({ projects_dir = root, query = 'agents', projects = { ['/w/agents'] = 'agents' } })
+  eq(vim.tbl_map(function(h) return h.session .. ':' .. h.kind end, r.hits), { 'b:prompt', 'a:project' })
 end
 
 T['lua context returns the turn of an event'] = function()
