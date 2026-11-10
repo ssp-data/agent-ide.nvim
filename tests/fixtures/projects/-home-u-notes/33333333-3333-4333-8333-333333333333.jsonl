@@ -1,0 +1,3 @@
+{"type":"user","uuid":"n01","cwd":"/home/u/notes","message":{"role":"user","content":"Summarize my meeting notes"}}
+{"type":"assistant","uuid":"n02","cwd":"/home/u/notes","message":{"role":"assistant","content":[{"type":"text","text":"Sure, here is a summary."}]}}
+{"type":"ai-title","aiTitle":"Meeting notes summary","sessionId":"33333333-3333-4333-8333-333333333333"}

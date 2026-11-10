@@ -1,0 +1,2 @@
+{"type":"user","uuid":"d01","cwd":"/home/u/git/alpha/docs","gitBranch":"main","message":{"role":"user","content":"Write the docs intro paragraph"}}
+{"type":"assistant","uuid":"d02","cwd":"/home/u/git/alpha/docs","gitBranch":"main","message":{"role":"assistant","content":[{"type":"text","text":"Here is a short intro paragraph."}]}}
