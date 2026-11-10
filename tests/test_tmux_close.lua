@@ -142,6 +142,17 @@ local function drawer_cursor_to(text)
   child.lua('local s = require("agent-ide.ui.drawer").state(); vim.api.nvim_set_current_win(s.win); vim.api.nvim_win_set_cursor(s.win, { ..., 0 })', { row })
 end
 
+-- A drawer line holding every one of `texts` (a row's mark, title and its pane label).
+local function row_with(...)
+  local texts = { ... }
+  for _, l in ipairs(drawer_lines()) do
+    local all = true
+    for _, t in ipairs(texts) do all = all and l:find(t, 1, true) ~= nil end
+    if all then return true end
+  end
+  return false
+end
+
 local function show_drawer()
   child.lua('require("agent-ide").toggle()')
   drawer_cursor_to('> repo')
@@ -218,16 +229,19 @@ T['X: No sends nothing; a working or waiting session asks again'] = function()
   drawer_cursor_to('Alpha task')
   child.lua('_G.answers = { 2 }')
   child.type_keys('X')
-  vim.wait(200)
+  wait_for(function() return #confirms() == 1 end, 'confirm')
+  vim.wait(100)
   eq(sent(), {})
   eq(alive(pid), true)
-  -- busy there: a second confirm, No
+  -- busy there (a new process): a second confirm, No. Ready once the row shows the new state
+  -- and the new pid's pane label, which the drawer learns a poll later.
   child.lua('_G.confirms = {}; _G.answers = { 1, 2 }')
   idle_world('busy')
-  wait_for(function() return has_line(drawer_lines(), 'B Alpha task') ~= nil end, 'busy row')
+  wait_for(function() return row_with('B Alpha task', 'tmux 2.1') end, 'busy row with its pane')
   drawer_cursor_to('Alpha task')
   child.type_keys('X')
-  vim.wait(200)
+  wait_for(function() return #confirms() == 2 end, 'two confirms')
+  vim.wait(100)
   local c = confirms()
   eq(#c, 2)
   eq(c[1].msg:find('(working)', 1, true) ~= nil, true)
@@ -236,12 +250,35 @@ T['X: No sends nothing; a working or waiting session asks again'] = function()
   -- waiting for input, both Yes: closed
   child.lua('_G.confirms = {}; _G.answers = { 1, 1 }')
   local p2 = idle_world('waiting')
-  wait_for(function() return has_line(drawer_lines(), 'W Alpha task') ~= nil end, 'waiting row')
+  wait_for(function() return row_with('W Alpha task') end, 'waiting row')
   drawer_cursor_to('Alpha task')
   child.type_keys('X')
   wait_for(function() return #sent() == 2 end, 'keys sent')
   eq(confirms()[2].msg, 'It is waiting for input; close anyway?')
   wait_for(function() return not alive(p2) end, 'ended')
+end
+
+T['X while the pane label is not known yet (a new pid, between polls): looks it up, then asks'] = function()
+  idle_world()
+  start()
+  show_drawer()
+  wait_for(function() return has_line(drawer_lines(), 'elsewhere') ~= nil or has_line(drawer_lines(), 'tmux 2.1') ~= nil end, 'row')
+  -- the drawer's label cache knows nothing about this pid at the moment X is pressed
+  child.lua('require("agent-ide.tmux").pane_label = function() return nil end')
+  drawer_cursor_to('Alpha task')
+  child.lua('_G.answers = { 2 }')
+  child.type_keys('X')
+  wait_for(function() return #confirms() == 1 end, 'confirm after the fresh lookup')
+  eq(confirms()[1].msg, 'Close Claude "Alpha task" in tmux pane 2.1 (idle)?')
+  eq(sent(), {})
+  -- the fresh lookup finds no pane: it says so (never silently nothing)
+  vim.fn.writefile({}, dir .. '/panes')
+  child.lua('_G.notes = {}; _G.confirms = {}')
+  child.type_keys('X')
+  wait_for(function() return #notes() > 0 end, 'notice')
+  eq(last_note(), 'Agent-IDE: cannot reach that session (no tmux pane known here); gp jumps to it')
+  eq(confirms(), {})
+  eq(sent(), {})
 end
 
 T['X: the pane gone, or the pid no longer below it, by the time it acts: nothing sent'] = function()
@@ -294,7 +331,9 @@ T['X: outside tmux, pane unknown, owned here, not running: a notice, nothing sen
   show_drawer()
   wait_for(function() return has_line(drawer_lines(), 'elsewhere') ~= nil end, 'elsewhere row')
   drawer_cursor_to('Alpha task')
+  child.lua('_G.notes = {}')
   child.type_keys('X')
+  wait_for(function() return #notes() > 0 end, 'notice after the fresh lookup')
   eq(last_note(), 'Agent-IDE: cannot reach that session (no tmux pane known here); gp jumps to it')
   -- a session this Neovim runs; one that runs nowhere
   child.lua('require("agent-ide.session").open({ id = ..., cwd = "/x/repo" }).owned = true', { A })

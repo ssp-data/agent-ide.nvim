@@ -118,17 +118,11 @@ local function one_line(t) return (tostring(t or ''):gsub('[\r\n\t]+', ' ')) end
 
 local WORD = { busy = 'working', waiting = 'waiting for input' }
 
----`X` on a drawer session row: close the Claude running it in a tmux pane after a confirm (a
----second one when it is working or waiting for input).
----@param node table drawer session row
-function M.close_row(node)
+local CANNOT = 'cannot reach that session (no tmux pane known here); gp jumps to it'
+
+-- The confirms and the keys, once the pane label is known.
+local function confirm_and_close(node, s, e, label)
   local id = node.session.id
-  local s = session.get(id)
-  if s and (s.owned or s:_alive()) then return notify('this session runs in this Neovim; use x to park it') end
-  local e = live.get()[id]
-  if not e or not e.pid or (s and not s:_elsewhere()) then return notify('session is not running') end
-  local label = in_tmux() and require('agent-ide.tmux').pane_label(e.pid)
-  if not label then return notify('cannot reach that session (no tmux pane known here); gp jumps to it') end
   local state = require('agent-ide.ui.drawer_model').state_of(id)
   local title = one_line(node.session.title or s and s.title or 'session')
   local msg = ('Close Claude "%s" in tmux pane %s (%s)?'):format(title, label, WORD[state] or state)
@@ -148,6 +142,27 @@ function M.close_row(node)
       end
       poll_now()
     end)
+  end)
+end
+
+---`X` on a drawer session row: close the Claude running it in a tmux pane after a confirm (a
+---second one when it is working or waiting for input). The drawer's pane labels lag a poll
+---behind a new process (Claude restarted in its pane); when the label is not known yet, one
+---fresh lookup decides, so `X` always ends in a confirm or a notice.
+---@param node table drawer session row
+function M.close_row(node)
+  local id = node.session.id
+  local s = session.get(id)
+  if s and (s.owned or s:_alive()) then return notify('this session runs in this Neovim; use x to park it') end
+  local e = live.get()[id]
+  if not e or not e.pid or (s and not s:_elsewhere()) then return notify('session is not running') end
+  if not in_tmux() then return notify(CANNOT) end
+  local label = require('agent-ide.tmux').pane_label(e.pid)
+  if label then return confirm_and_close(node, s, e, label) end
+  M.lookup({ e.pid }, function(panes)
+    local pane = panes[e.pid]
+    if not pane then return notify(CANNOT) end
+    confirm_and_close(node, s, e, pane.label)
   end)
 end
 
