@@ -257,7 +257,12 @@ pub struct Refresh {
 /// parallel, and the paths of `docs` below `dir` whose file is gone.
 pub fn refresh(dir: &str, docs: &HashMap<String, Doc>) -> Refresh {
     let files = scan::list_files(dir);
-    let changed: Vec<Doc> = files
+    Refresh { changed: changed(&files, docs), removed: missing(dir, &files, docs) }
+}
+
+/// The docs of those `files` that are new or changed compared with `docs`, indexed in parallel.
+pub fn changed(files: &[String], docs: &HashMap<String, Doc>) -> Vec<Doc> {
+    files
         .par_iter()
         .filter_map(|p| {
             let (mtime, size) = stat(Path::new(p))?;
@@ -267,11 +272,15 @@ pub fn refresh(dir: &str, docs: &HashMap<String, Doc>) -> Refresh {
             }
             index_file(Path::new(p), prev)
         })
-        .collect();
+        .collect()
+}
+
+/// Paths of `docs` below `dir` that are not among `files` (sorted).
+pub fn missing(dir: &str, files: &[String], docs: &HashMap<String, Doc>) -> Vec<String> {
     let listed: std::collections::HashSet<&str> = files.iter().map(String::as_str).collect();
     let prefix = format!("{}/", dir.trim_end_matches('/'));
     let mut removed: Vec<String> =
         docs.keys().filter(|p| p.starts_with(&prefix) && !listed.contains(p.as_str())).cloned().collect();
     removed.sort();
-    Refresh { changed, removed }
+    removed
 }
