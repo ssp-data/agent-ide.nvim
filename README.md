@@ -29,6 +29,8 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
 
 Without `cargo` leave out `build`; the plugin uses its Lua backend.
 
+If Neovim says that the helper is out of date, the helper binary was built from older sources than the plugin (both must read transcripts by the same rules): run `make helper` in the plugin folder (or let your plugin manager run its build step). Until then the plugin uses its Lua backend.
+
 ## Configuration
 
 These are the defaults. Pass only what you want to change to `setup()` (or `opts`).
@@ -55,7 +57,7 @@ require('agent-ide').setup({
     chat = { send = '<C-CR>', send_alt = '<leader><CR>', interrupt = '<C-c>', prompt = '<leader>ap', help = '?',
       history_prev = '<C-p>', history_next = '<C-n>', attach = '<leader>af',
       answer_inner = 'ir', answer_outer = 'ar', mode = '<S-Tab>', model = '<leader>aM', answer = '<leader>ay',
-      raw = 'gr', raw_event = 'gR', native = '<leader>at' },
+      raw = 'gr', raw_event = 'gR', native = '<leader>at', park = '<leader>ax' },
   },
   chat = { auto_slash = true, at_picker = true }, -- `/` opens the command menu, `@` the file picker
   icons = { open = '▾', closed = '▸', project = '', waiting = '◐', busy = '●', idle = '○', parked = '·',
@@ -72,7 +74,7 @@ Global:
 | Key | Action |
 |---|---|
 | `<leader>aa` | Toggle the Agents tab (same as `:Agents`) |
-| `<leader>an` | Go to the next session that needs you: an open question first (oldest first), then a failed or a finished turn you have not seen |
+| `<leader>an` | Go to the next session that needs you: one waiting for your answer here (oldest ask first), then one waiting in another Claude (jumped to in tmux), then a failed turn, then a finished turn you have not seen; from the first of them, the one after it |
 
 In the drawer:
 
@@ -82,6 +84,7 @@ In the drawer:
 | `za` | Expand or collapse the node under the cursor |
 | `R` | Rescan sessions and refresh running state |
 | `gp` | Jump to the tmux pane of a session running elsewhere |
+| `x` | Park the session: stop the Claude process this Neovim runs for it |
 | `q` | Close the drawer |
 | `?` | Help |
 
@@ -91,13 +94,14 @@ In the chat (transcript and prompt buffer, unless noted):
 |---|---|
 | `<C-CR>` | Send the prompt (normal and insert mode) |
 | `<leader><CR>` | Send the prompt |
-| `<C-c>` | Interrupt Claude; queued prompts come back into the prompt buffer |
+| `<C-c>` | Normal mode: interrupt Claude; queued prompts come back into the prompt buffer |
 | `<leader>ap` | Focus the prompt |
 | `i`, `a`, `o` | Transcript: write in the prompt |
 | `<leader>ay` | Answer what Claude asks (permission, question, plan) |
 | `<S-Tab>` | Next permission mode |
 | `<leader>aM` | Pick the model |
-| `<leader>at` | Continue the session in native Claude in a tmux pane |
+| `<leader>ax` | Park the session: stop its Claude process (asks when it is working); the next send resumes it |
+| `<leader>at` | Continue the session in native Claude in a tmux pane; while it is there, take it back |
 | `gr` | Transcript: raw view of what was sent and received; `q` or `gr` returns |
 | `gR` | Transcript: raw view at the line of the `unknown` fold under the cursor |
 | `ir`, `ar` | Transcript: text object for one Claude answer (`ar` with its header) |
@@ -114,19 +118,19 @@ The history buffer is markdown with folds for tool calls, results and thinking. 
 
 ## Chat
 
-Open a session from the drawer, or start one with `+ New session` under a project. The transcript fills the main window of the Agents tab and a prompt buffer opens below it. Opening a session shows its history without starting Claude; the first prompt you send starts `claude -p` for it (resuming the session when it has a history), and the process keeps running until you quit Neovim or hand the session to native Claude. The winbar shows project, title, model, permission mode, state and the number of queued prompts.
+Open a session from the drawer, or start one with `+ New session` under a project. The transcript fills the main window of the Agents tab and a prompt buffer opens below it. Opening a session shows its history without starting Claude; the first prompt you send starts `claude -p` for it (resuming the session when it has a history), and the process keeps running until you park the session (`<leader>ax`, or `x` in the drawer), hand it to native Claude, or quit Neovim. Parking asks first when Claude is working, puts queued prompts back into the prompt buffer, and keeps the transcript; the next prompt resumes the session. The winbar shows project, title, model, permission mode, state and the number of queued prompts.
 
 **Prompt buffer.** A normal markdown buffer: write as much as you like and send it with `<C-CR>`. Its text is sent as typed, except that an `[attach] <path>` line outside a fenced code block becomes `@<path>` (`@"<path>"` when the path holds spaces), which makes Claude read the file. `@` after a space opens a file picker that adds such a line; `/` on an empty line opens the menu of the commands the session listed (known after its first answer). `<C-p>` and `<C-n>` step through the prompts of the session.
 
 **While Claude works.** Answers stream into the transcript. A prompt sent while a turn runs is queued by the plugin and sent after that turn, in order. `<C-c>` interrupts the turn and puts the queued prompts back into the prompt buffer.
 
-**Permissions, questions and plans.** When Claude asks to use a tool, the ask shows at the end of the transcript and in the drawer, and a picker opens with Allow, Deny and the suggestions Claude made (switch the mode for this session, or always allow a rule; the label says where the rule is saved, for example `.claude/settings.local.json` in the project). The picker opens only when you are in that session's chat in normal mode. Nothing ever interrupts you: an ask from another session never opens a popup, moves the cursor or takes focus; it shows in the drawer and in the footer, and `<leader>an` takes you there. While you type in the same session's prompt, a one-line hint appears instead; `<leader>ay` opens the picker. Questions Claude asks (multiple choice) are answered the same way, one picker per question; a multi-select question takes one option per round until you pick Done choosing. A plan from plan mode can be approved, approved with edits accepted for the rest of the session, or sent back with Keep planning.
+**Permissions, questions and plans.** When Claude asks to use a tool, the ask shows at the end of the transcript and in the drawer, and a picker opens with Allow, Deny and the suggestions Claude made (switch the mode for this session, or always allow a rule; offered only where Claude saves it in this project's local settings, and labelled so). The picker opens only when you are in that session's chat in normal mode. Nothing ever interrupts you: an ask from another session never opens a popup, moves the cursor or takes focus; it shows in the drawer and in the footer, and `<leader>an` takes you there. While you type in the same session's prompt, a one-line hint appears instead; `<leader>ay` opens the picker. Questions Claude asks (multiple choice) are answered the same way, one picker per question; a multi-select question takes one option per round until you pick Done choosing. A plan from plan mode can be approved, approved with edits accepted for the rest of the session, or sent back with Keep planning.
 
 **Mode and model.** `<S-Tab>` cycles the permission mode (manual, acceptEdits, plan, auto) and `<leader>aM` picks the model. The winbar shows `old→new` until Claude confirms the change; a refused change says why.
 
 **Raw view.** `gr` in the transcript shows every line sent to Claude (`>>`) and received (`<<`) for the session, byte for byte; for a session that did not run here it shows the transcript file. Anything the chat cannot render shows as an `unknown` fold, and `gR` on it opens the raw view at its line.
 
-**Native Claude.** `<leader>at` inside tmux parks the session (after a question when Claude is working), opens `claude --resume <id>` in a split pane, and reloads the session from disk when that Claude exits; until then the winbar says `in native Claude (tmux pane)` and sending is refused. Outside tmux it parks the session and shows the command to run.
+**Native Claude.** `<leader>at` inside tmux parks the session (after a question when Claude is working), opens `claude --resume <id>` in a split pane, and takes the session back when that pane ends (also when it is killed). Until then the winbar says `in native Claude (tmux pane)` and sending is refused; `<leader>at` again offers to take the session back, which is refused while native Claude still runs it. The session is reloaded from disk in the background: a chat on screen is refreshed in place, otherwise a notice says it is back. Outside tmux the key parks the session and shows the command to run.
 
 **Quitting.** Quitting Neovim while a session is working asks first; `:qa!` and the other forced quits do not ask.
 
@@ -176,7 +180,7 @@ The plugin reads the local Claude Code transcripts (JSONL files), builds an inde
 
 Apart from Claude Code itself, everything stays on your machine. The plugin reads transcripts under `projects_dir` and the output of `claude agents --json`, and sends nothing over the network; what you type in a chat goes to the `claude` process it starts, which talks to Anthropic as it always does.
 
-The Rust helper keeps a metadata cache in `stdpath('cache')/agent-ide/index-v2.json` (on Linux usually `~/.cache/nvim/agent-ide/index-v2.json`). It holds the path, title, working directory, branch, size and modification time of each session, so the drawer opens fast. You can delete it at any time; it is rebuilt on the next scan.
+The Rust helper keeps a metadata cache in `stdpath('cache')/agent-ide/index-v3.json` (on Linux usually `~/.cache/nvim/agent-ide/index-v3.json`). It holds the path, title, working directory, branch, size and modification time of each session, so the drawer opens fast. You can delete it at any time; it is rebuilt on the next scan.
 
 ## Roadmap
 
