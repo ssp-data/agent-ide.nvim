@@ -254,16 +254,26 @@ end
 
 T['history in insert mode only when the menu is closed and at the first/last line'] = function()
   start()
+  -- keyword completion looks in this buffer only (not in every buffer of the child)
+  child.lua("vim.o.complete = '.'")
   set_events({ { kind = 'prompt', text = 'old' } })
+  local function mode() return child.lua_get('vim.api.nvim_get_mode().mode') end
+  local function pum() return child.lua_get('vim.fn.pumvisible()') end
   child.type_keys('i', 'a', '<CR>', 'b')
+  wait_for(function() return mode() == 'i' and pum() == 0 end, 'insert mode, no menu')
   child.type_keys('<C-p>') -- insert-mode <C-p> on line 2: normal behaviour (completion)
-  eq(lines_of('prompt')[1], 'a')
-  child.type_keys('<Esc>', 'gg', 'A')
-  child.type_keys('<C-p>')
-  eq(lines_of('prompt'), { 'old' })
-  eq(child.lua_get('vim.api.nvim_get_mode().mode'), 'i')
-  child.type_keys('<C-n>')
+  wait_for(function() return pum() == 0 end, 'keyword completion done')
   eq(lines_of('prompt'), { 'a', 'b' })
+  child.type_keys('<Esc>')
+  wait_for(function() return mode() == 'n' end, 'normal mode')
+  child.type_keys('gg', 'A')
+  wait_for(function() return mode() == 'i' and pum() == 0 end, 'insert mode on the first line, no menu')
+  child.type_keys('<C-p>')
+  wait_for(function() return vim.deep_equal(lines_of('prompt'), { 'old' }) end, 'history step back')
+  eq(mode(), 'i')
+  wait_for(function() return pum() == 0 end, 'no menu after the step')
+  child.type_keys('<C-n>')
+  wait_for(function() return vim.deep_equal(lines_of('prompt'), { 'a', 'b' }) end, 'history step forward')
 end
 
 T['insert-mode history keys keep their native action when no step is possible or a plugin menu is open'] = function()
