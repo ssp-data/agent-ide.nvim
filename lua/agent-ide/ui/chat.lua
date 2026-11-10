@@ -171,6 +171,11 @@ local HELP = {
   { 'interrupt', 'interrupt Claude; queued prompts return to the prompt buffer' },
   { 'prompt', 'focus the prompt' },
   { 'help', 'this help' },
+  { 'history_prev', 'prompt: older prompt (also <Up>) on the first line' },
+  { 'history_next', 'prompt: newer prompt (also <Down>) on the last line' },
+  { 'attach', 'prompt: pick a file and add an [attach] line' },
+  { 'answer_inner', 'transcript: text object, one Claude answer' },
+  { 'answer_outer', 'transcript: text object, one Claude answer with its header' },
 }
 
 local function help()
@@ -179,6 +184,8 @@ local function help()
   for _, h in ipairs(HELP) do
     if keys[h[1]] then rows[#rows + 1] = { key = keys[h[1]], desc = h[2] } end
   end
+  rows[#rows + 1] = { key = '/', desc = 'prompt, at line start: Claude commands (menu)' }
+  rows[#rows + 1] = { key = '@', desc = 'prompt, after a space: pick a file to attach' }
   rows[#rows + 1] = { key = 'i / a / o', desc = 'in the transcript: write in the prompt' }
   rows[#rows + 1] = { key = 'za', desc = 'toggle fold' }
   rows[#rows + 1] = { key = ':w', desc = 'save prompt (later; now only clears modified)' }
@@ -197,6 +204,7 @@ local function map_keys(c, buf, is_transcript)
   map('n', keys.prompt, function() focus_prompt(c, false) end, 'focus prompt')
   map('n', keys.help, help, 'chat help')
   if is_transcript then
+    require('agent-ide.ui.textobj').map(buf, c.s, keys)
     for _, lhs in ipairs({ 'i', 'a', 'o' }) do map('n', lhs, function() focus_prompt(c, true) end, 'write in the prompt') end
   end
 end

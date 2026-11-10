@@ -13,8 +13,12 @@ local function defaults()
     keys = {
       toggle = '<leader>aa',
       -- chat view, buffer-local in the transcript and the prompt
-      chat = { send = '<C-CR>', send_alt = '<leader><CR>', interrupt = '<C-c>', prompt = '<leader>ap', help = '?' },
+      chat = { send = '<C-CR>', send_alt = '<leader><CR>', interrupt = '<C-c>', prompt = '<leader>ap', help = '?',
+        history_prev = '<C-p>', history_next = '<C-n>', attach = '<leader>af',
+        answer_inner = 'ir', answer_outer = 'ar' },
     },
+    -- prompt buffer: `/` opens the command menu, `@` opens the file picker
+    chat = { auto_slash = true, at_picker = true },
     icons = { open = '▾', closed = '▸', project = '', waiting = '◐', busy = '●', idle = '○', parked = '·',
       done = '✔', failed = '✖', new = '+' },
   }
