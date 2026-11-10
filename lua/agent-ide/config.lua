@@ -21,7 +21,10 @@ local function defaults()
       prompt_history = '<leader>aP', -- global: every prompt, newest first
       -- the search picker's query line; each a key, a list of keys, or false (close: normal mode)
       search_picker = { next = { '<C-n>', '<Down>' }, prev = { '<C-p>', '<Up>' }, open = '<CR>', copy = '<C-y>',
-        reuse = '<C-e>', scope = '<Tab>', kinds = '<C-t>', close = { '<Esc>', 'q' } },
+        reuse = '<C-e>', scope = '<Tab>', kinds = '<C-t>', close = { '<Esc>', 'q' },
+        -- the preview's next / previous occurrence of the query (]n / [n in normal mode only,
+        -- <M-n> / <M-p> also in insert mode); after <CR>, the same step through the transcript
+        next_match = { ']n', '<M-n>' }, prev_match = { '[n', '<M-p>' } },
       -- chat view, buffer-local in the transcript and the prompt
       chat = { send = '<C-CR>', send_alt = '<leader><CR>', interrupt = '<C-c>', prompt = '<leader>ap', help = 'g?',
         history_prev = '<C-p>', history_next = '<C-n>', attach = '<leader>af',

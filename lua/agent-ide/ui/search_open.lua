@@ -1,6 +1,7 @@
--- What the search picker does with a hit: open the session's chat on the hit's line, copy the
--- hit's text, put a prompt back into the chat prompt. Also the project grouping the picker
--- shows and scopes by (the drawer's, else one made from a scan).
+-- What the search picker does with a hit: open the session's chat on the hit's line (the query
+-- highlighted there, see `ui/search_hl.lua`), copy the hit's text, put a prompt back into the
+-- chat prompt. Also the project grouping the picker shows and scopes by (the drawer's, else one
+-- made from a scan).
 local api = vim.api
 local locate = require('agent-ide.transcript.locate')
 
@@ -58,9 +59,25 @@ function M.event_index(events, hit, first)
   end
 end
 
+-- The query's highlights in the transcript window `twin` (see `search_hl.attach`); returns the
+-- occurrence to put the cursor on: the first one in the hit's event (lines `from`..`to`) of a
+-- word the hit's row does not show, else of any word, else nil.
+local function highlight(twin, tbuf, hit, query, from, to)
+  local hl = require('agent-ide.ui.search_hl')
+  if not query or not query:find('%S') then return hl.clear(twin) end
+  local lines = api.nvim_buf_get_lines(tbuf, 0, -1, false)
+  local terms = hl.terms(query, hit, lines)
+  local occ = hl.occurrences(lines, terms, from, to)
+  local i = hl.pick(occ, from)
+  local o = i and occ[i]
+  local k = require('agent-ide.ui.search_keys').keys()
+  hl.attach(twin, terms, o, { next = k.next_match, prev = k.prev_match })
+  return o
+end
+
 -- `focus`: the window focused right after opening; focus moves to the transcript only while it
 -- is still focused (the user may have gone on meanwhile).
-local function place(s, tbuf, hit, focus)
+local function place(s, tbuf, hit, focus, query)
   local twin = require('agent-ide.ui.chat_win').showing(tbuf)
   if not twin then return end
   local i = M.event_index(s.events, hit)
@@ -72,9 +89,14 @@ local function place(s, tbuf, hit, focus)
   end
   if hit.event and not i then notify('the transcript changed since it was indexed; showing the session', vim.log.levels.WARN) end
   local line = i and locate.line(s.events, i) or 1
-  line = math.max(1, math.min(line, api.nvim_buf_line_count(tbuf)))
+  local n = api.nvim_buf_line_count(tbuf)
+  line = math.max(1, math.min(line, n))
+  -- the event ends where the next one starts
+  local last = n
+  if i and i < #s.events then last = math.max(line, math.min(n, (locate.line(s.events, i + 1) or n + 1) - 1)) end
+  local o = highlight(twin, tbuf, hit, query, line, last)
   if api.nvim_get_current_win() == focus then api.nvim_set_current_win(twin) end
-  api.nvim_win_set_cursor(twin, { line, 0 })
+  api.nvim_win_set_cursor(twin, o and { o.line, o.s } or { line, 0 })
   api.nvim_win_call(twin, function() vim.cmd('normal! zvzz') end)
 end
 
@@ -82,7 +104,8 @@ end
 ---opened). The line comes from the renderer (`transcript.locate`), once the history is loaded.
 ---@param hit table
 ---@param m? table `projects()` result
-function M.open(hit, m)
+---@param query? string the search: its words are highlighted in the transcript window
+function M.open(hit, m, query)
   if not vim.uv.fs_stat(hit.path) then
     return notify('this session no longer exists: ' .. vim.fn.fnamemodify(hit.path, ':t'), vim.log.levels.WARN)
   end
@@ -109,7 +132,7 @@ function M.open(hit, m)
     if ready or vim.uv.now() > deadline then
       timer:stop()
       timer:close()
-      if ready then place(s, tbuf, hit, focus) end
+      if ready then place(s, tbuf, hit, focus, query) end
     end
   end))
 end

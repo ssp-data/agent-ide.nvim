@@ -378,11 +378,14 @@ With the Rust helper the search is fuzzy and typo-tolerant ([neo_frizbee](https:
 | `<C-e>` | Put the prompt into the open chat prompt to reuse it |
 | `<Tab>` | Scope: all sessions, the current project, the current session |
 | `<C-t>` | What to search: everything, prompts, answers, titles, or also tool calls |
+| `]n` / `[n` (normal mode), `<M-n>` / `<M-p>` | Preview: next / previous occurrence of the query (wraps; the footer says `match 3/7`) |
 | `<Esc>` (normal mode) or `q` | Close; in insert mode `<Esc>` first goes to normal mode |
 
-The keys are under `keys.search_picker`; each is a key, a list of keys, or `false`. Other keys keep their Vim meaning in the query line: `<C-r>` inserts a register, `<C-k>` a digraph (`<C-k>u:` gives `ü`).
+The keys are under `keys.search_picker` (the match steps are `next_match` and `prev_match`; a step key that starts with a typed character, such as `]n`, works in normal mode only, so typing stays free); each is a key, a list of keys, or `false`. Other keys keep their Vim meaning in the query line: `<C-r>` inserts a register, `<C-k>` a digraph (`<C-k>u:` gives `ü`).
 
-The preview shows the hit in its turn, rendered and folded as in the chat, with the hit's fold open. The prompt history lists the newest 500 prompts (the footer says how many there are; type to narrow), and the same prompt sent several times in a row is one row with a count (`×3`).
+The preview shows the hit in its turn, rendered and folded as in the chat, with the hit's fold open. Every occurrence of every query word is marked (`AgentIdeSearchMatch`, linked to `Search`; the current one `AgentIdeSearchMatchCurrent`, linked to `CurSearch`), with the search's own matching (smart case, umlauts regardless of case; for a fuzzy match, what the search matched). The preview scrolls to the first occurrence of a word the result row does not already show in its title or project name, so a query such as `mailer signature` on a session titled "Mailer settings" lands on `signature`; when every word is only in the title or project name, the preview shows the top and its footer says `matched in title/project`.
+
+`<CR>` opens the chat with the cursor on the first occurrence in the hit's event, and the query stays marked in that transcript window: `]n` / `[n` step through every occurrence in the transcript, `<Esc>` in normal mode clears the marks (a global `<Esc>` mapping of yours still runs after). The marks are window-local matches, never the search register or `'hlsearch'`; they go when the window closes or shows another buffer, and with the next search. A key the transcript buffer already maps is left alone. The prompt history lists the newest 500 prompts (the footer says how many there are; type to narrow), and the same prompt sent several times in a row is one row with a count (`×3`).
 
 Tool calls are searched only on request (`<C-t>`), tool output never. The index keeps the first 4 KiB of each prompt and answer; copying and reusing take the full text from the transcript, and refuse with a notice when it cannot be read.
 
