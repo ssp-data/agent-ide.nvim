@@ -9,7 +9,7 @@ local function defaults()
     helper = { enabled = true, path = nil }, -- nil: <plugin root>/helper/target/release/agent-ide-helper
     -- modes: what <S-Tab> cycles through (plugin names; `manual` is Claude's `default`);
     -- default_mode: where the cycle starts before Claude reports a mode (nil: as if manual)
-    claude = { cmd = { 'claude' }, strip_api_key = true, model = nil,
+    claude = { cmd = { 'claude' }, strip_api_key = true, model = nil, version_check = true,
       modes = { 'manual', 'acceptEdits', 'plan', 'auto' }, default_mode = nil,
       models = { 'fable', 'opus', 'sonnet', 'haiku' } },
     tcd = true,
@@ -21,7 +21,7 @@ local function defaults()
       chat = { send = '<C-CR>', send_alt = '<leader><CR>', interrupt = '<C-c>', prompt = '<leader>ap', help = '?',
         history_prev = '<C-p>', history_next = '<C-n>', attach = '<leader>af',
         answer_inner = 'ir', answer_outer = 'ar', mode = '<S-Tab>', model = '<leader>aM', answer = '<leader>ay',
-        diff = 'gd' },
+        raw = 'gr', raw_event = 'gR', diff = 'gd' },
       -- diff view, buffer-local on both sides (]c / [c stay Neovim's hunk motions)
       diff = { next_file = ']f', prev_file = '[f', flip = 'gb', branch = 'gB', close = 'q', help = '?', lazygit = 'gl' },
     },

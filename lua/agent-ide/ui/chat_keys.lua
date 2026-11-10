@@ -17,6 +17,8 @@ local HELP = {
   { 'answer', 'answer what Claude asks (permission, question, plan)' },
   { 'mode', 'next permission mode (manual, acceptEdits, plan, auto)' },
   { 'model', 'pick the model' },
+  { 'raw', 'transcript: raw view of the wire lines (>> sent, << received), not the rendered answer; q or the same key returns' },
+  { 'raw_event', 'transcript: raw view at the line of the unknown fold under the cursor' },
   { 'help', 'this help' },
   { 'history_prev', 'prompt: older prompt (also <Up>) on the first line' },
   { 'history_next', 'prompt: newer prompt (also <Down>) on the last line' },
@@ -66,6 +68,8 @@ function M.map(c, buf, is_transcript, act)
   map('n', keys.mode, function() require('agent-ide.ui.mode').cycle(c.s) end, 'next permission mode')
   map('n', keys.model, function() require('agent-ide.ui.mode').pick_model(c.s) end, 'pick model')
   if is_transcript then
+    map('n', keys.raw, function() require('agent-ide.ui.raw').open(c.s) end, 'raw view')
+    map('n', keys.raw_event, function() require('agent-ide.ui.raw').open_at_cursor(c.s, buf) end, 'raw view at event')
     require('agent-ide.ui.textobj').map(buf, c.s, keys)
     require('agent-ide.ui.chat_diff').map(buf, c.s, keys)
     for _, lhs in ipairs({ 'i', 'a', 'o' }) do map('n', lhs, function() act.focus_prompt(c, true) end, 'write in the prompt') end
