@@ -74,7 +74,7 @@ local function alive(pid) return vim.uv.kill(pid, 0) == 0 end
 local function world(sessions)
   local live, ps_all, ps_tty, panes, labels = {}, {}, {}, {}, {}
   for n, s in ipairs(sessions) do
-    live[#live + 1] = { sessionId = s.id, status = s.status, pid = s.pid, cwd = '/x/repo' }
+    live[#live + 1] = { sessionId = s.id, status = s.status, pid = s.pid, cwd = s.cwd or '/x/repo' }
     if s.pane then
       local shell = 500 + n
       ps_all[#ps_all + 1] = s.pid .. ' ' .. shell
@@ -385,6 +385,36 @@ T[':AgentsCloseIdle: one confirm with the count, Ctrl-C twice into each idle pan
   eq(confirms()[1].msg, 'Close 1 idle Claude session(s) in tmux panes?')
   eq(sent(), { { 'send-keys', '-t', '%6', 'C-c' }, { 'send-keys', '-t', '%6', 'C-c' } })
   eq({ alive(pa), alive(pb) }, { true, false })
+end
+
+T[':AgentsCloseIdle in project scope: only that project\'s idle sessions, said in the confirm; ! means all'] = function()
+  local pa, pb = claude_proc(), claude_proc()
+  world({
+    { id = A, status = 'idle', pid = pa, pane = '%5', label = '2.1', tty = 'pts/5', victim = true },
+    { id = B, status = 'idle', pid = pb, pane = '%6', label = '2.2', tty = 'pts/6', victim = true, cwd = '/x/other' },
+  })
+  start()
+  child.lua('require("agent-ide.scope").set("project", { key = "/x/repo", name = "repo" })')
+  child.lua('_G.answers = { 1 }')
+  child.cmd('AgentsCloseIdle')
+  wait_for(function() return last_note():find('closed', 1, true) ~= nil end, 'summary')
+  eq(last_note(), 'Agent-IDE: closed 1 of 1')
+  eq(confirms()[1].msg, 'Close 1 idle Claude session(s) of repo in tmux panes?')
+  eq(sent(), { { 'send-keys', '-t', '%5', 'C-c' }, { 'send-keys', '-t', '%5', 'C-c' } })
+  eq({ alive(pa), alive(pb) }, { false, true })
+  -- nothing idle left in the project: the notice names it
+  world({ { id = B, status = 'idle', pid = pb, pane = '%6', label = '2.2', tty = 'pts/6', victim = true, cwd = '/x/other' } })
+  child.lua('_G.notes = {}; _G.confirms = {}')
+  child.cmd('AgentsCloseIdle')
+  wait_for(function() return #notes() > 0 end, 'notice')
+  eq(last_note(), 'Agent-IDE: no idle Claude sessions of repo in tmux panes')
+  eq(confirms(), {})
+  -- the bang: every project
+  child.lua('_G.notes = {}; _G.answers = { 1 }')
+  child.cmd('AgentsCloseIdle!')
+  wait_for(function() return last_note():find('closed', 1, true) ~= nil end, 'summary 2')
+  eq(confirms()[1].msg, 'Close 1 idle Claude session(s) in tmux panes?')
+  eq(alive(pb), false)
 end
 
 T[':AgentsCloseIdle: outside tmux, or nothing idle in a pane: a notice, no confirm'] = function()

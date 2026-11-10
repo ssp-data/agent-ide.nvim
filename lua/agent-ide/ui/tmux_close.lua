@@ -168,9 +168,13 @@ end
 
 ---`:AgentsCloseIdle`: close every Claude that is idle in a tmux pane (asked afresh), after one
 ---confirm with their count. `pred(id, entry)` limits them (e.g. to a project scope: a caller
----passes a predicate on the session id and its live entry `{ pid, cwd, status }`).
+---passes a predicate on the session id and its live entry `{ pid, cwd, status }`); `of` names
+---that limit in the confirm and the notices (`... session(s) of <of> in tmux panes`).
 ---@param pred? fun(id: string, entry: table): boolean
-function M.close_idle(pred)
+---@param of? string
+function M.close_idle(pred, of)
+  local where = (of and (' of ' .. one_line(of)) or '') .. ' in tmux panes'
+
   if not in_tmux() then return notify('not in tmux; nothing to close') end
   local cfg = require('agent-ide.config').get()
   live.query({ cmd = cfg.live.cmd, interval_ms = cfg.live.interval_ms }, function(ok, reason)
@@ -185,8 +189,8 @@ function M.close_idle(pred)
     table.sort(found)
     M.lookup(found, function(panes)
       local targets = vim.tbl_filter(function(pid) return panes[pid] ~= nil end, found)
-      if #targets == 0 then return notify('no idle Claude sessions in tmux panes') end
-      if vim.fn.confirm(('Close %d idle Claude session(s) in tmux panes?'):format(#targets), '&Close\n&Cancel', 2) ~= 1 then
+      if #targets == 0 then return notify('no idle Claude sessions' .. where) end
+      if vim.fn.confirm(('Close %d idle Claude session(s)%s?'):format(#targets, where), '&Close\n&Cancel', 2) ~= 1 then
         return
       end
       M.lookup(targets, function(now)
@@ -215,6 +219,16 @@ function M.close_idle(pred)
       end)
     end)
   end)
+end
+
+---`:AgentsCloseIdle[!]`: in project scope only the scoped project's sessions (by the live entry's
+---folder); with the bang, or in 'all' scope, every project.
+---@param bang boolean
+function M.command(bang)
+  local scope = require('agent-ide.scope')
+  local p = not bang and scope.project()
+  if not p then return M.close_idle() end
+  M.close_idle(function(_, e) return scope.matches(e) end, p.name)
 end
 
 return M

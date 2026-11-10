@@ -464,6 +464,27 @@ T['history steps back and forward, keeps the draft'] = function()
   eq(lines_of('prompt'), { 'draft' })
 end
 
+T['history holds the session\'s own prompts only, in project scope and in all'] = function()
+  start()
+  set_events({ { kind = 'prompt', text = 'mine' } })
+  -- another session of another project, with prompts of its own
+  child.lua([[
+    local o = require('agent-ide.session').open({ cwd = '/elsewhere/other' })
+    o.events = { { kind = 'prompt', text = 'theirs' } }
+    o.queue = { 'their queue' }
+  ]])
+  for _, k in ipairs({ 'project', 'all' }) do
+    child.lua('require("agent-ide.scope").set(...)', { k })
+    child.type_keys('<Esc>')
+    child.lua('vim.api.nvim_buf_set_lines(0, 0, -1, false, { "" })')
+    child.type_keys('<C-p>')
+    eq(lines_of('prompt'), { 'mine' })
+    child.type_keys('<C-p>')
+    eq(lines_of('prompt'), { 'mine' })
+    child.type_keys('<C-n>')
+  end
+end
+
 T['history in insert mode only when the menu is closed and at the first/last line'] = function()
   start()
   -- keyword completion looks in this buffer only (not in every buffer of the child)

@@ -215,7 +215,7 @@ With many sessions across many repositories, large ones can bury the session you
 
 In project scope the drawer has no project row. Its first, dimmed line names the project and branch and says `project · gs: all` (`<CR>` on it goes back to all). Below it come the Prompts node, then `+ New session`, `Sessions (n)` (open), `Saved prompts`, `Changes` and `Commits`, all at the top level. Every drawer key works as usual on these rows. Sessions of other projects keep running in this Neovim, they are just not listed. When one of them needs you (waiting, done unread, failed), a dimmed last line says so, for example `1 session in other projects needs you · gs`. Each scope remembers its own open folds.
 
-Search (`<leader>as`, `<leader>aP`, `s` outside a project row) opens on `project <name>`, and `<Tab>` widens it to all sessions. The status file for the desktop bar keeps listing all sessions of this Neovim.
+Search (`<leader>as`, `<leader>aP`, `s` outside a project row) opens on `project <name>`, and `<Tab>` widens it to all sessions. The status file for the desktop bar keeps listing all sessions of this Neovim. `:AgentsCloseIdle` closes only the project's idle terminal sessions (its confirm names the project); `:AgentsCloseIdle!` closes those of every project. The prompt history (`<C-p>`, `<C-n>`) is the session's own in either scope, so it never shows prompts of another project.
 
 Open a terminal straight into a project:
 
@@ -225,7 +225,7 @@ nvim +'Agents project'
 
 ### Closing terminal sessions
 
-`X` on a session row that runs in another Claude in a tmux pane (the row shows `tmux <window>.<pane>`) ends that Claude the way you would there: after a confirm (default: no) it types Ctrl-C into the pane, and again 300 ms later (Claude's own exit). Right before, it checks again that the pane still exists and still runs that Claude, so the keys never land in a pane that meanwhile runs something else; the process itself is never signalled. A session that is working or waiting for input asks a second time. If Claude still runs 5 s later, a notice says so and nothing more happens. Outside tmux, or when the pane is not known (`elsewhere`), `X` says it cannot reach the session; for a session running in this Neovim use `x`. `:AgentsCloseIdle` closes every Claude that is idle in a tmux pane, after one confirm with their count.
+`X` on a session row that runs in another Claude in a tmux pane (the row shows `tmux <window>.<pane>`) ends that Claude the way you would there: after a confirm (default: no) it types Ctrl-C into the pane, and again 300 ms later (Claude's own exit). Right before, it checks again that the pane still exists and still runs that Claude, so the keys never land in a pane that meanwhile runs something else; the process itself is never signalled. A session that is working or waiting for input asks a second time. If Claude still runs 5 s later, a notice says so and nothing more happens. When the drawer does not know the pane yet (Claude was just restarted in it), `X` looks it up first. Outside tmux, or when no pane runs it (`elsewhere`), `X` says it cannot reach the session; for a session running in this Neovim use `x`. `:AgentsCloseIdle` closes every Claude that is idle in a tmux pane, after one confirm with their count; in project scope only those of the project (`:AgentsCloseIdle!` for all).
 
 ## Keys
 
