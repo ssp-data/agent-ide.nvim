@@ -194,7 +194,8 @@ T['lua backend runs the change timer only while visible'] = function()
   index.on_change(nil)
 end
 
-local function pgrep(pat) vim.fn.system({ 'pgrep', '-f', pat }); return vim.v.shell_error == 0 end
+-- Only processes started by this Neovim count: a helper of the user's own editor may be running.
+local function pgrep(pat) vim.fn.system({ 'pgrep', '-P', tostring(vim.fn.getpid()), '-f', pat }); return vim.v.shell_error == 0 end
 
 T['idle crash falls back; on_change keeps firing from the Lua timer'] = function()
   local ack = script([[read l; printf '{"id":1,"result":{}}\n'; exit 0]])
@@ -265,7 +266,7 @@ T['no helper or fake process is left behind'] = function()
   scan(dir)
   helper._reset()
   local gone = wait(function() return not pgrep('^[^ ]*/agent-ide-helper( |$)') end, 2000)
-  if not gone then print(vim.fn.system({ 'pgrep', '-fa', '^[^ ]*/agent-ide-helper( |$)' })) end
+  if not gone then print(vim.fn.system({ 'pgrep', '-P', tostring(vim.fn.getpid()), '-fa', '^[^ ]*/agent-ide-helper( |$)' })) end
   eq(gone, true)
 end
 
