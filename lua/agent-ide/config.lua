@@ -13,6 +13,10 @@ local function defaults()
       modes = { 'manual', 'acceptEdits', 'plan', 'auto' }, default_mode = nil,
       models = { 'fable', 'opus', 'sonnet', 'haiku' } },
     tcd = true,
+    -- 'all' (every project) or 'project' (the git repository of Neovim's working directory):
+    -- what the drawer, search, <leader>an and the footer show at start; `:Agents all|project`
+    -- and `gs` in the drawer switch it
+    scope = 'all',
     -- false disables a mapping
     keys = {
       toggle = '<leader>aa',

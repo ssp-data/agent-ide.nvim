@@ -23,6 +23,7 @@ A Neovim plugin that manages Claude Code sessions from inside Neovim: a drawer w
 | `lua/agent-ide/git*.lua` | read-only, asynchronous git queries, parsing, cache |
 | `lua/agent-ide/prompts/` | prompt library, skills and commands, saved prompts |
 | `lua/agent-ide/ui/` | drawer, chat, prompt, permission, diff, graph, search picker, help, highlights, icons |
+| `lua/agent-ide/scope.lua` | project scope or all: what the drawer, search, next waiting and the footer show |
 | `lua/agent-ide/status.lua`, `live.lua`, `tmux.lua` | footer and status files, sessions running elsewhere, tmux |
 | `helper/` | Rust helper `agent-ide-helper` (scan, history, watch, search) |
 | `omarchy/` | Omarchy bar widget |

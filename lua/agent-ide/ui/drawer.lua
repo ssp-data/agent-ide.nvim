@@ -5,6 +5,7 @@ local hidden = require('agent-ide.hidden')
 local index = require('agent-ide.index')
 local live = require('agent-ide.live')
 local project = require('agent-ide.project')
+local scope = require('agent-ide.scope')
 local session = require('agent-ide.session')
 local tmux = require('agent-ide.tmux')
 local model = require('agent-ide.ui.drawer_model')
@@ -16,7 +17,8 @@ local M = {}
 local ns = api.nvim_create_namespace('agent-ide.drawer')
 local augroup = api.nvim_create_augroup('agent-ide.drawer', { clear = true })
 
-local S = { tab = nil, win = nil, buf = nil, projects = {}, nodes = {}, expanded = {} }
+local S = { tab = nil, win = nil, buf = nil, projects = {}, nodes = {}, expanded = {},
+  kind = nil, expanded_by = {} } -- kind: the scope `expanded` belongs to; expanded_by: the other scope's
 local debounce -- uv timer for index.on_change
 local shown = false -- the drawer window is on screen: live polling and the change timer run
 
@@ -39,6 +41,7 @@ local function node_key(node)
   if node.type == 'session' then return 'x:' .. node.session.id end
   if node.type == 'new' then return 'n:' .. node.project.key end
   if node.type == 'hidden' then return 'h:' .. node.key end
+  if node.type == 'scope' or node.type == 'others' then return node.type end
 end
 
 ---State shown for a session (see `drawer_model.state_of`).
@@ -53,18 +56,34 @@ local function text_width(cfg)
   return api.nvim_win_get_width(S.win) - (info and info.textoff or 0)
 end
 
----Projects as the drawer shows them: unsaved new sessions added, hidden ones grouped.
+-- Each scope keeps its own open folds: flipping back restores what was open.
+local function sync_scope()
+  local k = scope.get()
+  if S.kind == k then return end
+  if S.kind then S.expanded_by[S.kind] = S.expanded end
+  S.kind, S.expanded = k, S.expanded_by[k] or {}
+end
+
+---Projects as the drawer shows them: those in scope, unsaved new sessions added, hidden ones grouped.
 local function shown_projects()
-  local projects = model.with_unsaved(S.projects)
+  local projects = model.with_unsaved(model.in_scope(S.projects, scope.project()))
   if not hidden.any() then return projects end
   return model.with_hidden(projects, hidden.is, model.state_of)
 end
 
 local function build()
   local cfg = config.get()
-  return tree.build(shown_projects(), model.state_of, S.expanded, os.time(), cfg.icons, cfg.projects_dir,
+  sync_scope()
+  local projects = shown_projects()
+  local scoped
+  if scope.project() then
+    local p = projects[1]
+    local head = p.is_git and p.root and require('agent-ide.git_cache').head(p.root)
+    scoped = { others = model.others_needing(scope.matches), branch = head and head.branch or nil }
+  end
+  return tree.build(projects, model.state_of, S.expanded, os.time(), cfg.icons, cfg.projects_dir,
     model.note_of, sections.collect,
-    { top = sections.collect_top, width = text_width(cfg) })
+    { top = sections.collect_top, width = text_width(cfg), scope = scoped })
 end
 
 ---Re-render the drawer buffer; keeps the drawer cursor on the same node (or on `focus`).
@@ -232,6 +251,8 @@ function actions.open()
     local s = session.open({ cwd = dir })
     model.add_unsaved(s.id, p.key)
     require('agent-ide.ui.chat').open(s, p)
+  elseif node.type == 'scope' or node.type == 'others' then
+    M.set_scope('all')
   elseif node.open then
     local ok, err = pcall(node.open, node)
     if not ok then vim.notify('Agent-IDE: ' .. tostring(err), vim.log.levels.ERROR) end
@@ -345,8 +366,10 @@ function actions.collapse_all()
     local key = fold_of(node)
     if key then S.expanded[key] = false end
   end
+  -- in project scope there is no project row to close: its Sessions close too
+  local scoped = scope.project() ~= nil
   for key, v in pairs(S.expanded) do
-    if key:sub(-#'/sessions') == '/sessions' then S.expanded[key] = nil elseif v then S.expanded[key] = false end
+    if key:sub(-#'/sessions') == '/sessions' and not scoped then S.expanded[key] = nil elseif v then S.expanded[key] = false end
   end
   for _, p in ipairs(S.projects) do S.expanded[p.key] = false end
   expanded_all = nil
@@ -382,6 +405,14 @@ end
 
 function actions.close() M.close() end
 
+-- `gs`: project scope <-> all. From all, the row's project (any row under a project), else the
+-- project of the working directory.
+function actions.scope()
+  if scope.get() == 'project' then return M.set_scope('all') end
+  local node = current_node()
+  M.set_scope('project', node and node.project)
+end
+
 -- The drawer's own keys (lhs, action name); a provider row key with the same lhs is neither
 -- mapped nor listed. `?` (actions.help) lists them all.
 local KEYS = {
@@ -389,6 +420,7 @@ local KEYS = {
   { 'x', 'park' }, { 'H', 'hide' }, { 'D', 'delete' }, { 'zM', 'collapse_all' }, { 'zR', 'expand_all' }, { 'glg', 'lazygit' }, { 'q', 'close' }, { 's', 'search' }, { '?', 'help' },
   { 'g?', 'help' },
   { 'gG', 'graph' }, -- commit graph of the row's repository (ui/graph.lua)
+  { 'gs', 'scope' }, -- project scope <-> all (scope.lua)
 }
 local OWN = {}
 for _, k in ipairs(KEYS) do OWN[vim.keycode(k[1])] = true end
@@ -458,6 +490,7 @@ function actions.help()
     { key = '? / g?', desc = 'this help' },
     { key = '/', desc = 'search (built-in)' },
     { key = 'gG', desc = 'commit graph of the project (or the row\'s worktree)' },
+    { key = 'gs', desc = 'scope: only this project / all projects' },
   }
   for _, k in ipairs(provider_keys()) do rows[#rows + 1] = { key = k.lhs, desc = k.desc } end
   require('agent-ide.ui.help').open('Agent-IDE drawer', rows)
@@ -574,6 +607,27 @@ function M.toggle()
   else
     open_drawer()
   end
+end
+
+---Switch the scope (see scope.lua) and re-render: the cursor stays on its node when that is
+---still shown (else on the project's nearest row); focus does not move.
+---@param kind 'all'|'project'
+---@param anchor? table the project to scope to (nil: the working directory's)
+function M.set_scope(kind, anchor)
+  sync()
+  local cur = S.win and node_key(S.nodes[api.nvim_win_get_cursor(S.win)[1]])
+  local before = scope.project()
+  scope.set(kind, anchor)
+  local after = scope.project()
+  local focus = { cur or 'scope' }
+  if after then
+    focus[#focus + 1] = 'n:' .. after.key
+    focus[#focus + 1] = 'scope'
+  elseif before then
+    focus[#focus + 1] = 'p:' .. before.key
+  end
+  render(focus)
+  require('agent-ide.status').refresh()
 end
 
 ---Scan the sessions again (e.g. after one was restored from the trash).

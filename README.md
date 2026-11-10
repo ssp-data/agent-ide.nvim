@@ -130,6 +130,7 @@ require('agent-ide').setup({
     models = { 'fable', 'opus', 'sonnet', 'haiku' },     -- what the model picker offers
   },
   tcd = true, -- opening a session sets the tab's working directory to its project
+  scope = 'all', -- 'project': start with only the repository of Neovim's working directory (see Project scope)
   -- each key option is a key, a list of keys, or false (no mapping); keys = false turns off all of
   -- these. Fixed, not configurable: the drawer's own keys, q / <Esc> in help floats, q in the raw
   -- view, ]c / [c in the diff view, and / and @ in the prompt (chat.auto_slash, chat.at_picker)
@@ -201,6 +202,25 @@ Not removed: pasted-text cache files (`paste-cache/`), usage statistics (`stats-
 
 The trash is `stdpath('data')/agent-ide/trash/<YYYYMMDD-HHMMSS>-<id>/` (folder `0700`; files keep their modes): the moved entries in their layout, `history.jsonl` with the removed lines and `manifest.json` (where each entry came from, title, project, time). **The trash still holds the whole session**, prompts and answers included, until you empty it: for sensitive data run `:AgentsTrash empty` afterwards. `:AgentsTrash` lists the trashed sessions to restore one (refused when something is at its old place; the history lines go back in time order) or delete it for good; `:AgentsTrash empty` deletes all of them for good after a confirm. Nothing is purged automatically unless you set `trash = { keep_days = 30 }`, which purges older entries at setup.
 
+## Project scope
+
+With many sessions across many repositories, large ones can bury the session you are after. The project scope narrows Agent-IDE to one repository: the drawer, search, `<leader>an` and the footer then show only that project. You can, for example, run one Neovim per project in project scope, and open the overview only now and then.
+
+- **Setting.** `scope = 'all'` (the default) or `scope = 'project'` in `setup()` decides how each Neovim starts. The scope belongs to one Neovim and is not saved.
+- **Commands.** `:Agents project` switches to the project of Neovim's working directory (the global one, `:pwd`) and opens the drawer if it is closed. Each run looks at the working directory again, so after a `:cd` it re-anchors. `:Agents all` goes back to every project. `:Agents` alone toggles the drawer as before, in the current scope.
+- **Key.** `gs` in the drawer flips between the two. From `all`, on a row of a project (its row, a session, a section), it narrows to that project; elsewhere to the working directory's.
+- **Which project.** The same one the drawer groups by: the git repository root, with its sub-folders and linked worktrees folded in; a folder without git is its own project. A repository without sessions yet shows `Sessions (0)`, and `+ New session` starts in its root.
+
+In project scope the drawer has no project row. Its first, dimmed line names the project and branch and says `project · gs: all` (`<CR>` on it goes back to all). Below it come the Prompts node, then `+ New session`, `Sessions (n)` (open), `Saved prompts`, `Changes` and `Commits`, all at the top level. Every drawer key works as usual on these rows. Sessions of other projects keep running in this Neovim, they are just not listed. When one of them needs you (waiting, done unread, failed), a dimmed last line says so, for example `1 session in other projects needs you · gs`. Each scope remembers its own open folds.
+
+Search (`<leader>as`, `<leader>aP`, `s` outside a project row) opens on `project <name>`, and `<Tab>` widens it to all sessions. The status file for the desktop bar keeps listing all sessions of this Neovim.
+
+Open a terminal straight into a project:
+
+```sh
+nvim +'Agents project'
+```
+
 ## Keys
 
 Global:
@@ -228,6 +248,7 @@ In the drawer:
 | `D` | Delete an inactive session: move it to the plugin's trash after a confirm (see [Deleting sessions](#deleting-sessions)) |
 | `q` | Close the drawer |
 | `glg` | Open lazygit for the row's repository (a worktree row or session: that worktree) |
+| `gs` | Scope: only the row's project (else the working directory's), or back to all projects (see [Project scope](#project-scope)) |
 | `?`, `g?` | Help (`/` searches in it, `q` or `<Esc>` closes it) |
 | `e` | Prompt row: edit its file in the main window (Claude's commands and skills open read-only) |
 | `r` | Prompt row: rename (library: `group/name` moves it to another group) |

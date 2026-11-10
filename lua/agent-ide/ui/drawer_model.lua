@@ -127,6 +127,36 @@ function M.with_unsaved(projects)
   return out
 end
 
+---Projects in scope (see scope.lua): all of them without `sp`; else the one project keyed
+---`sp.key`, or, when no session of it is listed yet (a fresh repository), an empty one made from
+---`sp`, so "+ New session" is there.
+---@param projects table[]
+---@param sp? { key: string, name?: string, root?: string, is_git?: boolean } the scoped project
+---@return table[]
+function M.in_scope(projects, sp)
+  if not sp then return projects end
+  for _, p in ipairs(projects) do
+    if p.key == sp.key then return { p } end
+  end
+  return { { key = sp.key, name = sp.name or sp.key:match('([^/]*)$'), root = sp.root, is_git = sp.is_git == true,
+    missing = vim.uv.fs_stat(sp.key) == nil, activity = 0, sessions = {} } }
+end
+
+-- States in which a session of another project is counted on the drawer's last line.
+local NEEDS = { waiting = true, done = true, failed = true }
+
+---Sessions alive in this Neovim, outside the scoped project, that need the user (waiting,
+---done unread, failed).
+---@param matches fun(s: table): boolean in scope
+---@return integer
+function M.others_needing(matches)
+  local n = 0
+  for _, s in ipairs(session.all()) do
+    if NEEDS[s.state] and not matches(s) then n = n + 1 end
+  end
+  return n
+end
+
 -- States in which a hidden session counts as visible: hiding never swallows an ask or a result.
 local ATTENTION = { waiting = true, busy = true, done = true, failed = true }
 

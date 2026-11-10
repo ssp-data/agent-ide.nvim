@@ -39,6 +39,20 @@ function M.toggle()
   require('agent-ide.ui.drawer').toggle()
 end
 
+---Switch the scope: 'project' (the git repository of the working directory, resolved again on
+---every call) or 'all'; opens the drawer when it is not on screen.
+---@param kind 'all'|'project'
+function M.scope(kind)
+  if kind ~= 'all' and kind ~= 'project' then
+    return vim.notify('Agent-IDE: scope is "project" or "all"', vim.log.levels.WARN)
+  end
+  require('agent-ide.ui.highlights').setup()
+  local drawer = require('agent-ide.ui.drawer')
+  drawer.set_scope(kind)
+  local st = drawer.state()
+  if not st.tab or vim.api.nvim_get_current_tabpage() ~= st.tab or not st.win then drawer.toggle() end
+end
+
 ---Open the next session that needs you: waiting for an answer (oldest ask first), then a
 ---failed, then a finished turn you have not seen. Notifies when there is none.
 function M.next_waiting()
