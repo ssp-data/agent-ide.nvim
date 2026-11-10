@@ -11,6 +11,20 @@ Coding is changing, from writing to more navigating and viewing changes, etc. So
 
 I want to prompt in neovim (I use `ctrl-g`) for Claude Code anyway to type with my shortcuts [Vim Motions](https://www.ssp.sh/brain/vim-language-and-motions/) and also my snippets and superpowers, and the rendering of responses from Claude Code looks awful, unlike my rendering of Markdown within neovim. So why not use neovim to write and also show the responses in a buffer of Neovim that renders Markdown nicely? That was the premise, and the outcome looks like this:
 
+![Agent-IDE: the drawer with all sessions, a chat and the prompt buffer](docs/images/main.png)
+
+What you see, from right to left. **The drawer** shows the `Prompts` node (library, skills and commands) and every project with its sessions in all states: running elsewhere (`elsewhere`), waiting for a permission (`permission: Bash`), done and not read yet (`done, unread`), failed (`failed: API Error…`), idle and parked (dimmed). A project row sums its sessions up (`input (1)`, `review (1)`). Below the sessions are a branch's `Changes vs main` and `Commits on branch`, and a second worktree. **The chat** fills the main window: a rendered markdown transcript with tool calls (`Read`, `Edit`, `Bash`, `Write`) and thinking folded, and a winbar with project, title, model, permission mode and state. **The prompt buffer** below holds a draft with an `[attach]` line. **The footer** in lualine shows the overall state, the model and the quota.
+
+The diff view: what the agent changed on the branch, side by side, with your real file on the right:
+
+![Agent-IDE: side-by-side diff of a changed file](docs/images/diff.png)
+
+The search across all sessions, with a rendered preview of the hit:
+
+![Agent-IDE: search picker with preview](docs/images/search.png)
+
+The screenshots use synthetic demo sessions and repositories.
+
 ## Focus
 The features and focus are on managing all agent sessions in a single drawer, as I use [Query databases in vim (vim-dadbod)](https://www.ssp.sh/brain/query-databases-in-vim-vim-dadbod/) to query databases within nvim, that's why it's called the **Agents IDE** because it's my IDE for agents.
 
