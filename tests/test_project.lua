@@ -26,6 +26,9 @@ T['git_root: nested folder, worktree, plain, home rule, vanished folder'] = func
   eq({ P.git_root(tmp .. '/wt', '/nohome') }, { tmp .. '/repo', true })
   eq({ P.git_root(tmp .. '/rel', '/nohome') }, { tmp .. '/repo', true }) -- relative gitdir
   eq({ P.git_root(tmp .. '/plain', '/nohome') }, { nil, true })
+  -- a relative folder ends at once instead of walking up forever
+  eq({ P.git_root('dddddddd-0000-4000-8000-00000000000a', '/nohome') }, { nil, false })
+  eq({ P.git_root('', '/nohome') }, { nil, false })
   eq({ P.git_root(tmp .. '/homefake/stuff', tmp .. '/homefake') }, { nil, true })
   eq({ P.git_root(tmp .. '/homefake', tmp .. '/homefake') }, { tmp .. '/homefake', true })
   eq({ P.git_root(tmp .. '/repo/gone/dir', '/nohome') }, { tmp .. '/repo', false })

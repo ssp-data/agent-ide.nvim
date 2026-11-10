@@ -41,6 +41,8 @@ end
 --- Walk up from `cwd` looking for a git repository.
 ---@return string|nil root, boolean exists
 function M.git_root(cwd, home)
+  -- a relative folder (no slash to strip) would never shrink to '': it has no root to find
+  if cwd:sub(1, 1) ~= '/' then return nil, false end
   local exists = stat(cwd) ~= nil
   local dir = cwd
   while dir ~= '' and not stat(dir) do dir = dirname(dir) end
