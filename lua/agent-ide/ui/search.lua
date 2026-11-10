@@ -297,9 +297,12 @@ function M.open(opts)
   for i, set in ipairs(KIND_SETS) do
     if opts.kinds and vim.deep_equal(set.kinds, opts.kinds) then kind_set = i end
   end
+  -- in project scope (scope.lua) the picker starts on that project; <Tab> still widens to all
+  local sp = not opts.scope and not opts.project and require('agent-ide.scope').project() or nil
   P = { opts = opts, hits = {}, sel = opts.sel or 1, sent_query = opts.sel and (opts.query or ''), contexts = {},
     preview_gen = 0, kind_set = opts.kind_set or kind_set,
-    scope = opts.scope or (opts.project and 'project') or 'all', project = opts.project,
+    scope = opts.scope or ((opts.project or sp) and 'project') or 'all',
+    project = opts.project or (sp and require('agent-ide.ui.drawer_model').in_scope({}, sp)[1]),
     session_id = cur and cur.id, prev_win = api.nvim_get_current_win(),
     timer = vim.uv.new_timer(), preview_timer = vim.uv.new_timer() }
   P.v = view.create()
@@ -331,6 +334,7 @@ function M.open(opts)
   act.projects(function(maps)
     if P ~= mine then return end
     P.maps = maps
+    if sp then P.project = require('agent-ide.ui.drawer_model').in_scope(maps.projects, sp)[1] end
     if not P.project then
       local s = cur and maps.by_id[cur.id]
       P.project = s or nil
