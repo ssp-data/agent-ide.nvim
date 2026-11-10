@@ -87,10 +87,18 @@ function H.echo(s, a)
   end
 end
 
+-- The agent's command list changed (ACP `available_commands_update`): the `/` menu follows.
+function H.commands(s, a)
+  s.slash_commands = a.slash_commands
+  s.capabilities.commands = type(a.slash_commands) == 'table' and #a.slash_commands > 0
+  s:_emit('meta')
+end
+
 function H.permission(s, a)
   s.pending_permissions[#s.pending_permissions + 1] = {
     request_id = a.request_id, tool_name = a.tool_name, input = a.input,
     description = a.description, suggestions = a.suggestions,
+    options = a.options, -- an ACP agent's own choices (`{ optionId, name, kind }`)
   }
   s:_emit('permission')
   s:_set_state('waiting')

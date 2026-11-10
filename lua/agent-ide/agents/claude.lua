@@ -103,6 +103,11 @@ end
 
 -- Adapter -----------------------------------------------------------------------------------
 
+---The plugin's name for one of Claude's modes (`manual` for Claude's `default`).
+---@param m string
+---@return string
+function M.plugin_mode(m) return m == 'default' and 'manual' or m end
+
 ---A mode or model change asked for while no process runs, in the shape `s.deferred` keeps
 ---until the next start (Claude's control request).
 ---@param op 'set_mode'|'set_model'

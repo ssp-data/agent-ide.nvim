@@ -219,7 +219,7 @@ end
 ---@return boolean
 function Session:set_mode(mode)
   if not self:_setting('set_mode', mode) then return false end
-  self.mode_requested = mode == 'default' and 'manual' or mode
+  self.mode_requested = self.adapter.plugin_mode(mode)
   self:_emit('meta')
   return true
 end
@@ -253,7 +253,7 @@ function Session:answer(request_id, allow, opts)
   if not self:_alive() or not self.proc:answer(p, allow, opts) then return false end
   for _, u in ipairs(allow and opts.updated_permissions or {}) do
     if u.type == 'setMode' and type(u.mode) == 'string' then
-      self.mode_requested = u.mode == 'default' and 'manual' or u.mode
+      self.mode_requested = self.adapter.plugin_mode(u.mode)
       self.mode_by_answer = self.mode_requested -- given up at the end of the turn if unconfirmed
       self:_emit('meta')
     end

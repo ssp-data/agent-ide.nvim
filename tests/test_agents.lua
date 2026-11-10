@@ -46,9 +46,9 @@ T['an unknown agent is nil with a clear reason; default and names come from the 
   eq(a, nil)
   eq(err:find('nope', 1, true) ~= nil, true)
   eq(agents.default(), 'claude')
-  eq(agents.names(), { 'claude' })
+  eq(agents.names(), { 'claude', 'gemini', 'opencode' }) -- the built-in entries
   config.setup({ default_agent = 'claude', agents = { zed = { kind = 'what' } } })
-  eq(agents.names(), { 'claude', 'zed' })
+  eq(agents.names(), { 'claude', 'gemini', 'opencode', 'zed' })
   local z, zerr = agents.get('zed')
   eq(z, nil)
   eq(zerr:find('kind', 1, true) ~= nil, true)
