@@ -11,6 +11,18 @@ local C = 'dddddddd-0000-4000-8000-00000000000c'
 
 local tmp, repo, claude, slug
 
+-- A child call cannot time out by itself: a watchdog timer kills a child that lives longer than
+-- CHILD_MAX_S, so a stuck child fails its case instead of hanging the run.
+local CHILD_MAX_S = 60
+local watchdog
+local function stop_watchdog()
+  if watchdog then
+    watchdog:stop()
+    watchdog:close()
+  end
+  watchdog = nil
+end
+
 local T = MiniTest.new_set({ hooks = {
   pre_case = function()
     tmp = vim.uv.fs_realpath(vim.fn.tempname()) or vim.fn.tempname()
@@ -28,9 +40,13 @@ local T = MiniTest.new_set({ hooks = {
   end,
   post_case = function()
     child.stop()
+    stop_watchdog()
     vim.fn.delete(tmp, 'rf')
   end,
-  post_once = function() child.stop() end,
+  post_once = function()
+    child.stop()
+    stop_watchdog()
+  end,
 } })
 
 local function write(path, text, mode)
@@ -96,14 +112,24 @@ local function snapshot(root)
 end
 
 local function start(opts)
+  stop_watchdog()
   child.restart({ '-u', 'tests/minimal_init.lua' })
+  -- stubs first: a real confirm or select would wait for input forever in a headless child
+  child.lua([[
+    _G.confirms = {}
+    _G.answer = 1
+    vim.fn.confirm = function(msg) table.insert(_G.confirms, msg); return _G.answer end
+    vim.ui.select = function(_, _, cb) cb(nil) end
+    vim.ui.input = function(_, cb) cb(nil) end
+  ]])
+  local pid = child.lua_get('vim.fn.getpid()')
+  watchdog = vim.uv.new_timer()
+  -- a fast callback: it runs while this Neovim waits for a child reply
+  watchdog:start(CHILD_MAX_S * 1000, 0, function() vim.uv.kill(pid, 'sigkill') end)
   child.lua([[
     vim.env.TMUX = nil
     _G.notes = {}
     vim.notify = function(msg) table.insert(_G.notes, msg) end
-    _G.confirms = {}
-    _G.answer = 1
-    vim.fn.confirm = function(msg) table.insert(_G.confirms, msg); return _G.answer end
     require('agent-ide').setup(...)
   ]], { vim.tbl_deep_extend('force', {
     projects_dir = claude .. '/projects',
@@ -212,9 +238,16 @@ T['D moves every kind of file and the history lines into the trash; others stay 
   eq(child.lua_get('require("agent-ide.session").get(...)', { A }), vim.NIL)
 
   -- search no longer finds it (Lua backend)
+  -- asked again until the background indexing is done
   child.lua([[_G.hits = nil
-    require('agent-ide.index.search').search({ query = 'topic', limit = 50 }, function(r) _G.hits = r end)]])
-  wait_for(function() return child.lua_get('_G.hits ~= nil and not _G.hits.indexing') end, 'search')
+    _G.ask = function()
+      require('agent-ide.index.search').search({ query = 'topic', limit = 50 }, function(r)
+        if r.indexing then return vim.defer_fn(_G.ask, 20) end
+        _G.hits = r
+      end)
+    end
+    _G.ask()]])
+  wait_for(function() return child.lua_get('_G.hits ~= nil') end, 'search')
   local titles = child.lua_get('vim.tbl_map(function(h) return h.title end, _G.hits.hits)')
   eq(vim.tbl_contains(titles, 'Alpha topic'), false)
   eq(vim.tbl_contains(titles, 'Beta topic'), true)
@@ -251,60 +284,57 @@ T['a hidden session can be deleted from the Hidden group; its id leaves hidden.j
   eq(vim.uv.fs_stat(claude .. '/projects/' .. slug .. '/' .. A .. '.jsonl'), nil)
 end
 
-T['refused: active here, elsewhere, in native Claude, live query failing, unsent prompt text; No'] = function()
-  tree()
-  local before = snapshot(claude)
-  local function refused(text)
-    eq(last_note():find(text, 1, true) ~= nil, true)
+-- Each refusal in a fresh child: nothing moved, no trash, the row stays.
+local REFUSALS = {
+  { 'active in this Neovim', 'not deleted: it is active here; park it first (x)', nil, function()
+    child.lua('require("agent-ide.session").open({ id = ..., cwd = ... }).state = "idle"', { A, repo })
+  end },
+  { 'handed to native Claude', 'not deleted: it is open in native Claude', nil, function()
+    child.lua('local h = require("agent-ide.ui.handoff"); local id = ...; h.away = function(s) return s.id == id end', { A })
+    child.lua('require("agent-ide.session").open({ id = ..., cwd = ... })', { A, repo })
+  end },
+  { 'unsent prompt text', 'not deleted: its prompt holds unsent text', nil, function()
+    cursor_to('Alpha topic')
+    child.type_keys('<CR>')
+    wait_for(function() return child.lua_get('require("agent-ide.ui.chat")._windows().prompt ~= nil') end, 'chat open')
+    child.lua([[
+      local _, p = require('agent-ide.ui.chat').buffers(require('agent-ide.session').get(...))
+      vim.api.nvim_buf_set_lines(p, 0, -1, false, { 'draft' })
+    ]], { A })
+  end },
+  { 'running in another Claude', 'not deleted: it runs in another Claude',
+    { live = { cmd = { 'echo', '[{"sessionId":"' .. A .. '","status":"idle","pid":4242,"cwd":"/x"}]' } } } },
+  { 'live query failing', 'not deleted: cannot check whether it runs elsewhere (exit code 1)', { live = { cmd = { 'false' } } } },
+}
+
+for _, r in ipairs(REFUSALS) do
+  T['refused: ' .. r[1]] = function()
+    tree()
+    local before = snapshot(claude)
+    start(r[3])
+    open_drawer()
+    if r[4] then r[4]() end
+    delete('Alpha topic')
+    eq(last_note(), 'Agent-IDE: ' .. r[2])
     eq(snapshot(claude), before)
     eq(#trash_dirs(), 0)
     eq(find('Alpha topic') ~= nil, true)
   end
+end
 
+T['answering No to the confirm does nothing'] = function()
+  tree()
+  local before = snapshot(claude)
   start()
   open_drawer()
-  -- active in this Neovim
-  child.lua('require("agent-ide.session").open({ id = ..., cwd = ... }).state = "idle"', { A, repo })
-  delete('Alpha topic')
-  refused('not deleted: it is active here; park it first (x)')
-  child.lua('require("agent-ide.session").get(...).state = "parked"', { A })
-  -- handed to native Claude
-  child.lua('require("agent-ide.ui.handoff").away = function() return true end')
-  delete('Alpha topic')
-  refused('not deleted: it is open in native Claude')
-  child.lua('package.loaded["agent-ide.ui.handoff"] = nil')
-  -- unsent text in its prompt
-  child.lua([[
-    local s = require('agent-ide.session').get(...)
-    local p = require('agent-ide.ui.prompt').create(s)
-    vim.api.nvim_buf_set_lines(p, 0, -1, false, { 'draft' })
-  ]], { A })
-  delete('Alpha topic')
-  refused('not deleted: its prompt holds unsent text')
-  child.lua([[for _, b in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_get_name(b):find('prompt/', 1, true) then vim.api.nvim_buf_delete(b, { force = true }) end
-  end]])
-  -- the answer is No
   child.lua('_G.answer = 2')
-  child.lua('_G.confirms = {}')
   cursor_to('Alpha topic')
   child.type_keys('D')
   wait_for(function() return #child.lua_get('_G.confirms') == 1 end, 'confirm')
   child.lua('vim.wait(50)')
   eq(snapshot(claude), before)
+  eq(#trash_dirs(), 0)
   eq(find('Alpha topic') ~= nil, true)
-
-  -- running in another Claude (the fresh live query says so)
-  start({ live = { cmd = { 'echo', '[{"sessionId":"' .. A .. '","status":"idle","pid":4242,"cwd":"' .. repo .. '"}]' } } })
-  open_drawer()
-  delete('Alpha topic')
-  refused('not deleted: it runs in another Claude')
-
-  -- the live command fails
-  start({ live = { cmd = { 'false' } } })
-  open_drawer()
-  delete('Alpha topic')
-  refused('not deleted: cannot check whether it runs elsewhere (exit code 1)')
 end
 
 T['lines Claude appends to history.jsonl while it is rewritten are kept'] = function()

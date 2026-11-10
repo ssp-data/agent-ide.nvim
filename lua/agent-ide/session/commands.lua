@@ -37,7 +37,8 @@ end
 function M.key_of(cwd)
   local k = keys[cwd]
   if k then return k end
-  local root = require('agent-ide.project').git_root(cwd, vim.uv.os_homedir() or '')
+  -- only an absolute folder is looked up (project.git_root walks up to `/`)
+  local root = cwd:sub(1, 1) == '/' and require('agent-ide.project').git_root(cwd, vim.uv.os_homedir() or '') or nil
   k = vim.fn.sha256(root or cwd):sub(1, 16)
   keys[cwd] = k
   return k
