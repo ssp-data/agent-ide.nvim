@@ -202,7 +202,7 @@ T['new session row opens a chat: transcript above, prompt below (8 lines), left 
   eq(layout, { above = true, same_col = true, left = true, height = 8, fix = true, current = true,
     tname = 'agents://repo/new session', pname = 'agents://repo/new session · prompt',
     tbt = 'nofile', tft = 'markdown', tmod = false, pbt = 'acwrite', pft = 'markdown', pmod = true })
-  eq(winbar(), 'I idle · repo · new session')
+  eq(winbar(), 'I idle · repo · new session  default') -- the model it would start with
 end
 
 T['<C-CR> in insert mode sends; the answer streams into the transcript; prompt is emptied'] = function()
@@ -645,7 +645,7 @@ T['opening the fixture shows its history; a send resumes it'] = function()
   local bash = has_line(lines, '▸ Bash:')
   eq(bash ~= nil, true)
   eq(child.lua_get('vim.api.nvim_win_call(require("agent-ide.ui.chat")._windows().transcript, function() return vim.fn.foldclosed(' .. bash .. ') end)'), bash)
-  eq(winbar(), '. parked · repo · Alpha basics')
+  eq(winbar(), '. parked · repo · Alpha ba…  default')
   type_prompt('Next question')
   child.type_keys('<C-CR>')
   wait_for(function() return has_line(transcript(), 'Next answer') ~= nil end, 'answer')

@@ -60,7 +60,7 @@ T['args: new session, resume, model, custom cmd'] = function()
   eq(process.args({ session_id = 'abc', model = 'haiku' }),
     vim.list_extend(vim.deepcopy(expected), { '--model', 'haiku', '--session-id', 'abc' }))
   eq(process.args({ session_id = 'abc', model = 'haiku', resume = true }),
-    vim.list_extend(vim.deepcopy(expected), { '--resume', 'abc' }))
+    vim.list_extend(vim.deepcopy(expected), { '--model', 'haiku', '--resume', 'abc' }))
   config.setup({ claude = { cmd = { 'nvim', '-l', 'x.lua' } } })
   local a = process.args({ session_id = 'abc' })
   eq(vim.list_slice(a, 1, 4), { 'nvim', '-l', 'x.lua', '-p' })

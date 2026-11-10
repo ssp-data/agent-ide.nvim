@@ -133,6 +133,14 @@ T['gL toggles it; drawer.legend = false starts hidden; listed in the help'] = fu
   eq(float(), vim.NIL)
   child.type_keys('gL')
   eq(float() ~= vim.NIL, true)
+  -- the toggle is remembered: off, a restart keeps it off, whatever the setting says
+  child.type_keys('gL')
+  eq(child.lua_get('require("agent-ide.util.jsonfile").read(require("agent-ide.prefs")._file()).legend'), false)
+  start()
+  vim.wait(200)
+  eq(float(), vim.NIL)
+  -- the setting counts before the first toggle
+  child.lua('vim.fn.delete(require("agent-ide.prefs")._file())')
   start({ legend = false })
   vim.wait(200)
   eq(float(), vim.NIL)

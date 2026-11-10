@@ -38,6 +38,9 @@ end
 local function filter_cases(case)
   local test = case.test
   case.test = function(...)
+    -- prefs.json (the model last used, the legend toggle) is kept across restarts on purpose;
+    -- between cases it would leak one case's choices into the next
+    vim.fn.delete(xdg_root .. '/state/nvim/agent-ide/prefs.json')
     local ok, e = pcall(test, ...)
     if not ok then error(tostring(e), 0) end
   end

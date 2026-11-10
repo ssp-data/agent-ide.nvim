@@ -235,9 +235,13 @@ local function compute_text()
   elseif l.level == 3 then text = ('review (%d)'):format(l.review)
   else text = ('input required (%d)'):format(l.waiting) end
   local ok, cur = pcall(M._src.current)
-  if ok and type(cur) == 'table' and type(cur.model) == 'string' and cur.model ~= '' then
-    local name = require('agent-ide.ui.mode').model_name(cur, cur.model)
-    text = text .. ' · ' .. (name or cur.model:gsub('^claude%-', ''))
+  if ok and type(cur) == 'table' then
+    local mode = require('agent-ide.ui.mode')
+    local model = type(cur.model) == 'string' and cur.model ~= '' and cur.model or mode.start_model(cur)
+    if model then
+      local name = mode.model_name(cur, model)
+      text = text .. ' · ' .. (name or model:gsub('^claude%-', ''))
+    end
   end
   return text .. quota_text()
 end

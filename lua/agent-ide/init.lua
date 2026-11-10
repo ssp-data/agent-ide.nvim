@@ -12,6 +12,7 @@ function M.setup(opts)
   require('agent-ide.hidden').load()
   require('agent-ide.session.commands').load()
   require('agent-ide.claude.models').load()
+  require('agent-ide.prefs').load()
   local keep = type(cfg.trash) == 'table' and tonumber(cfg.trash.keep_days)
   if keep then require('agent-ide.trash').purge_older(keep) end
   require('agent-ide.ui.quit_guard').setup()

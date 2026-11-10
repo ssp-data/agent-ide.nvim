@@ -29,6 +29,7 @@ end
 
 function H.init(s, a)
   s.model, s.slash_commands = a.model, a.slash_commands
+  require('agent-ide.prefs').set('model', a.model) -- the model last used: new sessions start with it
   if s.cwd and type(a.slash_commands) == 'table' and #a.slash_commands > 0 then
     require('agent-ide.session.commands').record(s.cwd, a.slash_commands) -- for new sessions
   end
@@ -122,6 +123,7 @@ function H.control_ok(s, a)
     initialized(s, a.response)
   elseif req.subtype == 'set_model' then
     s.model, s.model_chosen = req.model, req.model
+    require('agent-ide.prefs').set('model', req.model)
     if s.model_requested == req.model then s.model_requested = nil end
     s:_emit('meta')
   elseif req.subtype == 'set_permission_mode' then

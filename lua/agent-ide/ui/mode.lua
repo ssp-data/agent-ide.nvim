@@ -94,11 +94,17 @@ function M.row_text(item, list)
   return t
 end
 
+---The model `s` starts with (prefs.lua): asked for or picked, else `claude.model`, else the
+---last one used here; nil for Claude's own default.
+---@param s table Session
+---@return string|nil
+function M.start_model(s) return require('agent-ide.prefs').start_model(s) end
+
 ---The item of `items` that is the current model of `s` (nil: none fits). Before Claude reported
----one, the model the session starts with: the one chosen, `config.claude.model`, else `default`.
+---one, the model the session starts with (`start_model`), else `default`.
 local function current(s, items)
-  local chosen = s.model_chosen or claude_cfg().model
-  return models().match(items, s.model or chosen or 'default', chosen)
+  local chosen = M.start_model(s)
+  return models().match(items, s.model or chosen or 'default', s.model_chosen or chosen)
 end
 
 ---Picker rows of `s` as shown: `● ` before the current model, two spaces before the others.
@@ -179,12 +185,15 @@ function M.model_name(s, model)
   return models().label(known(s), model, s.model_chosen)
 end
 
----Winbar parts for the model and the mode of `s`.
+---Winbar parts for the model and the mode of `s`. Before Claude reported a model, the one the
+---session will start with (`start_model`; `default` when that is Claude's own and not known by
+---name); a requested change shows as `old→new`.
 ---@param s table Session
 ---@return string model, string mode
 function M.labels(s)
-  local model = M.model_name(s, s.model) or short_model(s.model)
-  if s.model_requested and s.model_requested ~= s.model then
+  local shown = s.model or M.start_model(s) or 'default'
+  local model = M.model_name(s, shown) or short_model(shown)
+  if s.model_requested and s.model_requested ~= shown then
     model = model .. '→' .. (M.model_name(s, s.model_requested) or s.model_requested)
   end
   local mode = 'mode:' .. (s.mode or '?')

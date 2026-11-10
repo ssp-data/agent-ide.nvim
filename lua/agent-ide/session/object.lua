@@ -104,7 +104,7 @@ function Session:_start_process()
     cwd = self.cwd,
     session_id = self.id,
     resume = resume,
-    model = require('agent-ide.config').get().claude.model,
+    model = require('agent-ide.prefs').start_model(self),
     on_object = function(obj, raw)
       if not mine() then return end
       self:_raw('in', raw)

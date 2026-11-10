@@ -18,13 +18,13 @@ local FIXED = {
 local live = {} -- proc -> true, every process started here that has not exited yet
 local augroup
 
----Full argv: configured command, fixed flags, optional model, session flag.
+---Full argv: configured command, fixed flags, optional model (new and resumed sessions), session flag.
 ---@param opts { session_id: string, resume?: boolean, model?: string }
 ---@return string[]
 function M.args(opts)
   local argv = vim.deepcopy(require('agent-ide.config').get().claude.cmd)
   vim.list_extend(argv, FIXED)
-  if opts.model and not opts.resume then vim.list_extend(argv, { '--model', opts.model }) end
+  if opts.model then vim.list_extend(argv, { '--model', opts.model }) end
   vim.list_extend(argv, { opts.resume and '--resume' or '--session-id', opts.session_id })
   return argv
 end

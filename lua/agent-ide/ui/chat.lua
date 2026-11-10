@@ -79,7 +79,10 @@ end
 local function winbar_text(s, project, width)
   local st = state_parts(s)
   local model_label, mode_label = require('agent-ide.ui.mode').labels(s)
-  local model = (s.model or s.model_requested) and one_line(model_label) or nil
+  -- the model it runs with, else the one it would start with here; none for a session another
+  -- Claude runs (elsewhere, native: nothing starts here)
+  local away = not s.model and (s:_elsewhere() or require('agent-ide.ui.handoff').away(s))
+  local model = not away and one_line(model_label) or nil
   local mode = (s.mode or s.mode_requested) and ('[' .. mode_label:gsub('^mode:', '') .. ']') or nil
   local hot = mode and not (quiet_mode(s.mode) and quiet_mode(s.mode_requested))
   local queued = #s.queue > 0 and ('queued:' .. #s.queue) or nil
