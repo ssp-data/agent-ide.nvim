@@ -387,6 +387,49 @@ T['typing / opens the menu with nothing inserted; typing narrows it; completeopt
   eq(child.lua_get('vim.fn.pumvisible()'), 0)
 end
 
+T['/ in a burst of input (fast typing, a macro, `.`): literal after text, the menu only on an empty line'] = function()
+  start()
+  child.lua("require('agent-ide.session').all()[1].slash_commands = { 'compact', 'context', 'memory' }")
+  local function line() return child.lua_get('vim.api.nvim_get_current_line()') end
+  local function pum() return child.lua_get('vim.fn.pumvisible()') end
+  -- one burst each: the characters before `/` are in the line when `/` is judged, so the menu
+  -- is not prepared at all (no local completeopt, a completion plugin's menu left alone)
+  child.lua("_G.closed = 0; package.loaded.cmp = { visible = function() return false end, close = function() _G.closed = _G.closed + 1 end }")
+  local function untouched() return { child.lua_get('vim.bo.completeopt'), child.lua_get('_G.closed') } end
+  child.type_keys('i')
+  child.type_keys('x/')
+  eq({ line(), pum() }, { 'x/', 0 })
+  eq(untouched(), { '', 0 })
+  child.type_keys('<Esc>', 'cc')
+  child.type_keys('path/to')
+  eq({ line(), pum() }, { 'path/to', 0 })
+  eq(untouched(), { '', 0 })
+  child.lua('package.loaded.cmp = nil')
+  -- `/` alone on an empty line, also at the end of a burst
+  child.type_keys('<Esc>', 'cc')
+  child.type_keys('/')
+  eq({ line(), pum() }, { '/', 1 })
+  eq(child.lua_get('vim.fn.complete_info({ "selected" }).selected'), -1)
+  child.type_keys('<Esc>', 'cc')
+  child.type_keys('/co')
+  wait_for(function() return pum() == 1 end, 'menu after a burst')
+  eq(line(), '/co')
+  -- a macro: recorded and replayed, `a/b` stays literal
+  child.type_keys('<Esc>', 'cc', '<Esc>')
+  child.type_keys('qq', 'ia/b', '<Esc>', 'q')
+  eq(line(), 'a/b')
+  child.type_keys('o', '<Esc>', '@q')
+  eq(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), { 'a/b', 'a/b' })
+  eq(pum(), 0)
+  -- `.` repeats the insert as typed
+  child.lua('vim.api.nvim_buf_set_lines(0, 0, -1, false, { "" })')
+  child.type_keys('ia/b', '<Esc>')
+  child.lua('vim.api.nvim_buf_set_lines(0, 0, -1, false, { "a/b", "" }); vim.api.nvim_win_set_cursor(0, { 2, 0 })')
+  child.type_keys('.')
+  eq(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)')[2], 'a/b')
+  eq(pum(), 0)
+end
+
 -- history ---------------------------------------------------------------------------------------
 
 local function history_events()

@@ -554,14 +554,16 @@ function M.setup_buf(buf, s)
     -- what the menu needs is ready before the first `/`: the project key and the found commands
     if s and s.cwd then require('agent-ide.session.commands').key_of(s.cwd) end
     require('agent-ide.prompts.cache').global()
-    map('i', '/', function()
-      local empty_line = api.nvim_get_current_line() == ''
-      if empty_line and bufs[buf] and not menu_visible() then
+    -- Not an <expr> mapping, for the reason given at `@` below: in a burst of input (`x/`, a
+    -- macro, `.`) the line would still look empty.
+    local open_keys = api.nvim_replace_termcodes('/<C-x><C-u>', true, false, true)
+    vim.keymap.set('i', '/', function()
+      if api.nvim_get_current_line() == '' and bufs[buf] and not menu_visible() then
         open_menu(buf)
-        return '/<C-x><C-u>'
+        return api.nvim_feedkeys(open_keys, 'in', false)
       end
-      return '/'
-    end, 'command menu')
+      api.nvim_feedkeys('/', 'in', false)
+    end, { buffer = buf, nowait = true, silent = true, desc = 'Agent-IDE: command menu' })
     api.nvim_create_autocmd('CompleteDone', { buffer = buf, callback = function()
       on_complete_done(buf)
       close_menu(buf)
