@@ -40,7 +40,7 @@ require('agent-ide').setup({
   live = { interval_ms = 5000, cmd = { 'claude', 'agents', '--json' } },
   helper = { enabled = true, path = nil }, -- nil: <plugin root>/helper/target/release/agent-ide-helper
   tcd = true, -- opening a session sets the tab's working directory to its project
-  keys = { toggle = '<leader>aa' }, -- false disables the mapping
+  keys = { toggle = '<leader>aa', search = '<leader>as', prompt_history = '<leader>aP' }, -- false disables a mapping
   icons = { open = '▾', closed = '▸', project = '', waiting = '◐', busy = '●', idle = '○', parked = '·' },
 })
 ```
@@ -55,9 +55,29 @@ require('agent-ide').setup({
 | `za` | Expand or collapse the node under the cursor |
 | `R` | Rescan sessions and refresh running state |
 | `gp` | Jump to the tmux pane of a running session |
+| `s` | Search the sessions of the project under the cursor |
 | `q` | Close the drawer |
 
 The history buffer is markdown with folds for tool calls, results and thinking. Anything the viewer does not understand is shown as a fold marked `unknown`, never dropped, and truncated output says how many lines are hidden.
+
+## Search
+
+`<leader>as` (or `:AgentsSearch [query]`, or `require('agent-ide').search()`) opens a floating picker that searches the titles, your prompts and Claude's answers of every session, live as you type. `<leader>aP` opens the same picker on your prompts only, newest first: the prompt history of all sessions. In the drawer, `s` searches the project under the cursor.
+
+With the Rust helper the search is fuzzy and typo-tolerant ([neo_frizbee](https://crates.io/crates/neo_frizbee)): exact and word-start matches come first, then titles before prompts before answers, then the newest. Words match in any order; a word with a capital letter matches case-sensitively; umlauts match regardless of case (`über` finds `Über`). The index is built in the background on first use, kept on disk and updated when a transcript changes. Without the helper the picker says it is limited: titles and prompts only, exact words only.
+
+| Key in the picker | Action |
+|---|---|
+| typing | Search (results update per keystroke) |
+| `<C-n>` / `<C-p>`, `<Down>` / `<Up>` (`j` / `k` in normal mode) | Move |
+| `<CR>` | Open the session's chat on the hit's line |
+| `<C-y>` | Copy the hit's full text (prompt or answer) |
+| `<C-r>` | Put the prompt into the open chat prompt to reuse it |
+| `<Tab>` | Scope: all sessions, the current project, the current session |
+| `<C-k>` | What to search: everything, prompts, answers, titles, or also tool calls |
+| `<Esc>` then `<Esc>` or `q` | Close |
+
+Tool calls are searched only on request (`<C-k>`), tool output never. The index keeps the first 4 KiB of each prompt and answer; copying takes the full text from the transcript.
 
 ## How it works
 
@@ -68,6 +88,8 @@ The plugin reads the local Claude Code transcripts (JSONL files), builds an inde
 Everything stays on your machine. The plugin reads transcripts under `projects_dir` and the output of `claude agents --json`, and sends nothing over the network.
 
 The Rust helper keeps a metadata cache in `stdpath('cache')/agent-ide/index-v2.json` (on Linux usually `~/.cache/nvim/agent-ide/index-v2.json`). It holds the path, title, working directory, branch, size and modification time of each session, so the drawer opens fast. You can delete it at any time; it is rebuilt on the next scan.
+
+The search index is `search-v1.json` in the same folder. It holds the first 4 KiB of every prompt and answer and a one-line summary of every tool call, with the session titles and paths. It is written at most every 30 seconds and when Neovim exits, and is ignored when a different helper version wrote it. You can delete it at any time; it is rebuilt on the next search.
 
 ## Roadmap
 
