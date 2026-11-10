@@ -12,6 +12,7 @@ local legend = require('agent-ide.ui.drawer_legend')
 local model = require('agent-ide.ui.drawer_model')
 local sections = require('agent-ide.ui.sections')
 local tree = require('agent-ide.ui.tree')
+local keylist = require('agent-ide.util.keys')
 
 local M = {}
 
@@ -80,7 +81,8 @@ local function build()
   if scope.project() then
     local p = projects[1]
     local head = p.is_git and p.root and require('agent-ide.git_cache').head(p.root)
-    scoped = { others = model.others_needing(scope.matches), branch = head and head.branch or nil }
+    scoped = { others = model.others_needing(scope.matches), branch = head and head.branch or nil,
+      key = keylist.first('drawer', 'scope') }
   end
   return tree.build(projects, model.state_of, S.expanded, os.time(), cfg.icons, cfg.projects_dir,
     model.note_of, sections.collect,
@@ -278,14 +280,42 @@ function actions.refresh()
   if shown then start_live() end
 end
 
-function actions.jump()
+-- `gT`: the session runs in another Claude: jump to its tmux pane; else (here, parked, or not
+-- running) continue it in native Claude in a tmux pane, as the chat's key does.
+function actions.tmux()
   local node = current_node()
   if not node or node.type ~= 'session' then return notify('no session under cursor') end
   local entry = live.get()[node.session.id]
-  if not entry or not entry.pid then return notify('session is not running') end
-  tmux.jump_to_pid(entry.pid, function(ok, reason)
-    if not ok then notify('cannot jump (' .. tostring(reason) .. ')') end
-  end)
+  local s = session.get(node.session.id)
+  if entry and entry.pid and (not s or s:_elsewhere()) then
+    return tmux.jump_to_pid(entry.pid, function(ok, reason)
+      if not ok then notify('cannot jump (' .. tostring(reason) .. ')') end
+    end)
+  end
+  require('agent-ide.ui.drawer_session_keys').native(node)
+end
+
+-- `y` on a session row: the last prompt sent in it, to the unnamed and + registers.
+function actions.yank()
+  local node = current_node()
+  if not node or node.type ~= 'session' then return end
+  local m = node.session
+  local function take(events)
+    local text
+    for i = #events, 1, -1 do
+      local ev = events[i]
+      if ev.kind == 'prompt' and not ev.sidechain and type(ev.text) == 'string' then text = ev.text; break end
+    end
+    if not text then return notify('no prompt in this session') end
+    vim.fn.setreg('"', text)
+    local clip = pcall(vim.fn.setreg, '+', text)
+    local n = #vim.split(text, '\n', { plain = true })
+    notify(('yanked the last prompt (%d line%s)%s'):format(n, n == 1 and '' or 's', clip and '' or '; no clipboard, unnamed register only'))
+  end
+  local s = session.get(m.id)
+  if s and #s.events > 0 then return take(s.events) end
+  if not m.path then return notify('no prompt in this session') end
+  index.history(m.path, function(history) take(history or {}) end)
 end
 
 function actions.park()
@@ -365,7 +395,7 @@ end
 
 local expanded_all -- S.expanded as the last `zR` left it
 
--- `zM`: every project, section and group closed; a project opened again shows its sessions.
+-- `z0`: every project, section and group closed; a project opened again shows its sessions.
 function actions.collapse_all()
   local keys = cursor_and_ancestors()
   for _, node in ipairs(S.nodes) do
@@ -382,7 +412,7 @@ function actions.collapse_all()
   render(keys)
 end
 
--- `zR`: every project open with its Sessions; Changes, Commits, Saved prompts, Hidden and the
+-- `z9`: every project open with its Sessions; Changes, Commits, Saved prompts, Hidden and the
 -- Prompts node stay as they are (opening them loads git or prompts everywhere at once). Again
 -- with nothing changed in between: everything opens.
 function actions.expand_all()
@@ -411,7 +441,7 @@ end
 
 function actions.close() M.close() end
 
--- `gs`: project scope <-> all. From all, the row's project (any row under a project), else the
+-- `S`: project scope <-> all. From all, the row's project (any row under a project), else the
 -- project of the working directory.
 function actions.scope()
   if scope.get() == 'project' then return M.set_scope('all') end
@@ -427,19 +457,36 @@ function actions.close_tmux()
   if node and node.type == 'session' then require('agent-ide.ui.tmux_close').close_row(node) end
 end
 
--- The drawer's own keys (lhs, action name); a provider row key with the same lhs is neither
--- mapped nor listed. `?` (actions.help) lists them all.
-local KEYS = {
-  { '<CR>', 'open' }, { 'o', 'open' }, { 'za', 'fold' }, { 'R', 'refresh' }, { 'gp', 'jump' },
-  { 'x', 'park' }, { 'H', 'hide' }, { 'D', 'delete' }, { 'zM', 'collapse_all' }, { 'zR', 'expand_all' }, { 'glg', 'lazygit' }, { 'q', 'close' }, { 's', 'search' }, { '?', 'help' },
-  { 'g?', 'help' },
-  { 'gG', 'graph' }, -- commit graph of the row's repository (ui/graph.lua)
-  { 'gs', 'scope' }, -- project scope <-> all (scope.lua)
-  { 'gL', 'legend' }, -- legend of the state marks (ui/drawer_legend.lua)
-  { 'X', 'close_tmux' }, -- close a Claude in a tmux pane (ui/tmux_close.lua)
+-- The drawer's own keys (`keys.drawer`): name and help text. On a row that has its own handler
+-- for the key (a prompt row's keys, ui/sections.lua) that handler runs instead; `fall`: on a
+-- row that is not a session the key keeps its Vim meaning. `?` (actions.help) lists them all.
+local ACTIONS = {
+  { 'open', 'open session, start a new one, use a prompt, or toggle' },
+  { 'fold', 'toggle fold' },
+  { 'collapse_all', 'collapse all' },
+  { 'expand_all', 'expand all projects and their sessions (again: everything)' },
+  { 'refresh', 'refresh' },
+  { 'tmux', 'session row: jump to its tmux pane (running elsewhere); else continue it in native Claude in a tmux pane' },
+  { 'search', 'search this project (<Tab> in the picker: all sessions)' },
+  { 'park', 'park the session: stop its Claude process here' },
+  { 'hide', 'hide the session into Hidden (n); on a hidden one: show it again' },
+  { 'delete', 'delete an inactive session: move it to the trash (:AgentsTrash)' },
+  { 'yank', 'session row: yank the last prompt sent in it', fall = true },
+  { 'lazygit', 'lazygit for the project (or the row\'s worktree)' },
+  { 'close', 'close drawer' },
+  { 'help', 'this help (type to filter; <CR> presses the key)' },
+  { 'graph', 'commit graph of the project (or the row\'s worktree)' },
+  { 'scope', 'scope: only this project / all projects' },
+  { 'legend', 'show or hide the legend of the state marks' },
+  { 'close_tmux', 'close the Claude running it in a tmux pane (Ctrl-C twice there; asks first)' },
 }
-local OWN = {}
-for _, k in ipairs(KEYS) do OWN[vim.keycode(k[1])] = true end
+
+local function drawer_keys()
+  local keys = config.get().keys
+  return type(keys) == 'table' and type(keys.drawer) == 'table' and keys.drawer or {}
+end
+
+local OWN = {} -- keycodes of the drawer's own keys, as mapped last
 
 local function provider_keys()
   return vim.tbl_filter(function(k) return not OWN[vim.keycode(k.lhs)] end, sections.keys())
@@ -453,18 +500,34 @@ local function default_register()
   return '"'
 end
 
--- A provider's row key (ui/sections.lua `keys`): the row's handler, else the key's own meaning:
--- fed back with its count and register, ahead of what was typed after it (`yj` stays `yj`).
-function actions.row_key(lhs)
-  local node = current_node()
+-- The key's own meaning: fed back with its count and register, ahead of what was typed after it
+-- (`yj` stays `yj`).
+local function fallback(lhs)
+  local count = vim.v.count > 0 and tostring(vim.v.count) or ''
+  local reg = vim.v.register ~= default_register() and ('"' .. vim.v.register) or ''
+  api.nvim_feedkeys(reg .. count .. vim.keycode(lhs), 'in', false)
+end
+
+-- A row's own handler for `lhs` (ui/sections.lua `keys`), run; false when the row has none.
+local function row_handler(node, lhs)
   local fn = node and node.keys and node.keys[lhs]
-  if not fn then
-    local count = vim.v.count > 0 and tostring(vim.v.count) or ''
-    local reg = vim.v.register ~= default_register() and ('"' .. vim.v.register) or ''
-    return api.nvim_feedkeys(reg .. count .. vim.keycode(lhs), 'in', false)
-  end
+  if not fn then return false end
   local ok, err = pcall(fn, node)
   if not ok then vim.notify('Agent-IDE: ' .. tostring(err), vim.log.levels.ERROR) end
+  return true
+end
+
+---A provider's row key: the row's handler, else the key's own meaning.
+function actions.row_key(lhs)
+  if not row_handler(current_node(), lhs) then fallback(lhs) end
+end
+
+-- One of the drawer's own keys: the row's handler first, then the action (or Vim's meaning).
+local function press(a, lhs)
+  local node = current_node()
+  if row_handler(node, lhs) then return end
+  if a.fall and not (node and node.type == 'session') then return fallback(lhs) end
+  actions[a[1]]()
 end
 
 function actions.search()
@@ -489,30 +552,23 @@ function actions.graph()
   graph.open({ root = root, project = p })
 end
 
-function actions.help()
-  local rows = {
-    { key = '<CR> / o', desc = 'open session, start a new one, use a prompt, or toggle' },
-    { key = 'za', desc = 'toggle fold' },
-    { key = 'zM', desc = 'collapse all' },
-    { key = 'zR', desc = 'expand all projects and their sessions (again: everything)' },
-    { key = 'R', desc = 'refresh' },
-    { key = 'gp', desc = 'jump to tmux pane' },
-    { key = 's', desc = 'search this project (<Tab> in the picker: all sessions)' },
-    { key = 'x', desc = 'park the session: stop its Claude process here' },
-    { key = 'H', desc = 'hide the session into Hidden (n); on a hidden one: show it again' },
-    { key = 'D', desc = 'delete an inactive session: move it to the trash (:AgentsTrash)' },
-    { key = 'glg', desc = 'lazygit for the project (or the row\'s worktree)' },
-    { key = 'q', desc = 'close drawer' },
-    { key = '? / g?', desc = 'this help' },
-    { key = '/', desc = 'search (built-in)' },
-    { key = 'gG', desc = 'commit graph of the project (or the row\'s worktree)' },
-    { key = 'gs', desc = 'scope: only this project / all projects' },
-    { key = 'gL', desc = 'show or hide the legend of the state marks' },
-    { key = 'X', desc = 'close the Claude running it in a tmux pane (Ctrl-C twice there; asks first)' },
-  }
-  for _, k in ipairs(provider_keys()) do rows[#rows + 1] = { key = k.lhs, desc = k.desc } end
+---Help rows of the drawer: its own keys as configured, `/`, the row keys of the providers and
+---the chat's keys on a session row.
+function M.help_rows()
+  local keys = drawer_keys()
+  local rows = {}
+  for _, a in ipairs(ACTIONS) do
+    local k = keylist.label(keys[a[1]])
+    if k then rows[#rows + 1] = { key = k, desc = a[2] } end
+  end
+  rows[#rows + 1] = { key = '/', desc = 'search (built-in)' }
+  for _, k in ipairs(sections.keys()) do rows[#rows + 1] = { key = k.lhs, desc = k.desc } end
   vim.list_extend(rows, require('agent-ide.ui.drawer_session_keys').help_rows(OWN))
-  require('agent-ide.ui.help').open('Agent-IDE drawer', rows)
+  return rows
+end
+
+function actions.help()
+  require('agent-ide.ui.help').open('Agent-IDE drawer', M.help_rows(), { win = S.win })
 end
 
 local function ensure_buf()
@@ -523,10 +579,17 @@ local function ensure_buf()
   vim.bo[buf].bufhidden = 'hide'
   vim.bo[buf].filetype = 'agent-ide'
   vim.bo[buf].modifiable = false
-  local function map(lhs, fn) vim.keymap.set('n', lhs, fn, { buffer = buf, nowait = true, silent = true }) end
-  -- provider row keys (the drawer's own keys below win a clash)
-  for _, k in ipairs(provider_keys()) do map(k.lhs, function() actions.row_key(k.lhs) end) end
-  for _, k in ipairs(KEYS) do map(k[1], actions[k[2]]) end
+  local function map(lhs, fn, desc) vim.keymap.set('n', lhs, fn, { buffer = buf, nowait = true, silent = true, desc = desc }) end
+  local keys = drawer_keys()
+  OWN = {}
+  for _, a in ipairs(ACTIONS) do
+    for _, lhs in ipairs(keylist.list(keys[a[1]])) do
+      OWN[vim.keycode(lhs)] = true
+      map(lhs, function() press(a, lhs) end, 'Agent-IDE drawer: ' .. a[2])
+    end
+  end
+  -- provider row keys with an lhs of their own (the others reach their rows through `press`)
+  for _, k in ipairs(provider_keys()) do map(k.lhs, function() actions.row_key(k.lhs) end, 'Agent-IDE drawer: ' .. k.desc) end
   require('agent-ide.ui.drawer_session_keys').map(buf, OWN, current_node) -- the chat's keys on session rows
   api.nvim_create_autocmd('BufEnter', { buffer = buf, callback = function() sections.focus() end })
   S.buf = buf

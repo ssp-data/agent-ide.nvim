@@ -45,7 +45,8 @@ function M.next_waiting()
   if #list == 0 then
     local scope = require('agent-ide.scope')
     local others = scope.project() and require('agent-ide.ui.drawer_model').others_needing(scope.matches) or 0
-    local msg = others > 0 and ('nothing in this project; %d in other projects (gs)'):format(others) or 'nothing needs you'
+    local key = require('agent-ide.util.keys').first('drawer', 'scope')
+    local msg = others > 0 and ('nothing in this project; %d in other projects (%s)'):format(others, key) or 'nothing needs you'
     return vim.notify('Agent-IDE: ' .. msg, vim.log.levels.INFO)
   end
   local pick = list[1]

@@ -193,7 +193,8 @@ T['raw view, help float: named; the raw view follows the title'] = function()
   child.lua('local s = require("agent-ide.session").all()[1]; s.title = "Later"; s:_emit("meta")')
   eq(vim.tbl_contains(names(), 'agents://repo/Later · raw'), true)
   child.lua('require("agent-ide.ui.help").open("Help", { { key = "a", desc = "b" } })')
-  eq(child.lua_get('vim.api.nvim_buf_get_name(0)'), 'agents://help')
+  eq(child.lua_get('vim.api.nvim_buf_get_name(0)'), 'agents://help/query')
+  eq(vim.tbl_contains(names(), 'agents://help'), true)
 end
 
 return T

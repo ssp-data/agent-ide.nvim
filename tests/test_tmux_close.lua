@@ -376,11 +376,11 @@ T['X: outside tmux, owned here, not running: a notice, nothing sent'] = function
   wait_for(function() return has_line(drawer_lines(), 'elsewhere') ~= nil end, 'elsewhere row')
   drawer_cursor_to('Alpha task')
   child.type_keys('X')
-  eq(last_note(), 'Agent-IDE: cannot reach that session (not in tmux); gp jumps to it')
+  eq(last_note(), 'Agent-IDE: cannot reach that session (not in tmux); gT jumps to it')
   -- a session this Neovim runs; one that runs nowhere
   child.lua('require("agent-ide.session").open({ id = ..., cwd = "/x/repo" }).owned = true', { A })
   child.type_keys('X')
-  eq(last_note(), 'Agent-IDE: this session runs in this Neovim; use x to park it')
+  eq(last_note(), 'Agent-IDE: this session runs in this Neovim; use sP to park it')
   drawer_cursor_to('Beta task')
   child.type_keys('X')
   eq(last_note(), 'Agent-IDE: session is not running')

@@ -75,7 +75,10 @@ function M.map(c, buf, is_transcript, act)
   map('n', keys.answer, function() require('agent-ide.ui.permission').answer(c.s) end, 'answer Claude')
   map('n', keys.mode, function() require('agent-ide.ui.mode').cycle(c.s) end, 'next permission mode')
   map('n', keys.model, function() require('agent-ide.ui.mode').pick_model(c.s) end, 'pick model')
-  map('n', keys.native, function() act.native(c) end, 'continue in native Claude (tmux)')
+  -- a typed key (gT) only in the transcript: the prompt buffer is where the user edits text
+  local native = is_transcript and keys.native
+    or vim.tbl_filter(function(k) return k:sub(1, 1) == '<' end, keylist.list(keys.native))
+  map('n', native, function() act.native(c) end, 'continue in native Claude (tmux)')
   map('n', keys.park, function() require('agent-ide.ui.chat').park(c.s) end, 'park the session')
   require('agent-ide.prompts.actions').map_chat(buf, is_transcript, keys)
   if is_transcript then

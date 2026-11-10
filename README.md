@@ -67,7 +67,7 @@ Parts 1 to 5 of 6 and search are done: the drawer and the history view, chat wit
 | A markdown render plugin | optional | Nicer answers in the transcript; any plugin that renders `markdown` buffers works |
 | lualine, or any statusline | optional | The footer with the state of all sessions and the quota (see [Footer](#footer)) |
 | `cargo` | optional | Builds the Rust helper: fast scanning, file watching and fuzzy, typo-tolerant search. Without it a Lua backend scans on a timer and search is limited to titles and prompts, exact words only |
-| `tmux` | optional | `gp` jumps to the pane of a session running elsewhere (the drawer then shows its pane, `tmux 2.1`), and `<leader>at` continues a chat in native Claude in a tmux pane |
+| `tmux` | optional | `gT` jumps to the pane of a session running elsewhere (the drawer then shows its pane, `tmux 2.1`) and continues a chat in native Claude in a tmux pane |
 | `lazygit` | optional | `glg` in the drawer and the diff view |
 | A `vim.ui.select` provider such as Snacks or Telescope | optional | Nicer pickers (permissions, model, prompts); the built-in one works |
 | A clipboard provider | optional | Copying a search hit (`<C-y>`) and yanking a prompt (`y`) also to the `+` register |
@@ -133,8 +133,8 @@ require('agent-ide').setup({
   tcd = true, -- opening a session sets the tab's working directory to its project
   scope = 'all', -- 'project': start with only the repository of Neovim's working directory (see Project scope)
   -- each key option is a key, a list of keys, or false (no mapping); keys = false turns off all of
-  -- these. Fixed, not configurable: the drawer's own keys, q / <Esc> in help floats, q in the raw
-  -- view, ]c / [c in the diff view, and / and @ in the prompt (chat.auto_slash, chat.at_picker)
+  -- these. Fixed, not configurable: q / <Esc> in help floats, q in the raw view, ]c / [c in the
+  -- diff view, and / and @ in the prompt (chat.auto_slash, chat.at_picker)
   keys = {
     toggle = '<leader>aa',
     next_waiting = '<leader>an',
@@ -142,19 +142,28 @@ require('agent-ide').setup({
     prompt_history = '<leader>aP', -- every prompt, newest first
     -- the search picker's query line; close works in normal mode (insert-mode <Esc> leaves insert mode)
     search_picker = { next = { '<C-n>', '<Down>' }, prev = { '<C-p>', '<Up>' }, open = '<CR>', copy = '<C-y>',
-      reuse = '<C-e>', scope = '<Tab>', kinds = '<C-t>', close = { '<Esc>', 'q' } },
+      reuse = '<C-e>', scope = '<Tab>', kinds = '<C-f>', close = { '<Esc>', 'q' } },
     chat = { send = '<C-CR>', send_alt = '<leader><CR>', interrupt = '<C-c>', prompt = '<leader>ap', help = 'g?',
       history_prev = '<C-p>', history_next = '<C-n>', attach = '<leader>af',
-      answer_inner = 'ir', answer_outer = 'ar', mode = '<S-Tab>', model = '<leader>aM', answer = '<leader>ay',
-      raw = 'gr', raw_event = 'gR', native = '<leader>at', park = '<leader>ax', diff = { 'gd', '<leader>gd' },
+      answer_inner = 'ir', answer_outer = 'ar', mode = '<S-Tab>', model = { '<leader>aM', '<leader>M' },
+      answer = '<leader>ay', raw = 'gr', raw_event = 'gR', park = '<leader>ax', diff = { 'gd', '<leader>gd' },
+      -- native: continue in native Claude in a tmux pane; a typed key (gT) works in the transcript
+      -- only, since the prompt buffer is where you edit text (gT stays Vim's there)
+      native = { 'gT', '<leader>aT' },
       save_library = '<leader>W', prompts = '<leader>al' },
     -- diff view, on both sides; a one-character key (q, ?, R) only on the left side, since the
     -- right side is your own file, where they stay macro recording, search and Replace mode
     diff = { next_file = { ']f', '<leader>gj' }, prev_file = { '[f', '<leader>gk' }, flip = { 'gb', '<leader>gt' },
       branch = { 'gB', '<leader>gB' }, close = { 'q', '<leader>gq' }, help = { '?', 'g?' },
       refresh = { 'R', '<leader>gR' }, lazygit = 'glg' },
+    -- the drawer's own keys (see Drawer); on a row that has its own handler for a key (the
+    -- prompt row keys below) that handler runs instead
+    drawer = { open = { '<CR>', 'o' }, fold = 'za', collapse_all = 'z0', expand_all = 'z9', refresh = 'R',
+      tmux = { 'gT', '<leader>aT' }, search = { 'Z', '<leader>ff', '<leader>Z' }, park = 'sP', hide = 'H',
+      delete = 'D', yank = 'y', lazygit = 'glg', close = 'q', help = { '?', 'g?' }, graph = 'G', scope = 'S',
+      legend = { 'gL', '<leader>aL' }, close_tmux = 'X' },
     -- drawer, on prompt rows (elsewhere these keys keep their normal meaning)
-    prompts = { edit = 'e', rename = 'r', delete = 'd', yank = 'y', to_library = 'L' },
+    prompts = { edit = 'e', rename = 'r', delete = 'D', yank = 'y', to_library = 'sL' },
   },
   prompts = {
     library_dir = nil,  -- your templates (nil: stdpath('data') .. '/agent-ide/library')
@@ -189,7 +198,7 @@ The drawer has no header line; `?` lists every key. Each row shows its state mar
 
 Ages read `now`, `5m`, `3h`, `12d`, then months (`14mo`) and years (`2y`). Colours: waiting violet (bold), busy yellow, idle green, done orange, failed red, parked rows (mark, title, age) and ages dimmed, never italic; the groups are `AgentIdeWaiting`, `AgentIdeBusy`, `AgentIdeIdle`, `AgentIdeDone`, `AgentIdeFailed`, `AgentIdeParked`, `AgentIdeAge` and `AgentIdeSection`, and a colorscheme can set them. The dim groups (`AgentIdeParked`, `AgentIdeAge`, `AgentIdeMissing`, `AgentIdeBranch`, `AgentIdeGitUntracked`) take the foreground of `Comment` at setup and on every `ColorScheme`, without italic or bold. A project row is its fold arrow and bold name; a parked project's name is dimmed. A project whose folder is gone says `(folder missing)`; a session started in a sub-folder of its project shows `<subfolder>/ · <title>`.
 
-**Legend.** The bottom of the drawer explains the state marks: `● input  ◐ running  ● idle  ○ parked  ✓ done  ✗ failed`, each mark in its colour (the marks of your icon set), over one or two lines. It stays put while the list scrolls, never takes the focus and never covers the cursor row (the list scrolls instead). It hides itself while the drawer is shorter than 12 lines or narrower than 24 columns. `gL` shows or hides it; `drawer = { legend = false }` starts with it hidden.
+**Legend.** The bottom of the drawer explains the state marks: `● input  ◐ running  ● idle  ○ parked  ✓ done  ✗ failed`, each mark in its colour (the marks of your icon set), over one or two lines. It stays put while the list scrolls, never takes the focus and never covers the cursor row (the list scrolls instead). It hides itself while the drawer is shorter than 12 lines or narrower than 24 columns. `gL` (or `<leader>aL`) shows or hides it, and that choice is remembered across restarts (`prefs.json`); `drawer = { legend = false }` is the start before you ever toggled it.
 
 **Hidden sessions.** `H` on a session row hides it: nothing is deleted, the session only moves into a collapsed, dimmed `Hidden (n)` group, the last row of its project's `Sessions (n)` section (which counts the visible ones only). `<CR>` or `za` expands the group; its rows open like any other session, and `H` on one shows it again. Hidden sessions do not count for the project's age, order or state mark, except while one needs you: a hidden session that is waiting, busy, done-unread or failed is listed among the normal rows (and counted in the roll-up, the footer and `<leader>an`) for as long as that lasts. A project whose sessions are all hidden still shows, with `Sessions (0)` and its group. Search finds hidden sessions as usual. The list is kept in `hidden.json` (see [Privacy](#privacy)); several Neovims share it.
 
@@ -201,7 +210,7 @@ Claude Code has no command to delete one session. `D` on a session row (also in 
 - `file-history/<id>/`, `session-env/<id>/`, `tasks/<id>/`;
 - the lines of `history.jsonl` that belong to the session (the prompts you typed); every other line stays byte for byte, and the plugin detects and carries over lines appended during the rewrite.
 
-Not removed: pasted-text cache files (`paste-cache/`), usage statistics (`stats-cache.json`) and settings. Only an inactive session can be deleted: `D` is refused while the session is active in this Neovim (park it first with `x`), handed to native Claude, running in another Claude (asked afresh with `claude agents --json`; when that fails, nothing is deleted), or while its prompt holds unsent text. Its chat and raw buffers are closed and it leaves `hidden.json`.
+Not removed: pasted-text cache files (`paste-cache/`), usage statistics (`stats-cache.json`) and settings. Only an inactive session can be deleted: `D` is refused while the session is active in this Neovim (park it first with `sP`), handed to native Claude, running in another Claude (asked afresh with `claude agents --json`; when that fails, nothing is deleted), or while its prompt holds unsent text. Its chat and raw buffers are closed and it leaves `hidden.json`.
 
 The trash is `stdpath('data')/agent-ide/trash/<YYYYMMDD-HHMMSS>-<id>/` (folder `0700`; files keep their modes): the moved entries in their layout, `history.jsonl` with the removed lines and `manifest.json` (where each entry came from, title, project, time). **The trash still holds the whole session**, prompts and answers included, until you empty it: for sensitive data run `:AgentsTrash empty` afterwards. `:AgentsTrash` lists the trashed sessions to restore one (refused when something is at its old place; the history lines go back in time order) or delete it for good; `:AgentsTrash empty` deletes all of them for good after a confirm. Nothing is purged automatically unless you set `trash = { keep_days = 30 }`, which purges older entries at setup.
 
@@ -211,12 +220,12 @@ With many sessions across many repositories, large ones can bury the session you
 
 - **Setting.** `scope = 'all'` (the default) or `scope = 'project'` in `setup()` decides how each Neovim starts. The scope belongs to one Neovim and is not saved.
 - **Commands.** `:Agents project` switches to the project of Neovim's working directory (the global one, `:pwd`) and opens the drawer if it is closed. Each run looks at the working directory again, so after a `:cd` it re-anchors. `:Agents all` goes back to every project. `:Agents` alone toggles the drawer as before, in the current scope.
-- **Key.** `gs` in the drawer flips between the two. From `all`, on a row of a project (its row, a session, a section), it narrows to that project; elsewhere to the working directory's.
+- **Key.** `S` in the drawer flips between the two. From `all`, on a row of a project (its row, a session, a section), it narrows to that project; elsewhere to the working directory's.
 - **Which project.** The same one the drawer groups by: the git repository root, with its sub-folders and linked worktrees folded in; a folder without git is its own project. A repository without sessions yet shows `Sessions (0)`, and `+ New session` starts in its root.
 
-In project scope the drawer has no project row. Its first, dimmed line names the project and branch and says `project · gs: all` (`<CR>` on it goes back to all). Below it come the Prompts node, then `+ New session`, `Sessions (n)` (open), `Saved prompts`, `Changes` and `Commits`, all at the top level. Every drawer key works as usual on these rows. Sessions of other projects keep running in this Neovim, they are just not listed. When one of them needs you (waiting, done unread, failed, also a Claude in a terminal that waits for input), a dimmed last line says so, for example `1 session in other projects needs you · gs`, and `<leader>an` with nothing to do in the project says `nothing in this project; 1 in other projects (gs)`. Each scope remembers its own open folds.
+In project scope the drawer has no project row. Its first, dimmed line names the project and branch and says `project · S: all` (`<CR>` on it goes back to all). Below it come the Prompts node, then `+ New session`, `Sessions (n)` (open), `Saved prompts`, `Changes` and `Commits`, all at the top level. Every drawer key works as usual on these rows. Sessions of other projects keep running in this Neovim, they are just not listed. When one of them needs you (waiting, done unread, failed, also a Claude in a terminal that waits for input), a dimmed last line says so, for example `1 session in other projects needs you · S`, and `<leader>an` with nothing to do in the project says `nothing in this project; 1 in other projects (S)`. Each scope remembers its own open folds.
 
-Search (`<leader>as`, `<leader>aP`, `s` outside a project row) opens on `project <name>`, and `<Tab>` widens it to all sessions. The status file for the desktop bar keeps listing all sessions of this Neovim. `:AgentsCloseIdle` closes only the project's idle terminal sessions (its confirm names the project); `:AgentsCloseIdle!` closes those of every project. The prompt history (`<C-p>`, `<C-n>`) is the session's own in either scope, so it never shows prompts of another project.
+Search (`<leader>as`, `<leader>aP`, `Z` outside a project row) opens on `project <name>`, and `<Tab>` widens it to all sessions. The status file for the desktop bar keeps listing all sessions of this Neovim. `:AgentsCloseIdle` closes only the project's idle terminal sessions (its confirm names the project); `:AgentsCloseIdle!` closes those of every project. The prompt history (`<C-p>`, `<C-n>`) is the session's own in either scope, so it never shows prompts of another project.
 
 Open a terminal straight into a project:
 
@@ -226,7 +235,7 @@ nvim +'Agents project'
 
 ### Closing terminal sessions
 
-`X` on a session row that runs in another Claude in a tmux pane (the row shows `tmux <window>.<pane>`) ends that Claude the way you would there: Ctrl-C into the pane, and again 300 ms later (Claude's own exit). Text typed in that Claude's input box is lost. The confirm (default: no) comes first, right on the key; a session that is working or waiting for input asks a second time. Only then does the plugin check, afresh: Claude still lists the session with the same process (and still idle, if idle is what you confirmed); that process is a Claude (`claude`, or `node` for an npm install) on the terminal of a tmux pane and is that terminal's foreground program (so not suspended with Ctrl-Z behind another program, not a Claude another Neovim started, not one in a Neovim `:terminal`); the pane is in no mode (such as copy mode) and its window does not synchronize panes. If any of that does not hold, nothing is sent and a notice says why. The process itself is never signalled. If Claude still runs 5 s later, a notice says so and nothing more happens. Outside tmux `X` says it cannot reach the session (`gp` jumps to it); for a session running in this Neovim use `x`. `:AgentsCloseIdle` closes every Claude that is idle in a tmux pane after one confirm (with their count when the drawer's live state is current), the same checks for each, and then says how many it closed and how many it skipped and why; in project scope only those of the project (`:AgentsCloseIdle!` for all).
+`X` on a session row that runs in another Claude in a tmux pane (the row shows `tmux <window>.<pane>`) ends that Claude the way you would there: Ctrl-C into the pane, and again 300 ms later (Claude's own exit). Text typed in that Claude's input box is lost. The confirm (default: no) comes first, right on the key; a session that is working or waiting for input asks a second time. Only then does the plugin check, afresh: Claude still lists the session with the same process (and still idle, if idle is what you confirmed); that process is a Claude (`claude`, or `node` for an npm install) on the terminal of a tmux pane and is that terminal's foreground program (so not suspended with Ctrl-Z behind another program, not a Claude another Neovim started, not one in a Neovim `:terminal`); the pane is in no mode (such as copy mode) and its window does not synchronize panes. If any of that does not hold, nothing is sent and a notice says why. The process itself is never signalled. If Claude still runs 5 s later, a notice says so and nothing more happens. Outside tmux `X` says it cannot reach the session (`gT` jumps to it); for a session running in this Neovim use `sP`. `:AgentsCloseIdle` closes every Claude that is idle in a tmux pane after one confirm (with their count when the drawer's live state is current), the same checks for each, and then says how many it closed and how many it skipped and why; in project scope only those of the project (`:AgentsCloseIdle!` for all).
 
 ## Keys
 
@@ -239,35 +248,34 @@ Global:
 | `<leader>aP` | Prompt history: every prompt you sent, newest first |
 | `<leader>an` | Go to the next session that needs you: one waiting for your answer here (oldest ask first), then one waiting in another Claude (jumped to in tmux), then a failed turn, then a finished turn you have not seen; from the first of them, the one after it |
 
-In the drawer:
+In the drawer (`keys.drawer`; the prompt row keys are `keys.prompts`, the session row keys the chat's, `keys.chat`):
 
 | Key | Action |
 |---|---|
 | `<CR>`, `o` | Expand or collapse a project; open a session; start a new session (`+ New session`; pressed again while that one has sent nothing, it comes back with its draft; `2<CR>` starts a separate one); use a prompt |
 | `za` | Expand or collapse the node under the cursor |
-| `zM` | Collapse all: only the top-level rows remain (a project opened again shows its sessions) |
-| `zR` | Expand all projects with their `Sessions`; `Changes`, `Commits`, `Saved prompts`, `Hidden` and the Prompts node stay as they are (opening them loads git or prompts for every project). `zR` again, with nothing changed in between, opens everything (a commit's own file list excepted). Git counts of closed sections load a few projects at a time |
+| `z0` | Collapse all: only the top-level rows remain (a project opened again shows its sessions) |
+| `z9` | Expand all projects with their `Sessions`; `Changes`, `Commits`, `Saved prompts`, `Hidden` and the Prompts node stay as they are (opening them loads git or prompts for every project). `z9` again, with nothing changed in between, opens everything (a commit's own file list excepted). Git counts of closed sections load a few projects at a time |
 | `R` | Rescan sessions and refresh running state |
-| `gp` | Jump to the tmux pane of a session running elsewhere |
-| `s` | Search the sessions of the project under the cursor |
-| `x` | Park the session: stop the Claude process this Neovim runs for it |
+| `gT`, `<leader>aT` | To tmux: on a session running elsewhere, jump to its tmux pane; on any other session, continue it in native Claude in a tmux pane (see [Native Claude](#chat)) |
+| `Z`, `<leader>ff`, `<leader>Z` | Search the sessions of the project under the cursor |
+| `sP` | Park the session: stop the Claude process this Neovim runs for it |
 | `H` | Hide the session into its project's `Hidden (n)` group; on a hidden session: show it again (Vim's `H` motion is not available in the drawer) |
-| `D` | Delete an inactive session: move it to the plugin's trash after a confirm (see [Deleting sessions](#deleting-sessions)) |
-| `<leader>aM`, `<S-Tab>`, `<C-c>`, `<leader>at`, `gr` | On a session row, what they do in its chat, for that session and without opening it: pick the model, next permission mode, interrupt (only while Claude works, after a confirm), continue in native Claude in a tmux pane, raw view in the main window. A session without a process takes the mode or model when it starts; one running in another Claude is refused (the raw view still opens). On other rows `<S-Tab>` and `<C-c>` keep their Vim meaning |
+| `D` | Session row: delete an inactive session, moving it to the plugin's trash after a confirm (see [Deleting sessions](#deleting-sessions)). Prompt row: delete the file (asks first) |
+| `y` | Session row: yank the last prompt sent in it. Prompt row: yank its text (unnamed and `+` registers). Elsewhere Vim's `y` |
+| `<leader>aM` / `<leader>M`, `<S-Tab>`, `<C-c>`, `gr` | On a session row, what they do in its chat, for that session and without opening it: pick the model, next permission mode, interrupt (only while Claude works, after a confirm), raw view in the main window. A session without a process takes the mode or model when it starts; one running in another Claude is refused (the raw view still opens). On other rows `<S-Tab>` and `<C-c>` keep their Vim meaning |
 | `X` | Close the Claude that runs the session in a tmux pane, after a confirm (see [Closing terminal sessions](#closing-terminal-sessions)) |
 | `q` | Close the drawer |
-| `gL` | Show or hide the legend of the state marks |
-| `gG` | Commit graph of the row's repository (a worktree session: that worktree; see [Commit graph](#commit-graph)) |
+| `gL`, `<leader>aL` | Show or hide the legend of the state marks (remembered) |
+| `G` | Commit graph of the row's repository (a worktree session: that worktree; see [Commit graph](#commit-graph)) |
 | `glg` | Open lazygit for the row's repository (a worktree row or session: that worktree) |
-| `gs` | Scope: only the row's project (else the working directory's), or back to all projects (see [Project scope](#project-scope)) |
-| `?`, `g?` | Help (`/` searches in it, `q` or `<Esc>` closes it) |
+| `S` | Scope: only the row's project (else the working directory's), or back to all projects (see [Project scope](#project-scope)) |
+| `?`, `g?` | Help: a list of every key you can filter by typing; `<CR>` on a row presses that key (see [Help](#help)) |
 | `e` | Prompt row: edit its file in the main window (Claude's commands and skills open read-only) |
 | `r` | Prompt row: rename (library: `group/name` moves it to another group) |
-| `d` | Prompt row: delete the file (asks first) |
-| `y` | Prompt row: yank its text (unnamed and `+` registers) |
-| `L` | Saved prompt row: copy it into the library (asks for a name) |
+| `sL` | Saved prompt row: copy it into the library (asks for a name) |
 
-The prompt row keys are under `keys.prompts`; elsewhere in the drawer they keep their Vim meaning, and a drawer key above always wins over one of them. The session row keys are the chat's (`keys.chat`), so a remap applies to both. The other drawer keys are fixed.
+Each of these is a key, a list of keys, or `false`. A prompt row key acts on prompt rows even when a drawer key has the same lhs (`D`, `y`); elsewhere in the drawer it keeps its Vim meaning. The session row keys are the chat's (`keys.chat`), so a remap applies to both.
 
 In the chat (transcript and prompt buffer, unless noted):
 
@@ -280,9 +288,9 @@ In the chat (transcript and prompt buffer, unless noted):
 | `i`, `a`, `o` | Transcript: write in the prompt |
 | `<leader>ay` | Answer what Claude asks (permission, question, plan) |
 | `<S-Tab>` | Next permission mode |
-| `<leader>aM` | Pick the model |
+| `<leader>aM`, `<leader>M` | Pick the model |
 | `<leader>ax` | Park the session: stop its Claude process (asks when it is working); the next send resumes it |
-| `<leader>at` | Continue the session in native Claude in a tmux pane; while it is there, take it back |
+| `gT`, `<leader>aT` | Continue the session in native Claude in a tmux pane; while it is there, take it back (`gT` in the transcript only; the prompt buffer keeps Vim's `gT`) |
 | `gr` | Transcript: raw view of what was sent and received; `q` or `gr` returns |
 | `gR` | Transcript: raw view at the line of the `unknown` fold under the cursor |
 | `ir`, `ar` | Transcript: text object for one Claude answer (`ar` with its header) |
@@ -297,7 +305,7 @@ In the chat (transcript and prompt buffer, unless noted):
 | `za` | Toggle fold |
 | `:q` | Prompt: hide the window; the draft stays |
 | `:q!` | Prompt: hide the window and discard the draft |
-| `g?` | Help (`?` stays Vim's backward search) |
+| `g?` | Help, filterable (`?` stays Vim's backward search) |
 
 The history buffer is markdown with folds for tool calls, results and thinking. Anything the viewer does not understand is shown as a fold marked `unknown`, never dropped, and truncated output says how many lines are hidden.
 
@@ -311,11 +319,11 @@ Open a session from the drawer, or start one with `+ New session` under a projec
 
 **Permissions, questions and plans.** When Claude asks to use a tool, the ask shows at the end of the transcript and in the drawer, and a picker opens with Allow, Deny and the suggestions Claude made (switch the mode for this session, or always allow a rule; offered only where Claude saves it in this project's local settings, and labelled so). The picker opens only when you are in that session's chat in normal mode. Nothing ever interrupts you: an ask from another session never opens a popup, moves the cursor or takes focus; it shows in the drawer and in the footer, and `<leader>an` takes you there. While you type in the same session's prompt, a one-line hint appears instead; `<leader>ay` opens the picker. Questions Claude asks (multiple choice) are answered the same way, one picker per question; a multi-select question takes one option per round until you pick Done choosing. A plan from plan mode can be approved, approved with edits accepted for the rest of the session, or sent back with Keep planning.
 
-**Mode and model.** `<S-Tab>` cycles the permission mode (manual, acceptEdits, plan, auto) and `<leader>aM` picks the model. The winbar shows `old→new` until Claude confirms the change; a refused change says why. The picker lists every model your Claude Code offers, with name and description (`Fable 5.2 — … (claude-fable-5-2)`, the current one marked `●`), as Claude reports them when a process starts (no turn, kept in `models.json`; on a fresh install a short-lived Claude is asked first, for at most 1.5 s), and the winbar and the footer name the model the same way (`fable 5.1`).
+**Mode and model.** `<S-Tab>` cycles the permission mode (manual, acceptEdits, plan, auto) and `<leader>aM` (or `<leader>M`) picks the model. The winbar shows `old→new` until Claude confirms the change; a refused change says why. The picker lists every model your Claude Code offers, with name and description (`Fable 5.2 — … (claude-fable-5-2)`, the current one marked `●`), as Claude reports them when a process starts (no turn, kept in `models.json`; on a fresh install a short-lived Claude is asked first, for at most 1.5 s), and the winbar and the footer name the model the same way (`fable 5.1`).
 
 **Raw view.** `gr` in the transcript shows every line sent to Claude (`>>`) and received (`<<`) for the session, byte for byte; for a session that did not run here it shows the transcript file. Anything the chat cannot render shows as an `unknown` fold, and `gR` on it opens the raw view at its line.
 
-**Native Claude.** `<leader>at` inside tmux parks the session (after a question when Claude is working), opens `claude --resume <id>` in a split pane, and takes the session back when that pane ends (also when it is killed). Until then the winbar's state word says `native` and sending is refused; `<leader>at` again offers to take the session back, which is refused while native Claude still runs it. The session is reloaded from disk in the background: a chat on screen is refreshed in place, otherwise a notice says it is back. Outside tmux the key parks the session and shows the command to run.
+**Native Claude.** `gT` (or `<leader>aT`) inside tmux parks the session (after a question when Claude is working), opens `claude --resume <id>` in a split pane, and takes the session back when that pane ends (also when it is killed). Until then the winbar's state word says `native` and sending is refused; the key again offers to take the session back, which is refused while native Claude still runs it. The session is reloaded from disk in the background: a chat on screen is refreshed in place, otherwise a notice says it is back. Outside tmux the key parks the session and shows the command to run.
 
 **Quitting.** Quitting Neovim while a session is working asks first; `:qa!` and the other forced quits do not ask.
 
@@ -386,7 +394,7 @@ The right side is your own file, so the one-character keys `q`, `?` and `R` are 
 
 ## Commit graph
 
-`gG` on any row of a git project in the drawer (the project row, its sections, a session) opens the project's history as a graph in the main window, the way GitKraken or SourceTree show branches and merges. On a session that works in a linked worktree it shows that worktree. `:AgentsGraph` opens it for the current context: the chat's session, the diff view's repository, the drawer row, else the current file's (or the working directory's) repository. Outside a git repository you get a notice and nothing opens.
+`G` on any row of a git project in the drawer (the project row, its sections, a session), or `<CR>` on the `commit graph` row at the top of an expanded `Commits` section, opens the project's history as a graph in the main window, the way GitKraken or SourceTree show branches and merges. On a session that works in a linked worktree it shows that worktree. `:AgentsGraph` opens it for the current context: the chat's session, the diff view's repository, the drawer row, else the current file's (or the working directory's) repository. Outside a git repository you get a notice and nothing opens.
 
 ```
  myapp · graph · all branches                                       (winbar)
@@ -403,7 +411,7 @@ Git draws the graph (`git log --graph --date-order`); the view turns its charact
 
 | Key (graph) | Action |
 |---|---|
-| `gG` (drawer) | Open the graph of the row's repository |
+| `G` (drawer) | Open the graph of the row's repository |
 | `<CR>` | On a commit: show / hide its changed files below it. On a file: the diff of that commit only (a merge against its first parent, the first commit against nothing); closing the diff comes back to the graph |
 | `]]` / `[[` | Next / previous commit |
 | `a` | All branches / the current branch only |
@@ -448,7 +456,7 @@ opts = { prompts = { library_dir = '~/notes/prompts' } }
 
 ## Search
 
-`<leader>as` (or `:AgentsSearch [query]`, or `require('agent-ide').search()`) opens a floating picker that searches the titles, your prompts and Claude's answers of every session, live as you type. `<leader>aP` opens the same picker on your prompts only, newest first: the prompt history of all sessions. In the drawer, `s` searches the project under the cursor.
+`<leader>as` (or `:AgentsSearch [query]`, or `require('agent-ide').search()`) opens a floating picker that searches the titles, your prompts and Claude's answers of every session, live as you type. `<leader>aP` opens the same picker on your prompts only, newest first: the prompt history of all sessions. In the drawer, `Z` searches the project under the cursor.
 
 With the Rust helper the search is fuzzy and typo-tolerant ([neo_frizbee](https://crates.io/crates/neo_frizbee)): exact and word-start matches come first, then titles before prompts before answers, then the newest; a fuzzy match must keep its letters close together. Words match in any order; a word with a capital letter matches case-sensitively; umlauts match regardless of case (`über` finds `Über`). A session found only through a word of its project's name is listed last (`proj`). The index is built in the background on first use, kept on disk and updated when a transcript changes. Without the helper the picker says it is limited: titles and prompts only, exact words only.
 
@@ -460,7 +468,7 @@ With the Rust helper the search is fuzzy and typo-tolerant ([neo_frizbee](https:
 | `<C-y>` | Copy the hit's full text (prompt, answer or title) |
 | `<C-e>` | Put the prompt into the open chat prompt to reuse it |
 | `<Tab>` | Scope: all sessions, the current project, the current session |
-| `<C-t>` | What to search: everything, prompts, answers, titles, or also tool calls |
+| `<C-f>` | What to search: everything, prompts, answers, titles, or also tool calls |
 | `]n` / `[n` (normal mode), `<M-n>` / `<M-p>` | Preview: next / previous occurrence of the query (wraps; the footer says `match 3/7`) |
 | `<Esc>` (normal mode) or `q` | Close; in insert mode `<Esc>` first goes to normal mode |
 
@@ -470,7 +478,7 @@ The preview shows the hit in its turn, rendered and folded as in the chat, with 
 
 `<CR>` opens the chat with the cursor on the first occurrence in the hit's event, and the query stays marked in that transcript window: `]n` / `[n` step through every occurrence in the transcript, `<Esc>` in normal mode clears the marks (a global `<Esc>` mapping of yours still runs after). The marks are window-local matches, never the search register or `'hlsearch'`; they go when the window closes or shows another buffer, and with the next search. A key the transcript buffer already maps is left alone. The prompt history lists the newest 500 prompts (the footer says how many there are; type to narrow), and the same prompt sent several times in a row is one row with a count (`×3`).
 
-Tool calls are searched only on request (`<C-t>`), tool output never. The index keeps the first 4 KiB of each prompt and answer; copying and reusing take the full text from the transcript, and refuse with a notice when it cannot be read.
+Tool calls are searched only on request (`<C-f>`), tool output never. The index keeps the first 4 KiB of each prompt and answer; copying and reusing take the full text from the transcript, and refuse with a notice when it cannot be read.
 
 ## How it works
 

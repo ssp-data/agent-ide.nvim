@@ -9,7 +9,7 @@ local FIXTURE_ID = '11111111-1111-4111-8111-111111111111'
 local FIXTURE = vim.fn.getcwd() .. '/tests/fixtures/projects/-home-u-git-alpha/' .. FIXTURE_ID .. '.jsonl'
 local ICONS = { open = 'v', closed = '>', project = 'P', waiting = 'W', busy = 'B', idle = 'I', parked = '.',
   done = 'D', failed = 'F', new = '+' }
-local ELSEWHERE = 'Agent-IDE: session is running in another Claude; use gp in the drawer to jump to it'
+local ELSEWHERE = 'Agent-IDE: session is running in another Claude; use gT in the drawer to jump to it'
 local LATER = '; takes effect when the session starts'
 
 local tmp, repo, projects, log
@@ -218,12 +218,18 @@ T['session running elsewhere: refused with the usual notice; the raw view still 
   start(nil, { live_json = vim.json.encode({ { sessionId = FIXTURE_ID, pid = 4242, status = 'busy', cwd = '/x' } }) })
   show_drawer()
   wait_for(function() return has_line(drawer_lines(), 'elsewhere') ~= nil end, 'elsewhere row')
-  for _, k in ipairs({ '<S-Tab>', '\\aM', '<C-c>', '\\at' }) do
+  for _, k in ipairs({ '<S-Tab>', '\\aM', '<C-c>' }) do
     drawer_cursor_to('Alpha basics')
     child.lua('_G.notes = {}')
     child.type_keys(k)
     eq({ k, notes() }, { k, { ELSEWHERE } })
   end
+  -- the drawer's tmux key jumps to its pane instead (here: not in tmux)
+  drawer_cursor_to('Alpha basics')
+  child.lua('_G.notes = {}')
+  child.type_keys('gT')
+  wait_for(function() return #notes() > 0 end, 'jump notice')
+  eq(notes(), { 'Agent-IDE: cannot jump (not in tmux)' })
   local s = sess()
   eq(s == vim.NIL or (s.mode_requested == vim.NIL and s.model_requested == vim.NIL), true)
   eq(argvs(), {})
@@ -232,7 +238,7 @@ T['session running elsewhere: refused with the usual notice; the raw view still 
   wait_for(function() return child.lua_get('vim.b.agent_ide_kind') == 'raw' end, 'raw view')
 end
 
-T['gr opens the raw view in the main window; <leader>at hands an alive session to native Claude'] = function()
+T['gr opens the raw view in the main window; gT hands an alive session to native Claude'] = function()
   start({ { expect = 'Hi' }, init(), say('Hello.'), result('Hello.') })
   alive()
   wait_for(function() return sess().state == 'idle' end, 'turn end')
@@ -244,7 +250,7 @@ T['gr opens the raw view in the main window; <leader>at hands an alive session t
   eq(has_line(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), '>> ') ~= nil, true)
   -- not in tmux: native parks it and says how to continue by hand
   drawer_cursor_to('Alpha basics')
-  child.type_keys('\\at')
+  child.type_keys('gT')
   wait_for(function() return sess().state == 'parked' end, 'parked for native')
   eq(last_note():find('parked; not in tmux, so continue it by hand: ', 1, true) ~= nil, true)
 end
@@ -255,7 +261,7 @@ T['on other rows the keys do nothing; <S-Tab> and <C-c> keep their Vim meaning']
   drawer_cursor_to('> Prompts')
   local before = child.lua_get('{ win = vim.api.nvim_get_current_win(), wins = #vim.api.nvim_list_wins() }')
   child.lua('_G.feeds = {}')
-  for _, k in ipairs({ '\\aM', 'gr', '\\at' }) do child.type_keys(k) end
+  for _, k in ipairs({ '\\aM', 'gr' }) do child.type_keys(k) end
   vim.wait(100)
   eq(child.lua_get('{ win = vim.api.nvim_get_current_win(), wins = #vim.api.nvim_list_wins() }'), before)
   eq(child.lua_get('_G.feeds'), {})
@@ -280,7 +286,7 @@ T['a remapped chat key applies in the drawer too; the help lists them under a he
   for i, r in ipairs(rows) do if r.heading == 'On a session row' then at = i end end
   eq(at ~= nil, true)
   local after = vim.tbl_map(function(r) return r.key end, vim.list_slice(rows, at + 1))
-  eq(after, { '<leader>aM', 'gm', '<C-c>', '<leader>at' })
+  eq(after, { '<leader>aM / <leader>M', 'gm', '<C-c>' }) -- native: the drawer's own tmux key (gT)
 end
 
 return T

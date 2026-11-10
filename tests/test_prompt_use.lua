@@ -279,14 +279,14 @@ T['help floats list the prompt keys'] = function()
   start()
   drawer_cursor_to('Prompts')
   child.type_keys('?')
-  local text = table.concat(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), '\n')
+  local text = table.concat(child.lua_get("vim.api.nvim_buf_get_lines(require('agent-ide.ui.help')._state().lbuf, 0, -1, false)"), '\n')
   for _, k in ipairs({ 'prompt row: edit', 'prompt row: rename', 'prompt row: delete', 'prompt row: yank', 'copy it into the library' }) do
     eq(text:find(k, 1, true) ~= nil, true)
   end
-  child.type_keys('q')
+  child.type_keys('<Esc>', 'q')
   child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.chat")._windows().prompt)')
   child.type_keys('g?')
-  text = table.concat(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), '\n')
+  text = table.concat(child.lua_get("vim.api.nvim_buf_get_lines(require('agent-ide.ui.help')._state().lbuf, 0, -1, false)"), '\n')
   eq(text:find('<leader>al', 1, true) ~= nil, true)
   eq(text:find('<leader>W', 1, true) ~= nil, true)
 end

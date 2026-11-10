@@ -8,7 +8,9 @@ local keylist = require('agent-ide.util.keys')
 
 local M = {}
 
-local ELSEWHERE = 'Agent-IDE: session is running in another Claude; use gp in the drawer to jump to it'
+local function elsewhere_msg()
+  return 'Agent-IDE: session is running in another Claude; use ' .. keylist.first('drawer', 'tmux') .. ' in the drawer to jump to it'
+end
 
 local function notify(msg, level) vim.notify(msg, level or vim.log.levels.INFO) end
 
@@ -30,20 +32,20 @@ local function later(s) return s:_alive() and '' or '; takes effect when the ses
 -- name in `keys.chat`, help text, action on a session row; `fall`: Vim's meaning elsewhere
 local ACTIONS = {
   { name = 'model', desc = 'pick the model', run = function(node)
-    if elsewhere(node) then return notify(ELSEWHERE, vim.log.levels.WARN) end
+    if elsewhere(node) then return notify(elsewhere_msg(), vim.log.levels.WARN) end
     local s = session_of(node)
     require('agent-ide.ui.mode').pick_model(s, function(model)
       notify(('Agent-IDE: model %s%s'):format(model, later(s)))
     end)
   end },
   { name = 'mode', fall = true, desc = 'next permission mode', run = function(node)
-    if elsewhere(node) then return notify(ELSEWHERE, vim.log.levels.WARN) end
+    if elsewhere(node) then return notify(elsewhere_msg(), vim.log.levels.WARN) end
     local s = session_of(node)
     require('agent-ide.ui.mode').cycle(s)
     notify(('Agent-IDE: mode %s%s'):format(tostring(s.mode_requested or s.mode), later(s)))
   end },
   { name = 'interrupt', fall = true, desc = 'interrupt Claude while it works (asks first)', run = function(node)
-    if elsewhere(node) then return notify(ELSEWHERE, vim.log.levels.WARN) end
+    if elsewhere(node) then return notify(elsewhere_msg(), vim.log.levels.WARN) end
     local s = require('agent-ide.session').get(node.session.id)
     if not (s and s:_alive() and (s.state == 'busy' or s.state == 'waiting')) then return end
     -- Ctrl-C is a reflex in normal mode; on a row (not in the chat) it asks first
@@ -54,7 +56,7 @@ local ACTIONS = {
   { name = 'native', desc = 'continue in native Claude in a tmux pane', run = function(node)
     local s = require('agent-ide.session').get(node.session.id)
     local away = s and require('agent-ide.ui.handoff').away(s) -- again: take it back
-    if not away and elsewhere(node) then return notify(ELSEWHERE, vim.log.levels.WARN) end
+    if not away and elsewhere(node) then return notify(elsewhere_msg(), vim.log.levels.WARN) end
     require('agent-ide.ui.chat').native(session_of(node), node.project)
   end },
   { name = 'raw', desc = 'raw view in the main window', run = function(node)
@@ -64,6 +66,14 @@ local ACTIONS = {
     api.nvim_set_current_win(main)
   end },
 }
+
+---The native Claude action on session row `node` (the drawer's tmux key, ui/drawer.lua).
+---@param node table
+function M.native(node)
+  for _, a in ipairs(ACTIONS) do
+    if a.name == 'native' then return M.run(a, nil, node) end
+  end
+end
 
 ---Run the key `lhs` of action `a` on drawer row `node`.
 function M.run(a, lhs, node)

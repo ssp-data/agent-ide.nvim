@@ -759,7 +759,7 @@ T['help lists the new keys'] = function()
   open_new()
   child.type_keys('g?')
   wait_for(function() return child.lua_get('vim.api.nvim_win_get_config(0).relative') ~= '' end, 'help float')
-  local text = table.concat(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), '\n')
+  local text = table.concat(child.lua_get("vim.api.nvim_buf_get_lines(require('agent-ide.ui.help')._state().lbuf, 0, -1, false)"), '\n')
   for _, key in ipairs({ '<S-Tab>', '<leader>aM', '<leader>ay', '<leader>an' }) do
     eq(text:find(key, 1, true) ~= nil, true)
   end

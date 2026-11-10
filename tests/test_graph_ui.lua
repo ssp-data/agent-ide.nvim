@@ -124,7 +124,7 @@ end
 
 local function open_graph()
   child.lua('require("agent-ide").toggle()')
-  press_on(' r  ', 'gG')
+  press_on(' r  ', 'G')
   wait_for(function() local g = graph(); return g ~= vim.NIL and g.state == 'ok' end, 'graph')
 end
 
@@ -220,10 +220,11 @@ T[']] / [[ step over commits, a: current branch only, y yanks the full hash, glg
   child.type_keys('a')
   wait_for(function() return graph_line('main work') ~= nil end, 'all branches again')
   child.type_keys('g?')
-  local help = child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)')
+  local help = child.lua_get("vim.api.nvim_buf_get_lines(require('agent-ide.ui.help')._state().lbuf, 0, -1, false)")
   for _, k in ipairs({ '<CR>', ']]', '[[', 'a ', 'R ', 'L ', 'y ', 'glg', 'q ', 'g?' }) do
     eq({ k, has_line(vim.tbl_map(function(l) return l .. ' ' end, help), k) ~= nil }, { k, true })
   end
+  child.type_keys('<Esc>', 'q')
   eq(child.lua_get('vim.fn.maparg("?", "n", false, true).buffer'), vim.NIL) -- ? stays backward search
 end
 
@@ -271,7 +272,7 @@ T['q returns to the chat that was open; the buffer is wiped'] = function()
   press_on(' r  ')
   press_on('Work on it')
   wait_for(function() return child.lua_get('require("agent-ide.ui.chat")._windows().prompt ~= nil') end, 'chat')
-  press_on('Work on it', 'gG') -- a session row
+  press_on('Work on it', 'G') -- a session row
   wait_for(function() local g = graph(); return g ~= vim.NIL and g.state == 'ok' end, 'graph')
   eq(child.lua_get('require("agent-ide.ui.chat")._windows().prompt'), vim.NIL) -- the prompt made room
   local buf = child.lua_get('require("agent-ide.ui.graph").state().buf')
@@ -315,7 +316,7 @@ T['gG on a worktree session: that worktree\'s graph; a narrower window re-render
   start()
   child.lua('require("agent-ide").toggle()')
   press_on(' r  ')
-  press_on('Worktree job', 'gG')
+  press_on('Worktree job', 'G')
   wait_for(function() local g = graph(); return g ~= vim.NIL and g.state == 'ok' end, 'graph')
   eq(graph().root, wt)
   eq(graph().lines[1]:find('wtb HEAD in the worktree', 1, true) ~= nil, true) -- HEAD of the worktree

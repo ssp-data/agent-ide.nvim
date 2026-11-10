@@ -13,7 +13,10 @@ local session = require('agent-ide.session')
 
 local M = {}
 
-local ELSEWHERE = 'Agent-IDE: session is running in another Claude; use gp in the drawer to jump to it'
+local function elsewhere_msg()
+  return 'Agent-IDE: session is running in another Claude; use '
+    .. require('agent-ide.util.keys').first('drawer', 'tmux') .. ' in the drawer to jump to it'
+end
 
 ---@class agent_ide.Chat
 ---@field s table Session
@@ -293,7 +296,7 @@ local function send(c)
       -- the prompt moved on while the question ran: what it holds now was never meant to go
       if not unchanged then
         if not valid_buf(c.pbuf) then return end
-        if c.s:_elsewhere() then return notify(ELSEWHERE, vim.log.levels.WARN) end
+        if c.s:_elsewhere() then return notify(elsewhere_msg(), vim.log.levels.WARN) end
         notify('Agent-IDE: not sent: the prompt changed while checking; send again', vim.log.levels.WARN)
         return
       end
@@ -309,7 +312,7 @@ local function send(c)
   if ok then
     prompt.clear(c.pbuf)
   elseif reason == 'running elsewhere' then
-    notify(ELSEWHERE, vim.log.levels.WARN)
+    notify(elsewhere_msg(), vim.log.levels.WARN)
   elseif reason ~= 'empty' then
     notify('Agent-IDE: ' .. tostring(reason), vim.log.levels.WARN)
   end

@@ -9,6 +9,24 @@ function M.list(v)
   return {}
 end
 
+---The keys of option `name` in `config.keys[group]` (`group` nil: a global key), as `M.list`.
+---@param group string|nil
+---@param name string
+---@return string[]
+function M.get(group, name)
+  local keys = require('agent-ide.config').get().keys
+  if type(keys) ~= 'table' then return {} end
+  local g = group and keys[group] or keys
+  return type(g) == 'table' and M.list(g[name]) or {}
+end
+
+---The first key of option `name` in `config.keys[group]` for a hint in a message, or `none`.
+---@param group string|nil
+---@param name string
+---@param none? string default '(no key)'
+---@return string
+function M.first(group, name, none) return M.get(group, name)[1] or none or '(no key)' end
+
 ---The keys joined for a help line (`a / b`), nil when there are none.
 ---@param v string|string[]|false|nil
 ---@return string|nil

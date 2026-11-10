@@ -275,7 +275,7 @@ T['the chat help lists gr and gR'] = function()
   start()
   open_chat()
   child.type_keys('g?')
-  local lines = cur_lines()
+  local lines = child.lua_get("vim.api.nvim_buf_get_lines(require('agent-ide.ui.help')._state().lbuf, 0, -1, false)")
   eq(has_line(lines, 'gr  ') ~= nil, true)
   eq(has_line(lines, 'gR  ') ~= nil, true)
 end

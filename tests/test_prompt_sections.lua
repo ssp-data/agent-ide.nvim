@@ -176,7 +176,7 @@ end
 
 T['row keys: a key, a list of keys or false'] = function()
   config.setup({ keys = { prompts = { edit = { 'e', 'E' }, yank = false, rename = 'r', delete = 'd', to_library = 'L' } } })
-  eq(vim.tbl_map(function(k) return k.lhs end, ps.keys()), { 'e', 'E', 'r', 'd', 'L' })
+  eq(vim.tbl_map(function(k) return k.lhs end, ps.keys()), { 'e', 'E', 'r', 'd', 'L' }) -- as configured
   config.setup({ keys = false })
   eq(ps.keys(), {})
 end

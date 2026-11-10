@@ -124,15 +124,15 @@ T['r renames a template; group/name moves it; a taken name is refused'] = functi
   eq(exists(lib .. '/invoice.md'), true)
 end
 
-T['d deletes after a question naming the file (default No)'] = function()
+T['D deletes after a question naming the file (default No)'] = function()
   start()
   on_row('Invoice text')
-  child.type_keys('d')
+  child.type_keys('D')
   local c = child.lua_get('_G.confirms')
   eq(c[1], { msg = 'Delete Library/invoice?', choices = '&Yes\n&No', default = 2 })
   eq(exists(lib .. '/invoice.md'), true)
   child.lua('_G.confirm_answer = 1')
-  child.type_keys('d')
+  child.type_keys('D')
   eq(exists(lib .. '/invoice.md'), false)
   eq(last_note(), 'Agent-IDE: deleted Library/invoice')
   wait_for(function() return has_line(drawer_lines(), 'Invoice text') == nil end, 'gone from the drawer')
@@ -147,7 +147,7 @@ T['y yanks the text to the unnamed and + registers'] = function()
   eq(last_note(), 'Agent-IDE: yanked Invoice text')
 end
 
-T['L copies a saved prompt into the library; r renames a saved prompt'] = function()
+T['sL copies a saved prompt into the library; r renames a saved prompt'] = function()
   start()
   local folder = saved_folder()
   vim.fn.mkdir(folder, 'p')
@@ -158,7 +158,7 @@ T['L copies a saved prompt into the library; r renames a saved prompt'] = functi
   child.type_keys('<CR>')
   drawer_cursor_to('add idle support')
   child.lua('_G.typed = { "ideas/idle" }')
-  child.type_keys('L')
+  child.type_keys('sL')
   eq(child.lua_get('_G.inputs')[1], { prompt = 'Save to library as: ', default = 'add-idle-support' })
   eq(vim.fn.readfile(lib .. '/ideas/idle.md'), { 'Add idle support' })
   eq(exists(folder .. '/add-idle-support.md'), true)
@@ -172,14 +172,14 @@ T['L copies a saved prompt into the library; r renames a saved prompt'] = functi
   eq(exists(folder .. '/idle-work.md'), true)
   -- L on a template says it is there already
   on_row('Invoice text')
-  child.type_keys('L')
+  child.type_keys('sL')
   eq(last_note(), 'Agent-IDE: this prompt is in the library already')
 end
 
 T["on commands and skills these keys only say the file is Claude's"] = function()
   start()
   on_row('/fix-grammar', { 'Skills & commands' })
-  for _, k in ipairs({ 'r', 'd', 'y', 'L' }) do
+  for _, k in ipairs({ 'r', 'D', 'y', 'sL' }) do
     child.lua('_G.notes = {}')
     child.type_keys(k)
     eq(last_note(), "Agent-IDE: /fix-grammar belongs to Claude's folders; it is read-only here")
@@ -206,16 +206,20 @@ T['the row keys keep their meaning elsewhere in the drawer'] = function()
   eq(child.lua_get('vim.fn.getreg("a")'), row .. '\n')
 end
 
-T["the drawer's own keys win a clash with a row key, also in the help"] = function()
-  start({ prompts = { edit = 'R', yank = 's' } })
+T["a row key with the lhs of a drawer key acts on its rows; elsewhere the drawer key does"] = function()
+  start({ prompts = { edit = 'R', yank = 'Z' } })
   on_row('Invoice text')
+  child.type_keys('R')
+  eq(child.lua_get('vim.api.nvim_buf_get_name(0)'), lib .. '/invoice.md')
+  child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.drawer").state().win)')
+  drawer_cursor_to('> repo  ')
   child.type_keys('R')
   eq(child.lua_get('vim.api.nvim_buf_get_name(0)'), 'agents://drawer')
   child.type_keys('?')
-  local text = table.concat(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), '\n')
-  eq(text:find('prompt row: edit', 1, true), nil)
-  eq(text:find('prompt row: yank', 1, true), nil)
-  eq(text:find('prompt row: rename', 1, true) ~= nil, true)
+  local text = table.concat(child.lua_get("vim.api.nvim_buf_get_lines(require('agent-ide.ui.help')._state().lbuf, 0, -1, false)"), '\n')
+  eq(text:find('prompt row: edit', 1, true) ~= nil, true)
+  eq(text:find('prompt row: yank', 1, true) ~= nil, true)
+  eq(text:find('refresh', 1, true) ~= nil, true)
 end
 
 return T

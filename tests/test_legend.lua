@@ -142,7 +142,7 @@ T['gL toggles it; drawer.legend = false starts hidden; listed in the help'] = fu
   child.lua('_G.rows = {}; require("agent-ide.ui.help").open = function(_, rows) _G.rows = rows end')
   child.type_keys('?')
   local found
-  for _, r in ipairs(child.lua_get('_G.rows')) do if r.key == 'gL' then found = r.desc end end
+  for _, r in ipairs(child.lua_get('_G.rows')) do if r.key == 'gL / <leader>aL' then found = r.desc end end
   eq(found, 'show or hide the legend of the state marks')
 end
 
@@ -238,7 +238,7 @@ T['the cursor row is never under the legend: moving down, jumping to the end, sc
     eq(row() <= room, true)
   end
   child.type_keys('gg')
-  child.type_keys('G')
+  child.lua('vim.cmd("normal! G")') -- G itself is the drawer's graph key
   eq(row() <= room, true)
   eq(child.lua_get('vim.fn.line(".")'), child.lua_get('vim.fn.line("$")'))
   for _ = 1, 10 do

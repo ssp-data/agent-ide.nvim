@@ -455,7 +455,7 @@ T['drawer hidden: a session opened in a terminal Claude meanwhile is refused, th
   child.type_keys(' more')
   wait_for(function()
     local notes = child.lua_get('_G.notes')
-    return notes[#notes] == 'Agent-IDE: session is running in another Claude; use gp in the drawer to jump to it'
+    return notes[#notes] == 'Agent-IDE: session is running in another Claude; use gT in the drawer to jump to it'
   end, 'refusal notice')
   child.type_keys('<Esc>')
   eq(prompt_lines(), { 'Never sent more' })
@@ -694,7 +694,7 @@ T['a session running elsewhere refuses to send and keeps the text'] = function()
   type_prompt('Hijack')
   child.type_keys('<C-CR>')
   local notes = child.lua_get('_G.notes')
-  eq(notes[#notes], 'Agent-IDE: session is running in another Claude; use gp in the drawer to jump to it')
+  eq(notes[#notes], 'Agent-IDE: session is running in another Claude; use gT in the drawer to jump to it')
   eq(prompt_lines(), { 'Hijack' })
   vim.wait(100)
   eq(fake.log(log), {})
@@ -705,7 +705,7 @@ T['g? opens the chat help'] = function()
   open_new()
   child.type_keys('g?')
   wait_for(function() return child.lua_get('vim.api.nvim_win_get_config(0).relative') ~= '' end, 'help float')
-  local text = table.concat(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), '\n')
+  local text = table.concat(child.lua_get("vim.api.nvim_buf_get_lines(require('agent-ide.ui.help')._state().lbuf, 0, -1, false)"), '\n')
   for _, key in ipairs({ '<C-CR>', '<leader><CR>', '<C-c>', '<leader>ap', 'g?', 'za', ':w', 'i / a / o' }) do
     eq(text:find(key, 1, true) ~= nil, true)
   end

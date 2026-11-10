@@ -8,6 +8,7 @@
 local live = require('agent-ide.live')
 local session = require('agent-ide.session')
 local verify = require('agent-ide.ui.tmux_verify')
+local keylist = require('agent-ide.util.keys')
 
 local M = {}
 
@@ -82,10 +83,10 @@ local LOST, LOSTS = 'Text typed in its input box is lost.', 'Text typed in their
 function M.close_row(node)
   local id = node.session.id
   local s = session.get(id)
-  if s and (s.owned or s:_alive()) then return notify('this session runs in this Neovim; use x to park it') end
+  if s and (s.owned or s:_alive()) then return notify('this session runs in this Neovim; use ' .. keylist.first('drawer', 'park') .. ' to park it') end
   local e = live.get()[id]
   if not e or not e.pid or (s and not s:_elsewhere()) then return notify('session is not running') end
-  if not in_tmux() then return notify('cannot reach that session (not in tmux); gp jumps to it') end
+  if not in_tmux() then return notify('cannot reach that session (not in tmux); ' .. keylist.first('drawer', 'tmux') .. ' jumps to it') end
   local label = require('agent-ide.tmux').pane_label(e.pid)
   local state = require('agent-ide.ui.drawer_model').state_of(id)
   local title = one_line(node.session.title or s and s.title or 'session')
