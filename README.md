@@ -180,6 +180,11 @@ require('agent-ide').setup({
   -- a soft chime when a session needs you; cmd: the player (nil: pw-play, paplay, aplay or afplay,
   -- whichever exists), the chime's WAV path is appended to it
   sound = { waiting = true, cmd = nil },
+  -- Claude runs under a small detached process of the plugin's (a keeper), so quitting Neovim
+  -- leaves it running and a new Neovim reattaches (see Background sessions); idle_minutes: an
+  -- idle Claude with no Neovim attached is closed after that long (false: never).
+  -- enabled = false: Claude is a child of Neovim and ends with it, as before
+  keeper = { enabled = true, idle_minutes = 30 },
   icons_style = 'nerd', -- 'nerd' (needs a Nerd Font) or 'plain' (characters of any monospace font)
   icons = {}, -- override single icons of that set, for example { busy = '*', changes = '' }; '' hides one
 })
@@ -339,9 +344,19 @@ Open a session from the drawer, or start one with `+ New session` under a projec
 
 **Native Claude.** `gT` (or `<leader>aT`) inside tmux parks the session (after a question when Claude is working), opens `claude --resume <id>` in a split pane, and takes the session back when that pane ends (also when it is killed). Until then the winbar's state word says `native` and sending is refused; the key again offers to take the session back, which is refused while native Claude still runs it. The session is reloaded from disk in the background: a chat on screen is refreshed in place, otherwise a notice says it is back. Outside tmux the key parks the session and shows the command to run.
 
-**Quitting.** Quitting Neovim while a session is working asks first; `:qa!` and the other forced quits do not ask.
+**Quitting.** With keepers on (the default) quitting never ends a Claude: see [Background sessions](#background-sessions). With `keeper = { enabled = false }` Claude is a child of Neovim; quitting while a session is working then asks first, and `:qa!` and the other forced quits do not ask.
 
 **Subscription.** The plugin removes `ANTHROPIC_API_KEY` from the environment of every Claude process it starts, so Claude uses your subscription login and never bills an API key (`claude.strip_api_key = false` keeps it).
+
+## Background sessions
+
+Every Claude the plugin starts runs under a **keeper**: a small headless Neovim of the plugin's own (`nvim --headless --clean -l lua/agent-ide/keeper/main.lua`), started detached, that owns Claude's pipes and keeps every line sent and received. Quitting Neovim, on purpose or by a crash, leaves Claude running: a turn goes on, an ask waits, and the prompts still queued are handed to the keeper, which sends them one after the other as each turn ends. Nothing is lost and nothing asks you before you quit.
+
+A new Neovim finds the keepers (their files in the runtime folder) and shows their sessions in the drawer with the state the keeper knows, the dim word `background` behind a running or idle one and `input` behind one that waits for you; the footer and `<leader>an` count them too. Opening such a session, or sending to it, attaches: the transcript before the keeper's Claude started comes from disk, the keeper replays everything since through the same decoder the live chat uses, so the events, the text that was streaming, the open asks, model, mode and state come back as the earlier Neovim had them, and the chat goes on live. Only one Neovim drives a session at a time: a second one is told so and shown the transcript from disk.
+
+An idle Claude with no Neovim attached is closed by its keeper after `keeper.idle_minutes` (30; `false` keeps it forever); the session resumes from disk the next time you send to it. Parking (`sP`, `<leader>ax`) and the quit of a keeper's Claude work as before: the keeper closes Claude's input and, after half a second, ends the process; then the keeper exits. If a keeper itself dies, Claude loses its pipes and exits on its own; the session is parked with an `error` line saying `keeper lost`.
+
+Rules that still hold: the keeper is the plugin's own process, started with the same command, folder and environment (the API key stripped) as a direct Claude would be; nothing is ever sent to a Claude the plugin did not start; the keeper's files are in the plugin's runtime folder, 0600 in 0700, and go with the keeper. `keeper = { enabled = false }` returns to Claude as a child of Neovim.
 
 ## Footer
 
@@ -510,6 +525,7 @@ What it writes, all of it private (new files `0600`, folders it creates `0700`, 
 | `search-v1.json` (helper only) | the same folder | the search index, see below |
 | `chime.wav` | the same folder | the chime played when a session needs you (generated, nothing of yours) |
 | `status-<pid>.json`, one per Neovim | `$XDG_RUNTIME_DIR/agent-ide/` (else `stdpath('run')/agent-ide/`) | level, counts and the sessions that are not parked (id, project folder name, title, state, the tool an ask is about); removed when that Neovim quits |
+| `keeper-<session id>.json`, `keeper-<session id>.sock` | the same folder | per Claude under a keeper (see [Background sessions](#background-sessions)): session id, project folder, transcript path, the keeper's and Claude's pids, a coarse state (busy, waiting, idle), whether a Neovim is attached, how many prompts are queued; and the socket (0600) a Neovim attaches through. Both go when Claude ends |
 | `quota.json` | `stdpath('state')/agent-ide/` | the last quota windows (percent used, reset times) and when they were reported |
 | `hidden.json` | `stdpath('data')/agent-ide/` | the ids of the sessions you hid with `H` |
 | Trash (`<YYYYMMDD-HHMMSS>-<id>/` per deleted session) | `stdpath('data')/agent-ide/trash/` | everything `D` moved out of Claude's folder (transcripts, file history, the session's `history.jsonl` lines) and a manifest, until `:AgentsTrash empty` or `trash.keep_days` |

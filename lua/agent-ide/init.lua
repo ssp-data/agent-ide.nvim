@@ -17,6 +17,7 @@ function M.setup(opts)
   if keep then require('agent-ide.trash').purge_older(keep) end
   require('agent-ide.ui.quit_guard').setup()
   require('agent-ide.sound').setup()
+  require('agent-ide.keeper').refresh() -- Claude processes earlier Neovims left running
   require('agent-ide.ui.prompt_sections').register() -- before git: Saved prompts follow Sessions
   require('agent-ide.ui.git_sections').register()
   for name, list in pairs(mapped) do

@@ -86,6 +86,10 @@ defaults = function()
     -- a soft chime when a session needs you (waiting); cmd: the player (nil: pw-play, paplay,
     -- aplay or afplay, whichever exists), the chime's WAV path is appended
     sound = { waiting = true, cmd = nil },
+    -- keeper: Claude runs under a small detached process of the plugin's, so quitting Neovim
+    -- leaves it running and a new Neovim reattaches; idle_minutes: an idle Claude with no Neovim
+    -- attached is closed after that long (false: never). enabled = false: a child of Neovim
+    keeper = { enabled = true, idle_minutes = 30 },
     -- 'nerd' (needs a Nerd Font in the terminal) or 'plain'; `icons` overrides single entries
     -- of that set (see ui/icons.lua for the keys); an empty string hides an icon
     icons_style = 'nerd',

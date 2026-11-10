@@ -145,6 +145,7 @@ local function start_live(slow)
     if not shown then live_policy() end
     require('agent-ide.status').refresh()
     tmux.refresh_labels(model.elsewhere_pids(), function() render() end)
+    require('agent-ide.keeper').refresh(function() render() end) -- sessions held in the background
     render()
     local chat = package.loaded['agent-ide.ui.chat']
     if chat then chat.refresh_winbars() end

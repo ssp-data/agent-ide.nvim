@@ -93,7 +93,7 @@ end
 
 -- A session of this Neovim turned `waiting`: it needs an answer.
 local function on_session(s, what)
-  if what == 'state' and s.state == 'waiting' and cfg().waiting ~= false then M.play() end
+  if what == 'state' and s.state == 'waiting' and not s.replaying and cfg().waiting ~= false then M.play() end
 end
 
 function M.setup()

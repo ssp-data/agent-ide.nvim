@@ -221,12 +221,12 @@ end
 
 ---@param path string
 ---@param cb fun(events: table[])
-function M.history(path, cb)
+function M.history(path, cb, limit)
   local events, lines, partial, i = {}, nil, false, 1
   local function step()
     if not lines then
       local f = io.open(path, 'rb')
-      local text = f and f:read('a') or ''
+      local text = f and (limit and f:read(limit) or f:read('a')) or ''
       if f then f:close() end
       lines, partial = parse.split_lines(text)
     end

@@ -77,6 +77,7 @@ local function start(steps, opts)
     helper = { enabled = false },
     live = { interval_ms = 50, cmd = { 'echo', '[]' } },
     claude = { cmd = cmd },
+    keeper = { enabled = false }, -- Claude as a child of Neovim: the quit guard and process ownership
   }, opts.config or {}) })
 end
 

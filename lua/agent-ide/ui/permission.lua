@@ -312,6 +312,7 @@ end
 ---the select.
 ---@param s table Session
 function M.on_permission(s)
+  if s.replaying then return end -- a keeper's replay: the ask is shown once the replay is in
   local c = st(s)
   local ids = {}
   for _, p in ipairs(s.pending_permissions) do

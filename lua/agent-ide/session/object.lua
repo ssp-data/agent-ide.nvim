@@ -20,6 +20,15 @@ M.Session = Session
 
 function M._reset_ids() request_n, init_n = 0, 0 end
 
+---A request id replayed from a keeper (`r12`, `i3`): the counters move past it.
+---@param id any
+function M._bump_ids(id)
+  local kind, n = tostring(id):match('^([ri])(%d+)$')
+  if not kind then return end
+  n = tonumber(n)
+  if kind == 'r' then request_n = math.max(request_n, n) else init_n = math.max(init_n, n) end
+end
+
 function Session:_emit(what) require('agent-ide.session')._emit(self, what) end
 
 function Session:_set_state(state)
@@ -104,6 +113,7 @@ function Session:_start_process()
     cwd = self.cwd,
     session_id = self.id,
     resume = resume,
+    path = self.path,
     model = require('agent-ide.prefs').start_model(self),
     on_object = function(obj, raw)
       if not mine() then return end
@@ -118,10 +128,14 @@ function Session:_start_process()
     on_exit = function(code, _, tail)
       if mine() then actions.on_exit(self, code, tail) end
     end,
+    on_pid = function(pid) -- a keeper names Claude's pid once it is up
+      if mine() then self.pid = pid end
+    end,
   })
   if not proc then return false, 'cannot start Claude: ' .. tostring(err) end
   self.proc, self.owned, self.parking, self.interrupted, self.requests = proc, true, false, false, {}
   self.pid = proc.handle and proc.handle.pid
+  proc.queue_source = function() return self.queue end -- handed to a keeper when Neovim quits
   -- the very first line of every new process: Claude answers with its models and commands,
   -- without a turn (docs/protocol.md); the prompt is written after it
   init_n = init_n + 1
@@ -155,15 +169,40 @@ end
 
 -- Public methods -------------------------------------------------------------------------
 
----A send now would start a Claude process (none runs here and none is being stopped).
-function Session:needs_start() return not self:_alive() and not self.parking end
+---A send now would start a Claude process (none runs here, none is being stopped, no keeper
+---holds one to attach to).
+function Session:needs_start()
+  return not self:_alive() and not self.parking and not require('agent-ide.keeper').info(self.id)
+end
 
 ---Another Claude (a terminal) runs this session. The stale live entry of our own dead
----process (same pid) does not count, nor does a live map not refreshed for two poll intervals.
+---process (same pid) does not count, nor does a live map not refreshed for two poll intervals,
+---nor a Claude a keeper of this plugin holds (that one is attached to, not driven elsewhere).
 function Session:_elsewhere()
   if self:_alive() then return false end
   local e = require('agent-ide.live').fresh()[self.id]
-  return e ~= nil and (self.pid == nil or e.pid ~= self.pid)
+  return e ~= nil and (self.pid == nil or e.pid ~= self.pid) and not require('agent-ide.keeper').claude_pids()[e.pid]
+end
+
+---A keeper holds a Claude for this session and nothing runs here: attach to it; `cb(ok)`.
+---False when there is nothing to attach to (or it is attached, or attaching).
+---@param cb? fun(ok: boolean, why?: string)
+---@return boolean
+function Session:attach(cb)
+  local info = require('agent-ide.keeper').info(self.id)
+  if not info or self:_alive() or self.parking then return false end
+  return require('agent-ide.session.attach').attach(self, info, cb or function() end)
+end
+
+---The next queued prompt starts a turn when none runs (after an attach).
+function Session:_resume_queue()
+  if self.state == 'busy' or self.state == 'waiting' or self.parking or #self.queue == 0 then return end
+  local text = table.remove(self.queue, 1)
+  self:_emit('meta')
+  if not self:_start_turn(text) then
+    table.insert(self.queue, 1, text)
+    self:_emit('meta')
+  end
 end
 
 ---Send a prompt; starts the process when none runs, queues while a turn is running.
@@ -173,8 +212,14 @@ function Session:send(text)
   if type(text) ~= 'string' or not text:find('%S') then return false, 'empty' end
   if self:_elsewhere() then return false, 'running elsewhere' end
   self.queue[#self.queue + 1] = text
-  if self.state == 'busy' or self.state == 'waiting' or self.parking then
+  if self.state == 'busy' or self.state == 'waiting' or self.parking or self.attaching then
     self:_emit('meta')
+    return true
+  end
+  -- a keeper holds this session's Claude: attach, then the queue goes on
+  if not self:_alive() and require('agent-ide.keeper').info(self.id) then
+    self:_emit('meta')
+    self:attach(function(ok) if ok then self:_resume_queue() end end)
     return true
   end
   -- prompts left over from a crash go first
@@ -293,6 +338,8 @@ end
 ---@param cb? fun()
 function Session:load(cb)
   cb = cb or function() end
+  -- a keeper holds this session's Claude: the history comes with the attach
+  if self:attach(function(ok) if not ok then self:load(cb) else cb() end end) then return end
   if not self.path then return vim.schedule(cb) end
   vim.uv.fs_stat(self.path, vim.schedule_wrap(function(_, st)
     local key = st and (st.mtime.sec .. '.' .. st.mtime.nsec .. ':' .. st.size)

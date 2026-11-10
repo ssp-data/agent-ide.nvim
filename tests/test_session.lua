@@ -522,7 +522,7 @@ T['park while busy asks; declined keeps it running; accepted parks'] = function(
   assert(wait(function() return got ~= nil end))
   eq({ got, asked, s.state, s.owned }, { true, 2, 'parked', false })
   eq(s.events[#s.events], { kind = 'text', text = 'working' })
-  eq(children(), false)
+  assert(wait(function() return not children() end, 4000)) -- a keeper lingers 2 s after Claude ends
 end
 
 T['interrupt drops the queue and the error result starts no turn'] = function()

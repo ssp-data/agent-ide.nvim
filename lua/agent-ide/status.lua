@@ -317,11 +317,7 @@ end
 -- Test knobs: heartbeat and sweep intervals.
 M._cfg = { heartbeat_ms = 30000, sweep_ms = 60000 }
 
-local function runtime_dir()
-  local base = vim.uv.os_getenv('XDG_RUNTIME_DIR')
-  if not base or base == '' then base = vim.fn.stdpath('run') end
-  return base .. '/agent-ide'
-end
+local function runtime_dir() return require('agent-ide.util.rundir').dir() end
 
 ---@return string status file of this instance
 function M.file() return runtime_dir() .. '/status-' .. vim.uv.os_getpid() .. '.json' end
