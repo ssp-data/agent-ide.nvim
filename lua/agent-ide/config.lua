@@ -20,7 +20,10 @@ local function defaults()
       -- chat view, buffer-local in the transcript and the prompt
       chat = { send = '<C-CR>', send_alt = '<leader><CR>', interrupt = '<C-c>', prompt = '<leader>ap', help = '?',
         history_prev = '<C-p>', history_next = '<C-n>', attach = '<leader>af',
-        answer_inner = 'ir', answer_outer = 'ar', mode = '<S-Tab>', model = '<leader>aM', answer = '<leader>ay' },
+        answer_inner = 'ir', answer_outer = 'ar', mode = '<S-Tab>', model = '<leader>aM', answer = '<leader>ay',
+        diff = 'gd' },
+      -- diff view, buffer-local on both sides (]c / [c stay Neovim's hunk motions)
+      diff = { next_file = ']f', prev_file = '[f', flip = 'gb', branch = 'gB', close = 'q', help = '?', lazygit = 'gl' },
     },
     -- prompt buffer: `/` opens the command menu, `@` opens the file picker
     chat = { auto_slash = true, at_picker = true },

@@ -136,6 +136,30 @@ function M.commit_files(root, hash)
   return e.data[kind]
 end
 
+local getters -- kind -> getter, filled below
+
+---Call `cb(value)` once `kind` ('changes', 'commits', 'base', 'files:<hash>') of `root` is
+---loaded (at once when it already is), starting the load when needed.
+---@param root string
+---@param kind string
+---@param cb fun(value: any)
+function M.when(root, kind, cb)
+  local function value()
+    local hash = kind:match('^files:(.+)$')
+    if hash then return M.commit_files(root, hash) end
+    return getters[kind](root)
+  end
+  local v = value()
+  if entry(root).loaded[kind] then return cb(v) end
+  local function on(r, k)
+    if r == root and k == kind and entry(root).loaded[kind] then
+      M.off_update(on)
+      cb(entry(root).data[kind])
+    end
+  end
+  M.on_update(on)
+end
+
 ---The entry of `root` without starting anything (nil when unknown).
 function M.peek(root) return entries[root] end
 
@@ -191,6 +215,8 @@ function M.off_update(fn)
     if f == fn then return table.remove(listeners, i) end
   end
 end
+
+getters = { changes = M.changes, commits = M.commits, base = M.base, head = M.head }
 
 ---Test only: store `value` as loaded data of `kind` (bumps the generation: running loads are dropped).
 function M._set(root, kind, value)

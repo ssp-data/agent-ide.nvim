@@ -23,6 +23,7 @@ local HELP = {
   { 'attach', 'prompt: pick a file and add an [attach] line' },
   { 'answer_inner', 'transcript: text object, one Claude answer' },
   { 'answer_outer', 'transcript: text object, one Claude answer with its header' },
+  { 'diff', 'transcript: on an Edit/Write fold, the branch diff of its file' },
 }
 
 function M.help()
@@ -66,6 +67,7 @@ function M.map(c, buf, is_transcript, act)
   map('n', keys.model, function() require('agent-ide.ui.mode').pick_model(c.s) end, 'pick model')
   if is_transcript then
     require('agent-ide.ui.textobj').map(buf, c.s, keys)
+    require('agent-ide.ui.chat_diff').map(buf, c.s, keys)
     for _, lhs in ipairs({ 'i', 'a', 'o' }) do map('n', lhs, function() act.focus_prompt(c, true) end, 'write in the prompt') end
   end
 end
