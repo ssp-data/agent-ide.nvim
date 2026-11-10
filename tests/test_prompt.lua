@@ -18,7 +18,7 @@ local T = MiniTest.new_set({ hooks = {
     vim.fn.writefile({ 'b' }, repo .. '/sub/b.lua')
     vim.fn.writefile({ 'n' }, repo .. '/node_modules/x/n.js')
     -- command lists another case left in the runner's temporary state folder
-    vim.fn.delete(vim.env.XDG_STATE_HOME .. '/agent-ide/commands.json')
+    vim.fn.delete(vim.fn.stdpath('state') .. '/agent-ide/commands.json')
   end,
   post_case = function()
     child.stop()
@@ -176,7 +176,7 @@ T['menu before the first turn: the persisted list of the project, else the newes
   local other, third = tmp .. '/other', tmp .. '/third'
   vim.fn.mkdir(other, 'p')
   vim.fn.mkdir(third, 'p')
-  vim.fn.delete(vim.env.XDG_STATE_HOME .. '/agent-ide/commands.json')
+  vim.fn.delete(vim.fn.stdpath('state') .. '/agent-ide/commands.json')
   start()
   write_lists({ [repo] = { at = 100, commands = { 'compact', 'context' } }, [other] = { at = 200, commands = { 'review' } } })
   start() -- read at setup, after a restart
@@ -191,7 +191,7 @@ T['menu before the first turn: the persisted list of the project, else the newes
 end
 
 T['menu: commands and skills found on disk join, de-duplicated; plugin entries first'] = function()
-  vim.fn.delete(vim.env.XDG_STATE_HOME .. '/agent-ide/commands.json')
+  vim.fn.delete(vim.fn.stdpath('state') .. '/agent-ide/commands.json')
   local cmds, skills = tmp .. '/cmds', tmp .. '/skills'
   vim.fn.mkdir(cmds .. '/git', 'p')
   vim.fn.mkdir(skills .. '/deploy', 'p')
@@ -210,7 +210,7 @@ T['menu: commands and skills found on disk join, de-duplicated; plugin entries f
 end
 
 T['commands.json: written on a changed list only, 0600 in 0700, at most 50 projects, a corrupt file is ignored'] = function()
-  vim.fn.delete(vim.env.XDG_STATE_HOME .. '/agent-ide/commands.json')
+  vim.fn.delete(vim.fn.stdpath('state') .. '/agent-ide/commands.json')
   start()
   local file = state_file()
   -- through Claude's init event

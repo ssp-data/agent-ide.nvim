@@ -145,6 +145,7 @@ require('agent-ide').setup({
     project_dirs = true, -- also <project>/.claude/commands and /skills of the chat's project
   },
   quota = { file = nil }, -- footer quota from a file another tool writes (see Footer); nil: off
+  trash = { keep_days = nil }, -- deleted sessions (D) older than this are purged at setup; nil: kept until :AgentsTrash empty
   chat = { auto_slash = true, at_picker = true }, -- `/` opens the command menu, `@` the file picker
   icons_style = 'nerd', -- 'nerd' (needs a Nerd Font) or 'plain' (characters of any monospace font)
   icons = {}, -- override single icons of that set, for example { busy = '*', changes = '' }; '' hides one
@@ -171,6 +172,18 @@ Ages read `now`, `5m`, `3h`, `12d`, then months (`14mo`) and years (`2y`). Colou
 
 **Hidden sessions.** `H` on a session row hides it: nothing is deleted, the session only moves into a collapsed, dimmed `Hidden (n)` group, the last row of its project's `Sessions (n)` section (which counts the visible ones only). `<CR>` or `za` expands the group; its rows open like any other session, and `H` on one shows it again. Hidden sessions do not count for the project's age, order or state mark, except while one needs you: a hidden session that is waiting, busy, done-unread or failed is listed among the normal rows (and counted in the roll-up, the footer and `<leader>an`) for as long as that lasts. A project whose sessions are all hidden still shows, with `Sessions (0)` and its group. Search finds hidden sessions as usual. The list is kept in `hidden.json` (see [Privacy](#privacy)); several Neovims share it.
 
+### Deleting sessions
+
+Claude Code has no command to delete one session. `D` on a session row (also in a `Hidden` group) moves what Claude keeps of it into the plugin's trash, after a confirm (default: no). Claude's folder is the parent of `projects_dir` (by default `~/.claude`). Moved, when present:
+
+- the transcript `projects/<slug>/<id>.jsonl` and the folder beside it, `projects/<slug>/<id>/` (subagents, tool results);
+- `file-history/<id>/`, `session-env/<id>/`, `tasks/<id>/`;
+- the lines of `history.jsonl` that belong to the session (the prompts you typed); every other line stays byte for byte, and lines Claude appends while it is rewritten are not lost.
+
+Not removed: pasted-text cache files (`paste-cache/`), usage statistics (`stats-cache.json`) and settings. Only an inactive session can be deleted: `D` is refused while the session is active in this Neovim (park it first with `x`), handed to native Claude, running in another Claude (asked afresh with `claude agents --json`; when that fails, nothing is deleted), or while its prompt holds unsent text. Its chat and raw buffers are closed and it leaves `hidden.json`.
+
+The trash is `stdpath('data')/agent-ide/trash/<YYYYMMDD-HHMMSS>-<id>/` (folder `0700`; files keep their modes): the moved entries in their layout, `history.jsonl` with the removed lines and `manifest.json` (where each entry came from, title, project, time). **The trash still holds the whole session**, prompts and answers included, until you empty it: for sensitive data run `:AgentsTrash empty` afterwards. `:AgentsTrash` lists the trashed sessions to restore one (refused when something is at its old place; the history lines go back in time order) or delete it for good; `:AgentsTrash empty` deletes all of them for good after a confirm. Nothing is purged automatically unless you set `trash = { keep_days = 30 }`, which purges older entries at setup.
+
 ## Keys
 
 Global:
@@ -195,6 +208,7 @@ In the drawer:
 | `s` | Search the sessions of the project under the cursor |
 | `x` | Park the session: stop the Claude process this Neovim runs for it |
 | `H` | Hide the session into its project's `Hidden (n)` group; on a hidden session: show it again (Vim's `H` motion is not available in the drawer) |
+| `D` | Delete an inactive session: move it to the plugin's trash after a confirm (see [Deleting sessions](#deleting-sessions)) |
 | `q` | Close the drawer |
 | `glg` | Open lazygit for the row's repository (a worktree row or session: that worktree) |
 | `?`, `g?` | Help (`/` searches in it, `q` or `<Esc>` closes it) |
@@ -343,7 +357,7 @@ Saving works on the prompt buffer (which is never marked modified, so `:q` and `
 | Send | The prompt goes out as typed; the buffer forgets which file it came from, so the next `:w` makes a new saved prompt and an edited template you sent without saving stays as it is on disk |
 | `:qa`, `:wqa`, `:xa` | Nothing is saved, nothing is asked |
 
-Files are written as typed, with a final newline added when the last line has none, atomically (a temporary file renamed into place; a new file is linked into place, so two Neovims saving the same name both keep theirs). New files are `0600` in folders created `0700`. The plugin writes only to the library and saved-prompts folders and never under a `.claude` folder. Drawer rows refresh on `R`, after a save, rename or delete, and when you come back to the drawer.
+Files are written as typed, with a final newline added when the last line has none, atomically (a temporary file renamed into place; a new file is linked into place, so two Neovims saving the same name both keep theirs). New files are `0600` in folders created `0700`. The plugin writes only to the library and saved-prompts folders and never under a `.claude` folder (deleting a session with `D` is the one exception, see [Deleting sessions](#deleting-sessions)). Drawer rows refresh on `R`, after a save, rename or delete, and when you come back to the drawer.
 
 To keep your library in git, point `library_dir` at a folder of a repository you manage (outside any `.claude` folder, so Claude does not take the templates for commands):
 
@@ -391,6 +405,7 @@ What it writes, all of it private (new files `0600`, folders it creates `0700`, 
 | `status-<pid>.json`, one per Neovim | `$XDG_RUNTIME_DIR/agent-ide/` (else `stdpath('run')/agent-ide/`) | level, counts and the sessions that are not parked (id, project folder name, title, state, the tool an ask is about); removed when that Neovim quits |
 | `quota.json` | `stdpath('state')/agent-ide/` | the last quota windows (percent used, reset times) and when they were reported |
 | `hidden.json` | `stdpath('data')/agent-ide/` | the ids of the sessions you hid with `H` |
+| Trash (`<YYYYMMDD-HHMMSS>-<id>/` per deleted session) | `stdpath('data')/agent-ide/trash/` | everything `D` moved out of Claude's folder (transcripts, file history, the session's `history.jsonl` lines) and a manifest, until `:AgentsTrash empty` or `trash.keep_days` |
 | `commands.json` | `stdpath('state')/agent-ide/` | Claude's command names last seen per project (at most 50), keyed by a short hash of the project folder, for the `/` menu |
 | Saved prompts (per project) | `stdpath('data')/agent-ide/prompts/<project folder>-<short hash>/`, or `prompts.saved_dir` | the prompts you save with `:w` |
 | Library prompts (templates) | `stdpath('data')/agent-ide/library`, or wherever you point `prompts.library_dir` | the prompts you save with `<leader>W`, rename or move |

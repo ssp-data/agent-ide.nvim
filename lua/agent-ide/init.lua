@@ -11,6 +11,8 @@ function M.setup(opts)
   require('agent-ide.status').setup()
   require('agent-ide.hidden').load()
   require('agent-ide.session.commands').load()
+  local keep = type(cfg.trash) == 'table' and tonumber(cfg.trash.keep_days)
+  if keep then require('agent-ide.trash').purge_older(keep) end
   require('agent-ide.ui.quit_guard').setup()
   require('agent-ide.ui.prompt_sections').register() -- before git: Saved prompts follow Sessions
   require('agent-ide.ui.git_sections').register()

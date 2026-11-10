@@ -283,6 +283,22 @@ function actions.hide()
   if after and after.type == 'session' and after.session.id == id then notify('hidden; listed here while it needs you') end
 end
 
+-- `D`: delete the session (into the plugin's trash, after checks and a confirm; ui/delete.lua).
+-- Its row goes away at once; the cursor stays on its screen line. Other rows: nothing.
+function actions.delete()
+  local node = current_node()
+  if not node or node.type ~= 'session' then return end
+  require('agent-ide.ui.delete').run(node, function()
+    local id = node.session.id
+    for _, p in ipairs(S.projects) do
+      p.sessions = vim.tbl_filter(function(x) return x.id ~= id end, p.sessions)
+    end
+    S.projects = vim.tbl_filter(function(p) return #p.sessions > 0 end, S.projects)
+    render(false)
+    rescan()
+  end)
+end
+
 -- Collapse and expand all ----------------------------------------------------------------------
 
 -- Keys of the row under the cursor and of the rows it sits in (by indent), nearest first.
@@ -370,7 +386,7 @@ function actions.close() M.close() end
 -- mapped nor listed. `?` (actions.help) lists them all.
 local KEYS = {
   { '<CR>', 'open' }, { 'o', 'open' }, { 'za', 'fold' }, { 'R', 'refresh' }, { 'gp', 'jump' },
-  { 'x', 'park' }, { 'H', 'hide' }, { 'zM', 'collapse_all' }, { 'zR', 'expand_all' }, { 'glg', 'lazygit' }, { 'q', 'close' }, { 's', 'search' }, { '?', 'help' },
+  { 'x', 'park' }, { 'H', 'hide' }, { 'D', 'delete' }, { 'zM', 'collapse_all' }, { 'zR', 'expand_all' }, { 'glg', 'lazygit' }, { 'q', 'close' }, { 's', 'search' }, { '?', 'help' },
   { 'g?', 'help' },
 }
 local OWN = {}
@@ -428,6 +444,7 @@ function actions.help()
     { key = 's', desc = 'search this project (<Tab> in the picker: all sessions)' },
     { key = 'x', desc = 'park the session: stop its Claude process here' },
     { key = 'H', desc = 'hide the session into Hidden (n); on a hidden one: show it again' },
+    { key = 'D', desc = 'delete an inactive session: move it to the trash (:AgentsTrash)' },
     { key = 'glg', desc = 'lazygit for the project (or the row\'s worktree)' },
     { key = 'q', desc = 'close drawer' },
     { key = '? / g?', desc = 'this help' },
@@ -549,6 +566,9 @@ function M.toggle()
     open_drawer()
   end
 end
+
+---Scan the sessions again (e.g. after one was restored from the trash).
+function M.rescan() if S.tab then rescan() end end
 
 ---Re-render the drawer (e.g. after a session changed state); keeps focus and other cursors.
 function M.refresh() render() end

@@ -14,7 +14,7 @@ local T = MiniTest.new_set({ hooks = {
     vim.fn.mkdir(tmp, 'p')
     tmp = vim.uv.fs_realpath(tmp)
     projects_dir = tmp .. '/projects'
-    vim.fn.delete(vim.env.XDG_DATA_HOME .. '/agent-ide/hidden.json')
+    vim.fn.delete(vim.fn.stdpath('data') .. '/agent-ide/hidden.json')
   end,
   post_case = function()
     child.stop()

@@ -25,7 +25,7 @@ local T = MiniTest.new_set({ hooks = {
     projects_dir = tmp .. '/projects'
     vim.fn.mkdir(repo, 'p')
     vim.fn.system({ 'git', 'init', '-q', repo })
-    vim.fn.delete(vim.env.XDG_DATA_HOME .. '/agent-ide/hidden.json') -- the runner's temporary data folder
+    vim.fn.delete(vim.fn.stdpath('data') .. '/agent-ide/hidden.json') -- the runner's temporary data folder
   end,
   post_case = function()
     child.stop()
