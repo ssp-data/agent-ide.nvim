@@ -143,7 +143,7 @@ end
 
 ---Map `keys.diff` in transcript `buf` of session `s`.
 function M.map(buf, s, keys)
-  for _, lhs in ipairs(require('agent-ide.ui.diff_buf').keys(keys.diff)) do
+  for _, lhs in ipairs(require('agent-ide.util.keys').list(keys.diff)) do
     vim.keymap.set('n', lhs, function() M.open(buf, s) end,
       { buffer = buf, nowait = true, silent = true, desc = 'Agent-IDE: branch diff of this Edit/Write' })
   end

@@ -1,5 +1,6 @@
 -- Buffer-local keys of the chat view (transcript and prompt) and the chat help float.
 local config = require('agent-ide.config')
+local keylist = require('agent-ide.util.keys')
 
 local M = {}
 
@@ -36,13 +37,12 @@ function M.help()
   local keys = M.keys()
   local rows = {}
   for _, h in ipairs(HELP) do
-    local k = keys[h[1]]
-    if type(k) == 'table' then k = #k > 0 and table.concat(k, ' / ') or nil end -- a list of keys
+    local k = keylist.label(keys[h[1]])
     if k then rows[#rows + 1] = { key = k, desc = h[2] } end
   end
   local all = config.get().keys
-  if type(all) == 'table' and all.next_waiting then
-    rows[#rows + 1] = { key = all.next_waiting, desc = 'anywhere: go to the next session that needs you' }
+  if type(all) == 'table' and keylist.label(all.next_waiting) then
+    rows[#rows + 1] = { key = keylist.label(all.next_waiting), desc = 'anywhere: go to the next session that needs you' }
   end
   rows[#rows + 1] = { key = '/', desc = 'prompt, at line start: Claude commands (menu)' }
   rows[#rows + 1] = { key = '@', desc = 'prompt, after a space: pick a file to attach' }
@@ -63,8 +63,9 @@ end
 function M.map(c, buf, is_transcript, act)
   local keys = M.keys()
   local function map(modes, lhs, fn, desc)
-    if not lhs then return end
-    vim.keymap.set(modes, lhs, fn, { buffer = buf, nowait = true, silent = true, desc = 'Agent-IDE: ' .. desc })
+    for _, k in ipairs(keylist.list(lhs)) do
+      vim.keymap.set(modes, k, fn, { buffer = buf, nowait = true, silent = true, desc = 'Agent-IDE: ' .. desc })
+    end
   end
   map({ 'n', 'i' }, keys.send, function() act.send(c) end, 'send prompt')
   map('n', keys.send_alt, function() act.send(c) end, 'send prompt')

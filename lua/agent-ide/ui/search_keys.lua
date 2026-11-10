@@ -18,11 +18,7 @@ local ACTIONS = {
   { 'close', true, 'close' },
 }
 
-local function list(v)
-  if type(v) == 'string' then return { v } end
-  if type(v) == 'table' then return v end
-  return {}
-end
+local list = require('agent-ide.util.keys').list
 
 ---@return table<string, string[]> action -> keys
 function M.keys()

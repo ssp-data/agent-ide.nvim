@@ -125,8 +125,8 @@ end
 ---@param keys table `config.keys.chat`
 function M.map(buf, s, keys)
   for name, inner in pairs({ answer_inner = true, answer_outer = false }) do
-    if keys[name] then
-      vim.keymap.set({ 'o', 'x' }, keys[name], function() return expr(buf, s, inner) end,
+    for _, lhs in ipairs(require('agent-ide.util.keys').list(keys[name])) do
+      vim.keymap.set({ 'o', 'x' }, lhs, function() return expr(buf, s, inner) end,
         { expr = true, buffer = buf, nowait = true, silent = true, desc = 'Agent-IDE: ' .. (inner and 'inner' or 'outer') .. ' answer' })
     end
   end

@@ -12,7 +12,7 @@ local HL_SECTION = 'AgentIdeSection'
 
 local function actions() return require('agent-ide.prompts.actions') end
 
-local function key_list(v) return require('agent-ide.ui.diff_buf').keys(v) end
+local function key_list(v) return require('agent-ide.util.keys').list(v) end
 
 local function prompt_keys()
   local keys = config.get().keys

@@ -180,12 +180,11 @@ local function get_view(s)
   vim.bo[buf].bufhidden, vim.bo[buf].undolevels, vim.bo[buf].modifiable = 'hide', -1, false
   v = { buf = buf, mode = 'live', gen = 0, dropped = 0, n = 0 }
   views[s.id] = v
-  local lhs = { 'q', require('agent-ide.ui.chat_keys').keys().raw }
+  local lhs = { 'q' }
+  vim.list_extend(lhs, require('agent-ide.util.keys').list(require('agent-ide.ui.chat_keys').keys().raw))
   for _, key in ipairs(lhs) do
-    if key then
-      vim.keymap.set('n', key, function() back(s, buf) end,
-        { buffer = buf, nowait = true, silent = true, desc = 'Agent-IDE: back to the chat' })
-    end
+    vim.keymap.set('n', key, function() back(s, buf) end,
+      { buffer = buf, nowait = true, silent = true, desc = 'Agent-IDE: back to the chat' })
   end
   return v
 end

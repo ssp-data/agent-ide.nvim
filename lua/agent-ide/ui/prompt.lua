@@ -326,9 +326,9 @@ function M.setup_buf(buf, s)
   vim.bo[buf].completefunc = "v:lua.require'agent-ide.ui.prompt'.complete"
   local keys, opts = chat_keys(), chat_opts()
   local function map(modes, lhs, fn, desc)
-    if not lhs then return end
     vim.keymap.set(modes, lhs, fn, { buffer = buf, expr = true, nowait = true, silent = true, desc = 'Agent-IDE: ' .. desc })
   end
+  local list = require('agent-ide.util.keys').list
 
   if opts.auto_slash ~= false then
     map('i', '/', function()
@@ -350,21 +350,23 @@ function M.setup_buf(buf, s)
       return '@'
     end, 'attach file')
   end
-  if keys.attach then
-    map('n', keys.attach, function()
+  for _, lhs in ipairs(list(keys.attach)) do
+    map('n', lhs, function()
       return ('<Cmd>lua require("agent-ide.ui.prompt").pick(%d, false)<CR>'):format(buf)
     end, 'attach file')
   end
 
-  if keys.history_prev then
-    map('n', keys.history_prev, edge_key(buf, -1, keys.history_prev, false), 'previous prompt')
-    map('n', '<Up>', edge_key(buf, -1, '<Up>', false), 'previous prompt')
-    map('i', keys.history_prev, edge_key(buf, -1, keys.history_prev, true), 'previous prompt')
-  end
-  if keys.history_next then
-    map('n', keys.history_next, edge_key(buf, 1, keys.history_next, false), 'next prompt')
-    map('n', '<Down>', edge_key(buf, 1, '<Down>', false), 'next prompt')
-    map('i', keys.history_next, edge_key(buf, 1, keys.history_next, true), 'next prompt')
+  for dir, name in pairs({ [-1] = 'history_prev', [1] = 'history_next' }) do
+    local l = list(keys[name])
+    local desc = dir < 0 and 'previous prompt' or 'next prompt'
+    for _, lhs in ipairs(l) do
+      map('n', lhs, edge_key(buf, dir, lhs, false), desc)
+      map('i', lhs, edge_key(buf, dir, lhs, true), desc)
+    end
+    if #l > 0 then
+      local arrow = dir < 0 and '<Up>' or '<Down>'
+      map('n', arrow, edge_key(buf, dir, arrow, false), desc)
+    end
   end
 end
 
