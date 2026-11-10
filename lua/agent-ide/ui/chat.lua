@@ -126,6 +126,26 @@ end
 
 local function notify(msg, level) vim.notify(msg, level or vim.log.levels.INFO) end
 
+---End the pre-send live check of `c` (its answer, a timeout, a cancel): the timer is stopped and
+---closed, a late answer finds `check_n` changed and does nothing.
+local function end_check(c)
+  c.check_n = (c.check_n or 0) + 1
+  c.checking = false
+  local t = c.check_timer
+  c.check_timer = nil
+  if t then
+    t:stop()
+    if not t:is_closing() then t:close() end
+  end
+end
+
+---Cancel a running check; the prompt text stays, `why` says so when the chat is still open.
+local function cancel_check(c, why)
+  if not c.checking then return end
+  end_check(c)
+  if why and valid_buf(c.pbuf) then notify(why, vim.log.levels.WARN) end
+end
+
 ---Send the prompt buffer's text. Held while the history loads, so the prompt lands below it.
 local function send(c)
   if not valid_buf(c.pbuf) then return end
@@ -152,10 +172,32 @@ local function send(c)
   if not c.live_checked and c.s:needs_start() and not c.s:_elsewhere() then
     if c.checking then return end -- one question at a time; the answer sends the prompt
     c.checking = true
+    local tick = api.nvim_buf_get_changedtick(c.pbuf)
+    local pbuf = c.pbuf
+    c.check_n = (c.check_n or 0) + 1
+    local n = c.check_n
     local cfg = require('agent-ide.config').get()
+    notify('Agent-IDE: checking where this session runs…')
+    -- the live command is killed after max(interval, 2 s); should its callback still not come,
+    -- the chat must not stay stuck
+    local guard = vim.uv.new_timer()
+    c.check_timer = guard
+    guard:start(math.max(cfg.live.interval_ms, 2000) + 2000, 0, vim.schedule_wrap(function()
+      if c.check_n ~= n then return end
+      cancel_check(c, 'Agent-IDE: could not tell where this session runs (no answer); send again')
+    end))
     require('agent-ide.live').query({ cmd = cfg.live.cmd, interval_ms = cfg.live.interval_ms }, function()
+      if c.check_n ~= n then return end -- cancelled or timed out meanwhile
+      local unchanged = c.pbuf == pbuf and valid_buf(pbuf) and api.nvim_buf_get_changedtick(pbuf) == tick
+      end_check(c)
+      -- the prompt moved on while the question ran: what it holds now was never meant to go
+      if not unchanged then
+        if not valid_buf(c.pbuf) then return end
+        if c.s:_elsewhere() then return notify(ELSEWHERE, vim.log.levels.WARN) end
+        notify('Agent-IDE: not sent: the prompt changed while checking; send again', vim.log.levels.WARN)
+        return
+      end
       -- a failed question leaves the cached map to decide, as without the drawer
-      c.checking = false
       c.live_checked = true
       local ok, err = pcall(send, c)
       c.live_checked = false
@@ -175,6 +217,7 @@ end
 
 local function interrupt(c)
   c.send_after_load = false -- a send held for a load is cancelled; its text stays in the prompt
+  cancel_check(c, 'Agent-IDE: not sent: interrupted while checking; send again')
   local dropped = c.s:interrupt()
   if #dropped == 0 then return end
   if valid_buf(c.pbuf) then prompt.restore(c.pbuf, dropped) end
@@ -210,6 +253,7 @@ end
 local function forget_on_unload(c, buf, field)
   api.nvim_create_autocmd('BufUnload', { group = augroup, buffer = buf, once = true, callback = function()
     by_buf[buf] = nil
+    end_check(c) -- a pending live check (and its timer) goes with the chat
     if c[field] == buf then
       c[field] = nil
       c.stale[field] = buf
@@ -364,6 +408,8 @@ function M.park(s)
     local why = s:_elsewhere() and 'it runs in another Claude' or 'it is not running in this Neovim'
     return notify('Agent-IDE: nothing to park; ' .. why)
   end
+  local pc = chats[s.id]
+  if pc then cancel_check(pc, 'Agent-IDE: not sent: the session was parked while checking; send again') end
   s:park(function(parked, dropped)
     if not parked then return end
     local c = chats[s.id]
@@ -407,6 +453,9 @@ function M.project_of(s)
   end
   return { key = s.cwd, name = vim.fn.fnamemodify(s.cwd or '?', ':t'), root = s.cwd, sessions = {} }
 end
+
+---Chats by session id (tests).
+function M._chats() return chats end
 
 ---Chat windows (tests): { transcript = win|nil, prompt = win|nil }, only those still valid.
 function M._windows()
