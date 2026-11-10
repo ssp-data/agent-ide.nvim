@@ -472,3 +472,7 @@ make bench DIR=~/.claude/projects   # timings and counts for your own transcript
 ```
 
 All test data is synthetic. `make test-real` is the exception: it talks to the real Claude Code with tiny prompts, prints only pass or fail per check, and removes its temporary repository and the transcript Claude wrote for it.
+
+### Releasing
+
+`CHANGELOG.md` is kept current under `## [Unreleased]`. `make release-notes` prints that section. `make release VERSION=x.y.z` (on `main`, clean tree, green tests) turns it into the version's section, sets the helper's version, commits and creates an annotated tag, all locally. `make publish VERSION=x.y.z` pushes the branch and the tag and creates the GitHub release (needs `gh`). Notes for coding agents are in `AGENTS.md`.
