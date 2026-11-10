@@ -6,8 +6,8 @@ local M = {}
 M._timeout_ms = 5000 -- tests shorten it
 M._grace_ms = 500 -- after closing stdin, wait this long before SIGTERM
 
--- `parts` holds the chunks of an incomplete line; joined once when its newline arrives.
-local state = { proc = nil, cur = nil, exit_fns = {}, gen = 0, next_id = 1, pending = {}, parts = {}, handlers = {} }
+local lines = require('agent-ide.util.lines')
+local state = { proc = nil, cur = nil, exit_fns = {}, gen = 0, next_id = 1, pending = {}, lines = lines.splitter(), handlers = {} }
 local augroup
 
 local DECODE_OPTS = require('agent-ide.transcript.parse').DECODE_OPTS
@@ -64,22 +64,10 @@ end
 local function on_stdout(gen)
   return vim.schedule_wrap(function(err, data)
     if gen ~= state.gen or err or not data then return end
-    -- Only the new chunk is searched, and a long line is joined once: linear in its size.
-    local s = 1
-    while true do
-      local nl = data:find('\n', s, true)
-      if not nl then break end
-      local line = data:sub(s, nl - 1)
-      if #state.parts > 0 then
-        state.parts[#state.parts + 1] = line
-        line = table.concat(state.parts)
-        state.parts = {}
-      end
+    state.lines:push(data, function(line)
       handle_line(line)
-      if gen ~= state.gen then return end -- a handler stopped the helper
-      s = nl + 1
-    end
-    if s <= #data then state.parts[#state.parts + 1] = data:sub(s) end
+      return gen ~= state.gen -- a handler stopped the helper
+    end)
   end)
 end
 
@@ -92,7 +80,7 @@ local function start()
   local gen = state.gen
   local cur = { exited = false }
   state.cur = cur
-  state.parts = {}
+  state.lines:reset()
   local ok, proc = pcall(vim.system, { M.path(), '--cache-dir', cache }, {
     stdin = true, stdout = on_stdout(gen), stderr = false,
   }, vim.schedule_wrap(function(obj)
@@ -173,7 +161,7 @@ function M.stop(now)
   state.proc = nil
   state.cur = nil
   state.gen = state.gen + 1
-  state.parts = {}
+  state.lines:reset()
   pcall(proc.write, proc, nil)
   local function terminate() if not cur.exited then pcall(proc.kill, proc, 15) end end
   if now then

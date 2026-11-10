@@ -7,6 +7,7 @@ local function defaults()
     drawer = { width = 44, side = 'right' },
     live = { interval_ms = 5000, cmd = { 'claude', 'agents', '--json' } },
     helper = { enabled = true, path = nil }, -- nil: <plugin root>/helper/target/release/agent-ide-helper
+    claude = { cmd = { 'claude' }, strip_api_key = true, model = nil },
     tcd = true,
     keys = { toggle = '<leader>aa' }, -- false disables the mapping
     icons = { open = '▾', closed = '▸', project = '', waiting = '◐', busy = '●', idle = '○', parked = '·' },
