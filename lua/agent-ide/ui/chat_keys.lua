@@ -44,7 +44,7 @@ function M.help()
   if type(all) == 'table' and keylist.label(all.next_waiting) then
     rows[#rows + 1] = { key = keylist.label(all.next_waiting), desc = 'anywhere: go to the next session that needs you' }
   end
-  rows[#rows + 1] = { key = '/', desc = 'prompt, at line start: Claude commands (menu)' }
+  rows[#rows + 1] = { key = '/', desc = 'prompt, at line start: command menu (Claude\'s commands; /model, /copy are the plugin\'s)' }
   rows[#rows + 1] = { key = '@', desc = 'prompt, after a space: pick a file to attach' }
   rows[#rows + 1] = { key = 'i / a / o', desc = 'in the transcript: write in the prompt' }
   rows[#rows + 1] = { key = 'za', desc = 'toggle fold' }

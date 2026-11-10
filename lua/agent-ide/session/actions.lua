@@ -29,6 +29,9 @@ end
 
 function H.init(s, a)
   s.model, s.slash_commands = a.model, a.slash_commands
+  if s.cwd and type(a.slash_commands) == 'table' and #a.slash_commands > 0 then
+    require('agent-ide.session')._commands_seen[s.cwd] = a.slash_commands -- for new sessions there
+  end
   mode_is(s, a.mode)
   s:_emit('meta')
   turn_begins(s)

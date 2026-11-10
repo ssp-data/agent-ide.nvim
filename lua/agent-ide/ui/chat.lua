@@ -131,6 +131,12 @@ local function send(c)
   if not valid_buf(c.pbuf) then return end
   local text = prompt.text_to_send(api.nvim_buf_get_lines(c.pbuf, 0, -1, false))
   if not text:find('%S') then return end
+  -- `/model`, `/copy` alone: the plugin's own commands, nothing is sent to Claude
+  local own = prompt.plugin_command(text)
+  if own then
+    prompt.clear(c.pbuf)
+    return own(c.s)
+  end
   if require('agent-ide.ui.handoff').away(c.s) then
     return notify('Agent-IDE: this session is open in native Claude (tmux pane); quit it there to continue here',
       vim.log.levels.WARN)
