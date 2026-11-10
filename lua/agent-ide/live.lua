@@ -15,18 +15,23 @@ local interval -- ms between polls while polling, nil when stopped
 local refreshed_at -- vim.uv.now() of the last finished poll (or query), nil before the first
 local stale_after -- ms after `refreshed_at` the map stops counting (two poll intervals)
 
+---Sessions by id, and whether `text` decoded as a JSON array at all: anything else (a banner,
+---a future format, an empty wrapper object) is not "nothing runs" but an answer we cannot read.
+---`[]` is valid and means nothing runs.
 ---@param text string
----@return table<string, { status: string, pid: integer, cwd: string, name: string|nil }>
+---@return table<string, { status: string, pid: integer, cwd: string, name: string|nil }> map
+---@return boolean readable
 function M.parse(text)
   local ok, data = pcall(vim.json.decode, text or '', { luanil = { object = true, array = true } })
-  if not ok or type(data) ~= 'table' or not vim.islist(data) then return {} end
+  -- `luanil` turns an empty array into an empty table, which vim.islist accepts
+  if not ok or type(data) ~= 'table' or not vim.islist(data) or not vim.trim(text):match('^%[') then return {}, false end
   local out = {}
   for _, e in ipairs(data) do
     if type(e) == 'table' and type(e.sessionId) == 'string' then
       out[e.sessionId] = { status = e.status, pid = e.pid, cwd = e.cwd, name = e.name }
     end
   end
-  return out
+  return out, true
 end
 
 ---@param m table
@@ -90,11 +95,14 @@ local function poll(gen, opts)
   -- a hung command is killed after the timeout, so polling never stalls
   local ok = pcall(vim.system, opts.cmd, { text = true, timeout = opts.timeout_ms }, function(res)
     vim.schedule(function()
-      if res.code ~= 0 then
-        finish({}, 'exit code ' .. tostring(res.code))
-      else
-        finish(M.parse(res.stdout))
-      end
+      if res.code ~= 0 then return finish({}, 'exit code ' .. tostring(res.code)) end
+      local new, readable = M.parse(res.stdout)
+      if readable then return finish(new) end
+      -- a failed poll: the previous map stays unrefreshed and ages out (`fresh`)
+      if gen ~= generation then return end
+      running = false
+      fail('unexpected output')
+      if opts.on_poll then opts.on_poll(map) end
     end)
   end)
   if not ok then finish({}, 'command not found') end
@@ -126,7 +134,8 @@ function M.active() return timer ~= nil end
 function M.interval() return interval end
 
 ---Run the live command once, now, asynchronously (not the cached map): `cb(true)` with the
----map stored when it answered, `cb(false, reason)` when it could not be run or failed.
+---map stored when it answered, `cb(false, reason)` when it could not be run, failed, or
+---printed something that is not a JSON list ('unexpected output'; the map is left as it was).
 ---@param opts { cmd?: string[], interval_ms: integer }
 ---@param cb fun(ok: boolean, reason?: string)
 function M.query(opts, cb)
@@ -134,8 +143,10 @@ function M.query(opts, cb)
   local ok = pcall(vim.system, cmd, { text = true, timeout = math.max(opts.interval_ms, 2000) }, function(res)
     vim.schedule(function()
       if res.code ~= 0 then return cb(false, 'exit code ' .. tostring(res.code)) end
+      local new, readable = M.parse(res.stdout)
+      if not readable then return cb(false, 'unexpected output') end
       stale_after = stale_after or 2 * opts.interval_ms
-      store(M.parse(res.stdout))
+      store(new)
       cb(true)
     end)
   end)

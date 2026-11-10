@@ -10,8 +10,60 @@ local T = MiniTest.new_set({ hooks = {
 T['parse keeps sessions by id, ignores garbage'] = function()
   local m = live.parse('[{"pid":7,"cwd":"/r","kind":"interactive","sessionId":"s1","name":"n","status":"busy"}]')
   eq(m.s1, { status = 'busy', pid = 7, cwd = '/r', name = 'n' })
-  eq(live.parse('Error: not logged in'), {})
-  eq(live.parse('{"a":1}'), {})
+  eq((live.parse('Error: not logged in')), {})
+  eq((live.parse('{"a":1}')), {})
+end
+
+T['parse says whether the output was a JSON list; [] is valid and means nothing runs'] = function()
+  eq({ live.parse('[]') }, { {}, true })
+  eq(select(2, live.parse('[{"sessionId":"s","status":"idle"}]')), true)
+  for _, bad in ipairs({ '', 'Error: not logged in', '{"a":1}', '{"sessions":[]}', '"[]"', 'null', '[] trailing' }) do
+    eq({ live.parse(bad) }, { {}, false })
+  end
+end
+
+T['query: output that is not a JSON list is a failure, and the map stays as it was'] = function()
+  local got
+  live.query({ cmd = { 'echo', '[{"sessionId":"q","status":"idle","pid":4,"cwd":"/"}]' }, interval_ms = 50 },
+    function(ok) got = ok end)
+  assert(vim.wait(1000, function() return got ~= nil end, 5))
+  for _, out in ipairs({ 'Welcome to Claude Code', '{"sessions":[]}', '' }) do
+    got = nil
+    live.query({ cmd = { 'printf', '%s', out }, interval_ms = 50 }, function(ok, reason) got = { ok, reason } end)
+    assert(vim.wait(1000, function() return got ~= nil end, 5))
+    eq(got, { false, 'unexpected output' })
+    eq(live.get().q.pid, 4)
+  end
+  got = nil
+  live.query({ cmd = { 'echo', '[]' }, interval_ms = 50 }, function(ok, reason) got = { ok, reason } end)
+  assert(vim.wait(1000, function() return got ~= nil end, 5))
+  eq(got, { true, nil })
+  eq(live.get(), {})
+end
+
+T['poll: unreadable output keeps the previous map, which then ages out; one notice'] = function()
+  local notices = 0
+  local orig = vim.notify
+  vim.notify = function() notices = notices + 1 end
+  local flag = vim.fn.tempname()
+  -- the first poll answers a list, every later one a banner
+  local script = ('if [ -e %s ]; then echo "Claude Code banner"; else touch %s; echo \'[{"sessionId":"p","status":"busy","pid":9,"cwd":"/"}]\'; fi')
+    :format(flag, flag)
+  local polls = 0
+  local ok, err = pcall(function()
+    live.start({ interval_ms = 40, cmd = { 'sh', '-c', script }, on_poll = function() polls = polls + 1 end })
+    assert(vim.wait(2000, function() return polls >= 1 end, 5))
+    eq(live.fresh().p.status, 'busy')
+    assert(vim.wait(2000, function() return polls >= 6 end, 5))
+    eq(live.get().p.status, 'busy') -- kept, never replaced by an empty map
+    eq(live.stale(), true) -- the failed polls did not refresh it
+    eq(live.fresh(), {})
+    eq(notices, 1)
+  end)
+  live.stop()
+  vim.notify = orig
+  vim.fn.delete(flag)
+  if not ok then error(err, 0) end
 end
 
 T['state_of and rollup'] = function()
