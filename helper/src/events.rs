@@ -10,6 +10,12 @@ use serde_json::{Map, Value};
 
 pub type Event = Value;
 
+/// Version of the rules both index backends must agree on: this parser and scan.rs (title,
+/// activity and session metadata) here, `transcript/parse.lua` and `index/lua_scan.lua` in
+/// the plugin. A rule change on EITHER side requires bumping this AND `M.RULES_VERSION` in
+/// `lua/agent-ide/transcript/parse.lua`; the plugin does not use a helper whose number differs.
+pub const RULES_VERSION: u64 = 2;
+
 const BOOKKEEPING: &[&str] = &[
     "last-prompt",
     "mode",

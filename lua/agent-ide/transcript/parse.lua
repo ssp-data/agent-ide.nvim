@@ -2,6 +2,12 @@
 -- Nothing is dropped silently: anything not understood becomes an `unknown` event.
 local M = {}
 
+-- Version of the rules both index backends must agree on: this parser and lua_scan.lua (title,
+-- activity and session metadata) on the Lua side, events.rs and scan.rs in the Rust helper.
+-- A rule change on EITHER side requires bumping this AND `RULES_VERSION` in
+-- helper/src/events.rs; a helper reporting another number is out of date and not used.
+M.RULES_VERSION = 2
+
 -- JSON null is nil in objects (the key is absent) and vim.NIL in arrays, so arrays keep
 -- their length and a null element is seen, not skipped. The helper client decodes the
 -- same way, so events from both backends compare equal.

@@ -60,6 +60,9 @@ local function lua_only(fn)
   return fn()
 end
 local fixture_path = dir .. '/-home-u-git-alpha/11111111-1111-4111-8111-111111111111.jsonl'
+local RULES = require('agent-ide.transcript.parse').RULES_VERSION
+-- shell: answer the `hello` every helper process gets first (request id 1)
+local HELLO = ([[read h; printf '{"id":1,"result":{"rules_version":%d}}\n'; ]]):format(RULES)
 
 T['backend is lua when helper disabled or missing'] = function()
   config.setup({ helper = { enabled = false } })
@@ -344,7 +347,7 @@ end
 local function pgrep(pat) vim.fn.system({ 'pgrep', '-P', tostring(vim.fn.getpid()), '-f', pat }); return vim.v.shell_error == 0 end
 
 T['idle crash falls back; on_change keeps firing from the Lua timer'] = function()
-  local ack = script([[read l; printf '{"id":1,"result":{}}\n'; exit 0]])
+  local ack = script(HELLO .. [[read l; printf '{"id":2,"result":{}}\n'; exit 0]])
   config.setup({ helper = { enabled = true, path = ack } })
   index._tick_ms = 30
   index.set_visible(true)
@@ -391,7 +394,7 @@ T['helper that ignores stdin is terminated after a timeout failure'] = function(
 end
 
 T['a response split across two chunks is assembled'] = function()
-  config.setup({ helper = { enabled = true, path = script([[read l; printf '{"id":1,"result":{"a'; sleep 0.2; printf 'bc":7}}\n'; cat >/dev/null]]) } })
+  config.setup({ helper = { enabled = true, path = script(HELLO .. [[read l; printf '{"id":2,"result":{"a'; sleep 0.2; printf 'bc":7}}\n'; cat >/dev/null]]) } })
   local err, res
   helper.request('x', {}, function(e, r) err, res = e or false, r end)
   wait(function() return err ~= nil end)
@@ -399,12 +402,54 @@ T['a response split across two chunks is assembled'] = function()
 end
 
 T['two responses in one chunk are both delivered'] = function()
-  config.setup({ helper = { enabled = true, path = script([[read l; read l; printf '{"id":2,"result":{"n":2}}\n{"id":1,"result":{"n":1}}\n'; cat >/dev/null]]) } })
+  config.setup({ helper = { enabled = true, path = script(HELLO .. [[read l; read l; printf '{"id":3,"result":{"n":2}}\n{"id":2,"result":{"n":1}}\n'; cat >/dev/null]]) } })
   local a, b
   helper.request('x', {}, function(_, r) a = r end)
   helper.request('x', {}, function(_, r) b = r end)
   wait(function() return a and b end)
   eq({ a, b }, { { n = 1 }, { n = 2 } })
+end
+
+-- A helper built from older sources follows older parse/scan rules: never used.
+local function outdated_case(answer)
+  local log = vim.fn.tempname()
+  config.setup({ helper = { enabled = true, path = script(
+    'while read -r l; do echo "$l" >> ' .. log .. '; ' .. answer .. '; done') } })
+  eq(index.backend(), 'helper')
+  eq(#scan(dir), 4) -- from the Lua backend
+  eq(index.backend(), 'lua')
+  eq(helper.available(), false)
+  eq(#history(fixture_path) > 0, true)
+  eq(#scan(dir), 4)
+  eq(vim.tbl_map(function(n) return { n.msg, n.level } end, notes),
+    { { 'Agent-IDE: the helper is out of date; run `make helper`', vim.log.levels.WARN } })
+  -- the helper got the hello first and was not asked again after it was found out of date
+  local first = vim.json.decode(vim.fn.readfile(log)[1])
+  eq({ first.id, first.method }, { 1, 'hello' })
+  eq(#vim.fn.readfile(log) <= 2, true)
+end
+
+T['a helper with other rules is out of date: Lua backend, one notice'] = function()
+  outdated_case([[id=$(echo "$l" | sed -n 's/.*"id":\([0-9]*\).*/\1/p'); printf '{"id":%s,"result":{"rules_version":1,"sessions":[]}}\n' "$id"]])
+end
+
+T['a helper without hello (old binary) is out of date'] = function()
+  outdated_case([[id=$(echo "$l" | sed -n 's/.*"id":\([0-9]*\).*/\1/p'); printf '{"id":%s,"error":{"message":"unknown method"}}\n' "$id"]])
+end
+
+T['the built helper says hello with our rules version'] = function()
+  need_helper()
+  local res
+  helper.request('hello', {}, function(e, r) res = { e, r } end)
+  wait(function() return res ~= nil end, 6000)
+  eq(res[1], nil)
+  eq(res[2].rules_version, RULES)
+  eq(#notes, 0)
+end
+
+T['the Rust helper and the Lua parser declare the same rules version'] = function()
+  local text = table.concat(vim.fn.readfile('helper/src/events.rs'), '\n')
+  eq(tonumber(text:match('pub const RULES_VERSION: u64 = (%d+);')), RULES)
 end
 
 T['no helper or fake process is left behind'] = function()

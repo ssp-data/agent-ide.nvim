@@ -79,6 +79,7 @@ impl Server {
 
     fn dispatch(&mut self, method: &str, params: &Value) -> Result<Value, String> {
         match method {
+            "hello" => Ok(json!({"rules_version": events::RULES_VERSION, "crate_version": env!("CARGO_PKG_VERSION")})),
             "scan" => {
                 let dir = str_param(params, "projects_dir")?;
                 let sessions = scan::scan(Path::new(dir), Some(&mut self.cache), &AtomicUsize::new(0));
