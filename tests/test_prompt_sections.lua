@@ -172,7 +172,6 @@ T['300 library entries: re-render under 5 ms collapsed and 20 ms expanded'] = fu
       return best
     end
   ]], { tmp })
-  local collapsed = child.lua_get('_G.best()')
   child.lua([[
     local d = require('agent-ide.ui.drawer')
     local s = d.state()
@@ -192,6 +191,15 @@ T['300 library entries: re-render under 5 ms collapsed and 20 ms expanded'] = fu
   ]])
   eq(child.lua_get('#vim.api.nvim_buf_get_lines(require("agent-ide.ui.drawer").state().buf, 0, -1, false)'), 1 + 1 + 1 + 10 + 300 + 1) -- Prompts, Skills & commands (0), Library, groups, entries, no sessions
   local expanded = child.lua_get('_G.best()')
+  -- the entries stay loaded; the Prompts node collapsed again
+  child.lua([[
+    local s = require('agent-ide.ui.drawer').state()
+    vim.api.nvim_win_set_cursor(s.win, { 1, 0 })
+    vim.api.nvim_feedkeys(vim.keycode('<CR>'), 'x', false)
+  ]])
+  eq(child.lua_get('#vim.api.nvim_buf_get_lines(require("agent-ide.ui.drawer").state().buf, 0, -1, false)'), 2)
+  eq(#child.lua_get('require("agent-ide.prompts.cache").global()'), 300)
+  local collapsed = child.lua_get('_G.best()')
   if collapsed >= 5 then error(('collapsed re-render %.2f ms, budget < 5 ms'):format(collapsed)) end
   if expanded >= 20 then error(('expanded re-render %.2f ms, budget < 20 ms'):format(expanded)) end
   MiniTest.add_note(('300 library entries: collapsed %.2f ms, expanded %.2f ms'):format(collapsed, expanded))

@@ -93,6 +93,7 @@ T[':w saves a fresh prompt under the project; a second :w updates the same file'
   child.cmd('write')
   eq(files(folder()), { 'fix-the-login-bug.md' })
   eq(read(path), '# Fix: the Login!! bug\nmore\n')
+  eq(last_note(), 'Agent-IDE: saved → Saved prompts/repo/fix-the-login-bug')
   -- created 0600 in a folder created 0700
   eq(vim.uv.fs_stat(path).mode % 512, tonumber('600', 8))
   eq(vim.uv.fs_stat(folder()).mode % 512, tonumber('700', 8))

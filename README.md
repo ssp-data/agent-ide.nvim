@@ -4,7 +4,7 @@ A Neovim plugin that lists your Claude Code sessions in a drawer, grouped by git
 
 ## Status
 
-Parts 1, 2 and 5 of 6: the drawer and the history view, chat with Claude Code from Neovim, and the Omarchy indicator (see `omarchy/io.github.sspaeti.agent-ide/README.md`). Prompts, git review and other agents are planned and not available yet.
+Parts 1, 2, 3 and 5 of 6: the drawer and the history view, chat with Claude Code from Neovim, reusable prompts, and the Omarchy indicator (see `omarchy/io.github.sspaeti.agent-ide/README.md`). Git review and other agents are planned and not available yet.
 
 ## Requirements
 

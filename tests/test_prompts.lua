@@ -114,6 +114,13 @@ T['parse: CRLF, malformed YAML, none, body starting with ---, quotes, unclosed']
   for _, odd in ipairs({ '', '---', '---\n', '\0\1\2', string.rep('-', 10000) }) do sources.parse(odd) end
 end
 
+T['a frontmatter block longer than the first read still gives the name'] = function()
+  write(tmp .. '/skills/long/SKILL.md', '---\ndescription: ' .. string.rep('x', 20000) .. '\nname: long-one\n---\nbody\n')
+  local e = scan({ skill_dirs = { tmp .. '/skills' } })
+  eq(e[1].insert, '/long-one')
+  eq(vim.fn.strchars(e[1].description), 500)
+end
+
 T['read: the body without frontmatter, byte for byte; a gone file'] = function()
   local got
   sources.read({ path = FIX .. '/library/writing/linkedin-post.md' }, function(t) got = t end)

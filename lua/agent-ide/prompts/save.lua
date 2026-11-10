@@ -46,7 +46,8 @@ function M.short(kind, path, project_name)
     if vim.startswith(name, lib .. '/') then return 'Library/' .. name:sub(#lib + 2) end
     return 'Library/' .. vim.fs.basename(name)
   end
-  return 'Saved prompts/' .. (project_name or vim.fs.basename(vim.fs.dirname(name))) .. '/' .. vim.fs.basename(name)
+  local folder = vim.fs.basename(vim.fs.dirname(name)):gsub('%-%x%x%x%x%x%x%x%x$', '') -- without its hash
+  return 'Saved prompts/' .. (project_name or folder) .. '/' .. vim.fs.basename(name)
 end
 
 local function project_of(buf)

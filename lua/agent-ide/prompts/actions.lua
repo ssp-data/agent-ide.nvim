@@ -48,8 +48,19 @@ local function target(project)
   return s
 end
 
--- The prompt buffer of `s`, its window shown and focused (normal mode).
+-- The prompt buffer of `s`, its window shown and focused (normal mode). From the drawer the
+-- transcript's window is entered first, so the prompt opens below it, never below the drawer.
 local function prompt_of(s)
+  local tbuf = chat().buffers(s)
+  local cur = api.nvim_get_current_win()
+  if tbuf and api.nvim_win_get_buf(cur) ~= tbuf and not vim.startswith(api.nvim_buf_get_name(api.nvim_win_get_buf(cur)), 'agent-ide://prompt/') then
+    for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+      if api.nvim_win_get_buf(w) == tbuf then
+        api.nvim_set_current_win(w)
+        break
+      end
+    end
+  end
   chat().focus_prompt(s, false)
   local _, pbuf = chat().buffers(s)
   return pbuf
@@ -155,6 +166,7 @@ end
 function M.pick(opts)
   opts = opts or {}
   local s = chat().current()
+  if not s then return notify(NO_CHAT) end
   local win, pos = opts.win, opts.pos
   local function resume()
     if not (opts.insert and win and api.nvim_win_is_valid(win)) then return end
@@ -180,14 +192,10 @@ function M.pick(opts)
       M.use(e)
     end)
   end
-  if s then
-    sources.scan({ saved_dir = cache.dirs().saved, project_name = cache.folder(chat().project_of(s)) }, function(list)
-      saved_list = list
-      cache.when_global(show)
-    end)
-  else
+  sources.scan({ saved_dir = cache.dirs().saved, project_name = cache.folder(chat().project_of(s)) }, function(list)
+    saved_list = list
     cache.when_global(show)
-  end
+  end)
 end
 
 ---Map the chat's prompt keys in `buf` (`config.keys.chat.prompts`; insert mode in the prompt

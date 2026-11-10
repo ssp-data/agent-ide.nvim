@@ -29,11 +29,14 @@ end
 ---its key, so two projects with the same name never share their prompts.
 ---@param project table
 ---@return string
+local folders = {} -- project key -> folder (the drawer asks on every render)
 function M.folder(project)
   local key = project.key or project.root or project.name or '?'
+  if folders[key] then return folders[key] end
   local base = vim.fs.basename(key):gsub('[^%w%-_.]', '-'):gsub('^%.+', '')
   if base == '' then base = 'project' end
-  return base .. '-' .. vim.fn.sha256(key):sub(1, 8)
+  folders[key] = base .. '-' .. vim.fn.sha256(key):sub(1, 8)
+  return folders[key]
 end
 
 local function notify_all()

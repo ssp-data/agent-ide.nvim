@@ -91,10 +91,14 @@ end
 
 -- Files ------------------------------------------------------------------------------------
 
+-- The first HEAD_BYTES of a file; up to 64 KiB when a frontmatter block is longer than that.
 local function read_head(path)
   local f = io.open(path, 'rb')
   if not f then return nil end
   local text = f:read(M.HEAD_BYTES) or ''
+  if #text == M.HEAD_BYTES and text:match('^%-%-%-') and not M.parse(text).frontmatter then
+    text = text .. (f:read(65536 - M.HEAD_BYTES) or '')
+  end
   f:close()
   return text
 end

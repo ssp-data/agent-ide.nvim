@@ -175,6 +175,10 @@ T['no chat open: the top-level node says so; a saved prompt row opens a session 
   child.type_keys('<CR>')
   eq(notes()[#notes()], 'Agent-IDE: open or start a session first, then pick a prompt')
   eq(child.lua_get('#require("agent-ide.session").all()'), 0)
+  child.lua('_G.notes = {}')
+  child.lua('require("agent-ide").prompts()')
+  eq(notes(), { 'Agent-IDE: open or start a session first, then pick a prompt' })
+  eq(#child.lua_get('_G.asked'), 0)
   -- a saved prompt of a project: a new session for that project, then the text
   local folder = child.lua_get('require("agent-ide.prompts.cache").folder({ key = ... })', { repo })
   vim.fn.mkdir(tmp .. '/saved/' .. folder, 'p')
