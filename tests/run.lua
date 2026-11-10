@@ -5,7 +5,8 @@
 -- and judge each case ourselves: it must have run and ended in a pass state.
 -- Isolation: every test Neovim (this one and its children) gets a temporary data folder, so the
 -- plugin's own data (saved prompts, the default library) is never the user's.
-vim.env.XDG_DATA_HOME = vim.fn.tempname() .. '-data'
+local data_home = vim.fn.tempname() .. '-data'
+vim.env.XDG_DATA_HOME = data_home
 
 local reporter = MiniTest.gen_reporter.stdout({ quit_on_finish = false })
 local finish = reporter.finish
@@ -21,6 +22,7 @@ reporter.finish = function()
       ok = false
     end
   end
+  vim.fn.delete(data_home, 'rf')
   vim.cmd(ok and 'qall!' or 'cquit 1')
 end
 

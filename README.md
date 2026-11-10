@@ -4,7 +4,7 @@ A Neovim plugin that lists your Claude Code sessions in a drawer, grouped by git
 
 ## Status
 
-Parts 1, 2, 3 and 5 of 6: the drawer and the history view, chat with Claude Code from Neovim, reusable prompts, and the Omarchy indicator (see `omarchy/io.github.sspaeti.agent-ide/README.md`). Git review and other agents are planned and not available yet.
+Parts 1 to 5 of 6: the drawer and the history view, chat with Claude Code from Neovim, reusable prompts, git review (what an agent changed, with a diff view), search, and the Omarchy indicator (see `omarchy/io.github.sspaeti.agent-ide/README.md`). Other agents are planned and not available yet.
 
 ## Requirements
 
@@ -114,6 +114,8 @@ In the drawer:
 | `d` | Prompt row: delete the file (asks first) |
 | `y` | Prompt row: yank its text (unnamed and `+` registers) |
 | `L` | Saved prompt row: copy it into the library (asks for a name) |
+
+The prompt row keys are under `keys.prompts`; elsewhere in the drawer they keep their Vim meaning, and a drawer key above always wins over one of them.
 
 In the chat (transcript and prompt buffer, unless noted):
 
@@ -226,9 +228,9 @@ The keys are under `keys.diff` (and `keys.chat.diff`) in the configuration; each
 
 Reusable prompts one keypress away, in a `Prompts` node at the top of the drawer (it reads its folders only when you open it) and in a picker (`<leader>al` in the chat, or `require('agent-ide').prompts()`):
 
-- **Skills & commands** are Claude's own: every `*.md` under `~/.claude/commands` (a sub-folder `git/sync.md` is `/git:sync`) and every `~/.claude/skills/<name>/SKILL.md` (named by its frontmatter `name`, else the folder), plus those in `<project>/.claude/` of the chat's project (a project one wins over a user one of the same name). `<CR>` puts `/name ` as the first line of the prompt and leaves you in insert mode for the arguments; Claude loads the command itself. Nothing is copied and these files are never changed (`e` opens them read-only).
-- **Library**: your templates, one markdown file per prompt; sub-folders are groups in the drawer. The title is the frontmatter `name`, else the first heading, else the file name. `<CR>` loads the text into the prompt buffer exactly as it is in the file (frontmatter left out), for you to fill in and send. A draft already in the prompt buffer is never thrown away: you are asked whether to replace it, insert above it, or cancel.
-- **Saved prompts** belong to a project and show as `Saved prompts (n)` below its sessions once it has any.
+- **Skills & commands** are Claude's own: every `*.md` under `~/.claude/commands` (a sub-folder `git/sync.md` is `/git:sync`, the name Claude Code lists for it) and every `~/.claude/skills/<name>/SKILL.md` (named by its frontmatter `name`, else the folder), plus those in `<project>/.claude/` of the chat's project (a project one wins over a user one of the same name). `<CR>` puts `/name ` as the first line of the prompt and leaves you in insert mode for the arguments; Claude loads the command itself. Nothing is copied and these files are never changed (`e` opens them read-only).
+- **Library**: your templates, one markdown file per prompt; sub-folders are groups in the drawer. The title is the frontmatter `name`, else the first heading, else the file name. `<CR>` loads the text into the prompt buffer exactly as it is in the file (a leading YAML frontmatter block left out; a `---` block that is not YAML, such as two markdown rules, is part of the text), for you to fill in and send. A draft already in the prompt buffer is never thrown away: you are asked whether to replace it, insert above it, or cancel.
+- **Saved prompts** belong to a project and show as `Saved prompts (n)` below its sessions once it has any. They load as the whole file.
 
 With no chat open, a saved prompt starts a new session in its project; anything else asks you to open a session first.
 
@@ -236,8 +238,9 @@ Saving works on the prompt buffer (which is never marked modified, so `:q` and `
 
 | You do | What happens |
 |---|---|
-| `:w`, `:wq`, `:x` or `ZZ` on a new prompt | Saved under the session's project, named after its first line (`fix-the-login-bug.md`; `-2`, `-3` … when the name is taken, never overwriting another prompt; the same text twice is kept once). Further `:w` update that file |
-| `:w` after loading a template or saved prompt | That file is updated in place (its frontmatter kept). If it changed on disk since you loaded it, you are asked: overwrite, save as new, or cancel |
+| `:w`, `:wq`, `:x` or `ZZ` on a new prompt | Saved under the session's project, named after its first line (`fix-the-login-bug.md`; `-2`, `-3` … when the name is taken, never overwriting another prompt). Text that is already saved word for word is not saved twice (`already saved`), and the buffer stays a new prompt. Further `:w` update the file it wrote |
+| `:w` after loading a template or saved prompt | That file is updated in place (a library file's frontmatter kept). If it changed on disk since you loaded it, you are asked: overwrite, save as new, or cancel |
+| Anything else that changes the text for you (inserting a command, "insert above", queued prompts coming back after an interrupt or park, reusing a search hit) | The text becomes a new prompt: the next `:w` never writes it into the file it was loaded from |
 | `<leader>W` | Asks for a name and saves to the library; `writing/my post` becomes `writing/my-post.md`. Names with `..`, a leading `/` or characters other than letters, digits, space, `-`, `_`, `.` are refused and asked again; a taken name is never overwritten |
 | `:w` on an empty prompt | `nothing to save`; `ZZ` just hides the window |
 | Send | The prompt goes out as typed; the buffer forgets which file it came from, so the next `:w` makes a new saved prompt and an edited template you sent without saving stays as it is on disk |
@@ -295,7 +298,7 @@ Both files are as private as the transcripts they come from: the folder is creat
 1. Drawer and history (done)
 2. Chat and prompt buffer (done)
 3. Prompts (done)
-4. Git review: changes, commits, diff view
+4. Git review: changes, commits, diff view (done)
 5. Omarchy indicator (done)
 6. Other agents
 

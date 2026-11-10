@@ -46,6 +46,16 @@ Where the code (or the brief given at build time) differed from this plan, the c
   case, spaces become `-`; a taken name re-asks with the next free name.
 - **No chat open** from a Saved prompt row starts a session for that row's project; "a project
   row was last selected" is not tracked (top-level rows only notify).
+- **Review fixes (after merging search).** One function, `prompt.put(buf, lines, how)`, writes
+  text into a prompt buffer for the plugin (loading, commands, queued prompts coming back, a
+  reused search hit): it leaves history browsing first (`prompt.leave_history`) and forgets the
+  origin. "Already saved" no longer ties the buffer to the existing file. Saved prompts load
+  as the whole file; a library file's leading `---` block counts as frontmatter only when it
+  reads as YAML. The changed-on-disk question is scheduled, so it opens after `ZZ`/`:x` hid
+  the prompt. A rename keeps the origin's old stamp. `:file`/`:saveas` put the name back.
+  Command names from sub-folders (`folder:name`) were checked against Claude Code 2.1.306
+  (see docs/protocol.md). Drawer focus rescans only what is shown open, reading only changed
+  files. Name parts are limited to 240 bytes.
 - **Existing tests** that counted drawer lines from the top (`tests/test_chat.lua`,
   `tests/test_git_budget.lua`) now skip the Prompts row; `tests/run.lua` gives every test Neovim a
   temporary `XDG_DATA_HOME`, so no test reads or writes the user's data folder.
