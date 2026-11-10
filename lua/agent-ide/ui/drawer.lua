@@ -7,6 +7,7 @@ local project = require('agent-ide.project')
 local session = require('agent-ide.session')
 local tmux = require('agent-ide.tmux')
 local model = require('agent-ide.ui.drawer_model')
+local sections = require('agent-ide.ui.sections')
 local tree = require('agent-ide.ui.tree')
 
 local M = {}
@@ -31,6 +32,7 @@ end
 
 local function node_key(node)
   if not node then return nil end
+  if node.id then return 'e:' .. node.id end -- rows of ui/sections.lua providers
   if node.type == 'project' then return 'p:' .. node.project.key end
   if node.type == 'section' then return 's:' .. node.key end
   if node.type == 'session' then return 'x:' .. node.session.id end
@@ -49,7 +51,8 @@ local function render(focus)
   if not S.buf then return end
   local cfg = config.get()
   local t = tree.build(model.with_unsaved(S.projects), model.state_of, S.expanded, os.time(), cfg.icons, cfg.projects_dir,
-    model.waits_for)
+    model.waits_for, sections.collect,
+    { top = sections.collect_top, width = S.win and api.nvim_win_get_width(S.win) or cfg.drawer.width })
   local row = S.win and api.nvim_win_get_cursor(S.win)[1]
   focus = focus or (row and node_key(S.nodes[row]))
   vim.bo[S.buf].modifiable = true
@@ -138,6 +141,9 @@ local function toggle_node(node)
     local key = node.project.key .. '/sessions'
     toggle_key(key, true)
     render('s:' .. key)
+  elseif node.fold then
+    toggle_key(node.fold.key, node.fold.default == true)
+    render(node.fold.focus and ('e:' .. node.fold.focus) or node_key(node))
   end
 end
 
@@ -158,6 +164,9 @@ function actions.open()
     local s = session.open({ cwd = dir })
     model.add_unsaved(s.id, p.key)
     require('agent-ide.ui.chat').open(s, p)
+  elseif node.open then
+    local ok, err = pcall(node.open, node)
+    if not ok then vim.notify('Agent-IDE: ' .. tostring(err), vim.log.levels.ERROR) end
   else
     toggle_node(node)
   end
@@ -169,6 +178,7 @@ function actions.fold()
 end
 
 function actions.refresh()
+  sections.refresh()
   rescan()
   if shown then start_live() end
 end
@@ -183,12 +193,29 @@ function actions.jump()
   end)
 end
 
+function actions.park()
+  local node = current_node()
+  if not node or node.type ~= 'session' then return notify('no session under cursor') end
+  local s = session.get(node.session.id)
+  if not s then return notify('nothing to park; it is not running in this Neovim') end
+  require('agent-ide.ui.chat').park(s)
+end
+
 function actions.close() M.close() end
 
 function actions.search()
   local node = current_node()
   local p = node and node.project
   require('agent-ide').search(p and { scope = 'project', project = p } or nil)
+end
+
+function actions.lazygit()
+  local node = current_node()
+  local p = node and node.project
+  if not (p and p.is_git and p.root) then return notify('not a git project') end
+  -- the row's own work tree: a git row's, a session's (a linked worktree), else the project's
+  local root = node.root or (node.session and require('agent-ide.ui.git_sections').tree_of(node.session.cwd)) or p.root
+  require('agent-ide.ui.lazygit').open(root)
 end
 
 function actions.help()
@@ -198,6 +225,8 @@ function actions.help()
     { key = 'R', desc = 'refresh' },
     { key = 'gp', desc = 'jump to tmux pane' },
     { key = 's', desc = 'search this project (<Tab> in the picker: all sessions)' },
+    { key = 'x', desc = 'park the session: stop its Claude process here' },
+    { key = 'glg', desc = 'lazygit for the project (or the row\'s worktree)' },
     { key = 'q', desc = 'close drawer' },
     { key = '?', desc = 'this help' },
     { key = '/', desc = 'search (built-in)' },
@@ -218,6 +247,9 @@ local function ensure_buf()
   map('za', actions.fold)
   map('R', actions.refresh)
   map('gp', actions.jump)
+  map('x', actions.park)
+  map('glg', actions.lazygit)
+  api.nvim_create_autocmd('BufEnter', { buffer = buf, callback = function() sections.focus() end })
   map('q', actions.close)
   map('s', actions.search)
   map('?', actions.help)
@@ -264,6 +296,7 @@ local function create_tab()
   end })
   api.nvim_create_autocmd('TabEnter', { group = augroup, callback = refresh_shown })
   open_drawer()
+  sections.setup()
   index.on_change(on_index_change)
   rescan()
 end

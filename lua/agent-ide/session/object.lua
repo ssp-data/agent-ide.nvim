@@ -8,6 +8,7 @@ local actions = require('agent-ide.session.actions')
 local M = {}
 
 local RAW_KEEP = 5000
+M.RAW_KEEP = RAW_KEEP
 local DENY_MESSAGE = 'Denied by user in Neovim'
 
 local request_n = 0 -- ids of control requests we send: r1, r2, ...
@@ -34,7 +35,13 @@ end
 function Session:_raw(dir, line)
   local raw = self.raw
   raw[#raw + 1] = { dir = dir, line = line }
-  if #raw > RAW_KEEP then table.remove(raw, 1) end
+  if #raw > RAW_KEEP then
+    table.remove(raw, 1)
+    self.raw_dropped = self.raw_dropped + 1
+  end
+  -- the raw view (ui/raw.lua) follows the wire while it is open
+  local on_raw = self.on_raw
+  if on_raw and not pcall(on_raw, dir, line) then self.on_raw = nil end
 end
 
 function Session:_alive() return self.proc ~= nil and self.proc:alive() end
@@ -114,6 +121,7 @@ function Session:_start_process()
   if not proc then return false, 'cannot start Claude: ' .. tostring(err) end
   self.proc, self.owned, self.parking, self.interrupted, self.requests = proc, true, false, false, {}
   self.pid = proc.handle and proc.handle.pid
+  require('agent-ide.claude.version').check() -- first start only; see claude/version.lua
   for _, req in ipairs(self.deferred) do self:_control(req) end
   self.deferred = {}
   return true
@@ -207,9 +215,12 @@ function Session:set_model(model)
 end
 
 ---Answer an open permission ask (also user questions and plan approvals).
+---`updated_permissions` (with an allow) are permission updates in Claude's suggestion shape
+---(`setMode`, `addRules`, ...) that Claude applies with the answer; a `setMode` among them is
+---pending in `mode_requested` until Claude reports the mode.
 ---@param request_id string
 ---@param allow boolean
----@param opts? { updated_input?: table, message?: string }
+---@param opts? { updated_input?: table, message?: string, updated_permissions?: table[] }
 ---@return boolean answered
 function Session:answer(request_id, allow, opts)
   opts = opts or {}
@@ -221,9 +232,18 @@ function Session:answer(request_id, allow, opts)
   local p = self.pending_permissions[idx]
   local response = allow and { behavior = 'allow', updatedInput = opts.updated_input or p.input }
     or { behavior = 'deny', message = opts.message or DENY_MESSAGE }
+  local updates = allow and opts.updated_permissions or nil
+  if updates and #updates > 0 then response.updatedPermissions = updates end
   if not self:_write({ type = 'control_response',
     response = { subtype = 'success', request_id = request_id, response = response } }) then
     return false
+  end
+  for _, u in ipairs(updates or {}) do
+    if u.type == 'setMode' and type(u.mode) == 'string' then
+      self.mode_requested = u.mode == 'default' and 'manual' or u.mode
+      self.mode_by_answer = self.mode_requested -- given up at the end of the turn if unconfirmed
+      self:_emit('meta')
+    end
   end
   table.remove(self.pending_permissions, idx)
   self:_emit('permission')
@@ -290,7 +310,7 @@ function M.new(opts, id)
   return setmetatable({
     id = id, cwd = opts.cwd, path = opts.path, title = opts.title,
     state = opts.id and 'parked' or 'idle',
-    events = {}, streaming = '', turn_start = 1, pending_permissions = {}, queue = {}, raw = {},
+    events = {}, streaming = '', turn_start = 1, pending_permissions = {}, queue = {}, raw = {}, raw_dropped = 0,
     unread = false, owned = false, visible = false,
     -- internal
     requests = {}, deferred = {}, park_cbs = {}, sent_before = false,

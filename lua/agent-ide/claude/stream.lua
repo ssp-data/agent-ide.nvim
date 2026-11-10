@@ -164,7 +164,12 @@ function Decoder:user(obj, raw)
   -- Everything else in a user message comes from Claude itself (tool results, command
   -- output, interrupt markers), never from the person typing: no `prompt` events.
   local evs = parse.message_events({ type = 'user', isMeta = true, message = msg }, raw)
-  return event_actions(evs, is_sidechain(obj), false)
+  local acts = event_actions(evs, is_sidechain(obj), false)
+  -- output of a command Claude ran itself, e.g. for our set_model (the Session records it)
+  if command_out then
+    for _, a in ipairs(acts) do a.command_stdout = true end
+  end
+  return acts
 end
 
 function Decoder:control_request(obj, raw)

@@ -30,7 +30,7 @@ function M.args(opts)
 end
 
 ---@return table|nil env  a full environment without the API key, or nil to inherit as is
-local function child_env()
+function M.child_env()
   if not require('agent-ide.config').get().claude.strip_api_key then return nil end
   local env = vim.fn.environ()
   env.ANTHROPIC_API_KEY = nil
@@ -103,7 +103,7 @@ function M.start(opts)
     end
   end
 
-  local env = child_env()
+  local env = M.child_env()
   local ok, handle = pcall(vim.system, M.args(opts), {
     cwd = opts.cwd, stdin = true, env = env, clear_env = env ~= nil,
     stdout = vim.schedule_wrap(function(err, data)

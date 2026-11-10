@@ -380,12 +380,45 @@ T['AskUserQuestion: cancelling a question denies it'] = function()
   open_new()
   send_normal('Ask me')
   wait_for(function() return #selects() == 1 end, 'question')
-  eq(selects()[1].prompt, 'Pick? (one choice only)') -- multiSelect is answered with one choice
+  eq(selects()[1].prompt, 'Pick? (several: one per round, then Done choosing)')
   child.lua('_G.cancel()')
   wait_for(function() return has_line(transcript(), 'Ok.') ~= nil end, 'answer')
   eq(answers()[1], { subtype = 'success', request_id = 'q1',
     response = { behavior = 'deny', message = 'User cancelled the question in Neovim' } })
   eq(#selects(), 1)
+end
+
+T['AskUserQuestion: multiSelect picks one option per round until Done choosing; labels go back joined by ", "'] = function()
+  local input = { questions = {
+    { question = 'Fruits?', header = 'F', multiSelect = true,
+      options = { { label = 'Apple' }, { label = 'Banana' }, { label = 'Cherry' } } },
+    { question = 'All?', header = 'A', multiSelect = true, options = { { label = 'X' }, { label = 'Y' } } },
+  } }
+  start(flat({ expect = 'Ask me' }, init(), status(), tool_use('t1', 'AskUserQuestion', input),
+    ask('q1', 'AskUserQuestion', input, { requires_user_interaction = true }), { expect = '"q1"' },
+    tool_result('t1', 'Your questions have been answered'), say('Thanks.'), result('Thanks.')))
+  open_new()
+  send_normal('Ask me')
+  wait_for(function() return #selects() == 1 end, 'round 1')
+  eq(selects()[1].labels, { 'Apple', 'Banana', 'Cherry' }) -- nothing to finish before a first choice
+  pick('Cherry')
+  wait_for(function() return #selects() == 2 end, 'round 2')
+  eq(selects()[2].prompt, 'Fruits? (several: one per round, then Done choosing) — chosen: Cherry')
+  eq(selects()[2].labels, { 'Done choosing', 'Apple', 'Banana' })
+  pick('Apple')
+  wait_for(function() return #selects() == 3 end, 'round 3')
+  eq(selects()[3].labels, { 'Done choosing', 'Banana' })
+  pick('Done choosing')
+  -- second question: choosing every option ends it without a last round
+  wait_for(function() return #selects() == 4 end, 'second question')
+  pick('Y')
+  wait_for(function() return #selects() == 5 end, 'second question round 2')
+  pick('X')
+  wait_for(function() return has_line(transcript(), 'Thanks.') ~= nil end, 'answer')
+  eq(#selects(), 5)
+  local expected = vim.deepcopy(input)
+  expected.answers = { ['Fruits?'] = 'Apple, Cherry', ['All?'] = 'X, Y' }
+  eq(answers()[1], { subtype = 'success', request_id = 'q1', response = { behavior = 'allow', updatedInput = expected } })
 end
 
 T['ExitPlanMode: the plan shows as markdown; keep planning denies, approve allows'] = function()
@@ -398,7 +431,7 @@ T['ExitPlanMode: the plan shows as markdown; keep planning denies, approve allow
   open_new()
   send_normal('Plan it')
   wait_for(function() return #selects() == 1 end, 'plan select')
-  eq(selects()[1].labels, { 'Approve plan', 'Keep planning' })
+  eq(selects()[1].labels, { 'Approve plan', 'Approve plan and accept edits for this session', 'Keep planning' })
   local parts = view_parts()
   eq(parts.above, parts.rendered)
   eq(vim.list_slice(parts.block, 1, 4), { '▸ Plan to approve', '# Plan', '- step one', '- step two' })
@@ -413,18 +446,72 @@ T['ExitPlanMode: the plan shows as markdown; keep planning denies, approve allow
   eq(transcript(), view_parts().rendered)
 end
 
-T['suggestions: only setMode is offered (addRules until its answer shape is verified); it allows and switches mode'] = function()
-  start(flat(write_turn('Write it', 'p1', { permission_suggestions = { SET_MODE, ADD_RULES, ADD_DIRS } }),
-    { expect = 'set_permission_mode' }, status('acceptEdits'), ok('r1', { mode = 'acceptEdits' })))
+T['ExitPlanMode: approve and accept edits sends the next mode with the approval'] = function()
+  local plan = { plan = '# Plan', planFilePath = '/x/plan.md' }
+  start(flat({ expect = 'Plan it' }, init('plan'), status(), tool_use('t1', 'ExitPlanMode', plan),
+    ask('x1', 'ExitPlanMode', plan, { requires_user_interaction = true }), { expect = '"x1"' },
+    status('acceptEdits'), tool_result('t1', 'User has approved your plan.'), say('Going.'), result('Going.')))
+  open_new()
+  send_normal('Plan it')
+  wait_for(function() return #selects() == 1 end, 'plan select')
+  pick('Approve plan and accept edits for this session')
+  wait_for(function() return has_line(transcript(), 'Going.') ~= nil end, 'answer')
+  eq(answers()[1], { subtype = 'success', request_id = 'x1', response = { behavior = 'allow', updatedInput = plan,
+    updatedPermissions = { { type = 'setMode', mode = 'acceptEdits', destination = 'session' } } } })
+  wait_for(function() return winbar():find('mode:acceptEdits ·', 1, true) ~= nil end, 'mode confirmed')
+  eq(controls(), {})
+end
+
+local ALWAYS_LOCAL = "Allow and always allow Bash(npm test:*) (saved in this project's local settings)"
+
+T['suggestions: setMode and addRules are offered (addDirectories is not); setMode goes back with the answer'] = function()
+  -- the mode change travels in the answer (updatedPermissions); Claude then reports the mode
+  start(write_turn('Write it', 'p1', { permission_suggestions = { SET_MODE, ADD_RULES, ADD_DIRS } }))
+  child.lua([[require('agent-ide.session').on_change(function(s, what)
+    if what == 'permission' and #s.pending_permissions == 0 then _G.mode_at_answer = s.mode_requested or false end
+  end)]])
   open_new()
   send_normal('Write it')
   wait_for(function() return #selects() == 1 end, 'select')
-  eq(selects()[1].labels, { 'Allow', 'Deny', 'Allow and switch to acceptEdits for this session' })
+  eq(selects()[1].labels, { 'Allow', 'Deny', 'Allow and switch to acceptEdits for this session', ALWAYS_LOCAL })
   pick('Allow and switch to acceptEdits for this session')
-  wait_for(function() return #controls() == 1 end, 'set_permission_mode')
-  eq(answers()[1], { subtype = 'success', request_id = 'p1', response = { behavior = 'allow', updatedInput = WRITE } })
-  eq(controls()[1], { subtype = 'set_permission_mode', mode = 'acceptEdits' })
+  wait_for(function() return has_line(transcript(), 'Written.') ~= nil end, 'answer')
+  eq(answers()[1], { subtype = 'success', request_id = 'p1',
+    response = { behavior = 'allow', updatedInput = WRITE, updatedPermissions = { SET_MODE } } })
+  eq(controls(), {}) -- no separate set_permission_mode request
+  eq(child.lua_get('_G.mode_at_answer'), 'acceptEdits') -- pending in the winbar until Claude reports it
+end
+
+T['suggestions: the mode Claude reports after a setMode answer reaches the winbar'] = function()
+  start(flat({ expect = 'Write it' }, init(), status(), tool_use('t1', 'Write', WRITE),
+    ask('p1', 'Write', WRITE, { permission_suggestions = { SET_MODE } }), { expect = '"p1"' },
+    status('acceptEdits'), tool_result('t1', 'written'), say('Written.'), result('Written.')))
+  open_new()
+  send_normal('Write it')
+  wait_for(function() return #selects() == 1 end, 'select')
+  pick('Allow and switch to acceptEdits for this session')
   wait_for(function() return winbar():find('mode:acceptEdits ·', 1, true) ~= nil end, 'mode confirmed')
+end
+
+T['suggestions: always allow only for verified destinations; the rule goes back in updatedPermissions'] = function()
+  local function rules(dest, behavior)
+    return { type = 'addRules', rules = { { toolName = 'Bash', ruleContent = 'npm test:*' }, { toolName = 'Read' } },
+      behavior = behavior or 'allow', destination = dest }
+  end
+  local sugg = { rules('session'), ADD_RULES, rules('localSettings'), rules('projectSettings'), rules('userSettings'),
+    rules('somewhereElse'), rules('localSettings', 'deny') }
+  start(write_turn('Write it', 'p1', { permission_suggestions = sugg }))
+  open_new()
+  send_normal('Write it')
+  wait_for(function() return #selects() == 1 end, 'select')
+  -- session, projectSettings, userSettings (not verified), an unknown destination and a deny
+  -- rule are left out
+  eq(selects()[1].labels, { 'Allow', 'Deny', ALWAYS_LOCAL,
+    "Allow and always allow Bash(npm test:*), Read (saved in this project's local settings)" })
+  pick(ALWAYS_LOCAL)
+  wait_for(function() return has_line(transcript(), 'Written.') ~= nil end, 'answer')
+  eq(answers()[1], { subtype = 'success', request_id = 'p1',
+    response = { behavior = 'allow', updatedInput = WRITE, updatedPermissions = { ADD_RULES } } })
 end
 
 T['cancel leaves the ask open; entering the window again does not reopen; <leader>ay does'] = function()

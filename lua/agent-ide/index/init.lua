@@ -45,7 +45,8 @@ local function fail(reason)
     failed = true
     watching, watch_active = false, false
   end
-  if not notified then
+  -- an out-of-date helper has told the user itself (index/helper.lua)
+  if not notified and reason ~= helper.OUT_OF_DATE then
     notified = true
     vim.notify('Agent-IDE: helper failed (' .. tostring(reason) .. '), using Lua fallback', vim.log.levels.WARN)
   end

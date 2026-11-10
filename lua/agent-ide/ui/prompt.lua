@@ -18,7 +18,8 @@ local function closes_fence(line, char, len)
 end
 
 ---The text a prompt buffer sends: lines joined with '\n', trailing blank lines removed. A
----`[attach] <path>` line outside a fenced code block becomes `@<path>`; nothing else changes.
+---`[attach] <path>` line outside a fenced code block becomes `@<path>` (`@"<path>"` when the
+---path holds whitespace); nothing else changes.
 ---@param lines string[]
 ---@return string
 function M.text_to_send(lines)
@@ -36,7 +37,8 @@ function M.text_to_send(lines)
       else
         local path = line:match('^%[attach%]%s+(.+)$')
         path = path and path:gsub('%s+$', '')
-        if path and path ~= '' then line = '@' .. path end
+        -- Claude Code ends an unquoted mention at whitespace; a quoted one attaches the file
+        if path and path ~= '' then line = path:find('%s') and ('@"' .. path .. '"') or ('@' .. path) end
       end
     end
     out[i] = line
