@@ -80,4 +80,28 @@ T['registry: a provider error is reported once and does not break the drawer'] =
   eq(#notes, 1)
 end
 
+T['top rows come before every project; ctx carries the width'] = function()
+  local seen
+  local function top(ctx)
+    seen = ctx
+    return { { pieces = { { 'v Prompts', 'AgentIdeSection' } }, node = { type = 'p', id = 'prompts', fold = { key = 'prompts', default = true } } } }
+  end
+  local t = tree.build(projects, parked, {}, 1000, icons, nil, nil, nil, { top = top, width = 44 })
+  eq(t.lines, { 'v Prompts', '> P alpha  . now', '> P beta  . 1m' })
+  eq({ t.nodes[1].id, seen.width }, { 'prompts', 44 })
+  t = tree.build({}, parked, {}, 0, icons, nil, nil, nil, { top = top })
+  eq(t.lines, { 'v Prompts', 'No Claude sessions found' })
+  local w
+  tree.build(projects, parked, {}, 1000, icons, nil, nil, function(_, ctx) w = ctx.width end, { width = 50 })
+  eq(w, 50)
+  sections.register('p', { top = function() return { { pieces = { { 'top' } }, node = { type = 't', id = 't' } } } end })
+  sections.register('q', { top = function() error('boom') end })
+  local orig, notes = vim.notify, {}
+  vim.notify = function(m) notes[#notes + 1] = m end
+  eq(#sections.collect_top({}), 1)
+  vim.wait(200, function() return #notes > 0 end, 5)
+  vim.notify = orig
+  eq(#notes, 1)
+end
+
 return T

@@ -85,6 +85,13 @@ function M.set_lines(buf, lines)
 end
 
 ---Stored fold levels of `buf` (tests).
+---Per-line fold levels of transcript `buf` ('>1' starts a fold), or nil for other buffers.
+---@param buf integer
+---@return string[]|nil
+function M.levels(buf)
+  return bufs[buf] and bufs[buf].levels
+end
+
 function M._levels(buf)
   return bufs[buf] and bufs[buf].levels
 end

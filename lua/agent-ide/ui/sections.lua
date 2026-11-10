@@ -2,9 +2,12 @@
 -- later the Prompts node). `tree.build` stays pure: it calls `collect` for each project.
 --
 -- sections.register(name, provider): provider is `rows(project, ctx)` or a table
--- { rows = fn, setup = fn?, refresh = fn?, focus = fn? }.
+-- { rows = fn?, top = fn?, setup = fn?, refresh = fn?, focus = fn? }.
+--   top(ctx) -> rows|nil: rows above all projects (e.g. a Prompts node); ctx as below without
+--     `open`. Nodes as for project rows (`id`, `fold`, `open`).
 --   rows(project, ctx) -> rows|nil, suffix|nil
---     ctx    = { open = <project expanded>, expanded = <drawer expansion table>, icons, now }
+--     ctx    = { open = <project expanded>, expanded = <drawer expansion table>, icons, now,
+--               width = <drawer window width> }
 --     rows   = { { pieces = { { text, hl_group|nil }, ... }, node = Node }, ... } shown below the
 --              project's Sessions section while the project is expanded
 --     suffix = { { text, hl_group|nil }, ... } appended to the project's own row
@@ -58,6 +61,25 @@ function M.collect(project, ctx)
     end
   end
   return rows, suffix
+end
+
+---Top-level rows of every provider (above the projects), in registration order.
+---@param ctx table
+---@return table[]
+function M.collect_top(ctx)
+  local rows = {}
+  for _, name in ipairs(order) do
+    local p = by_name[name]
+    if p.top then
+      local ok, r = pcall(p.top, ctx)
+      if not ok then
+        report(name, r)
+      elseif r then
+        vim.list_extend(rows, r)
+      end
+    end
+  end
+  return rows
 end
 
 local function each(field, ...)
