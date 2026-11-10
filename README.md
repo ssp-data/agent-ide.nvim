@@ -57,14 +57,24 @@ require('agent-ide').setup({
     chat = { send = '<C-CR>', send_alt = '<leader><CR>', interrupt = '<C-c>', prompt = '<leader>ap', help = '?',
       history_prev = '<C-p>', history_next = '<C-n>', attach = '<leader>af',
       answer_inner = 'ir', answer_outer = 'ar', mode = '<S-Tab>', model = '<leader>aM', answer = '<leader>ay',
-      raw = 'gr', raw_event = 'gR', native = '<leader>at', park = '<leader>ax', diff = { 'gd', '<leader>gd' } },
+      raw = 'gr', raw_event = 'gR', native = '<leader>at', park = '<leader>ax', diff = { 'gd', '<leader>gd' },
+      save_library = '<leader>W', prompts = '<leader>al' },
     -- diff view; each value is a key, a list of keys, or false
     diff = { next_file = { ']f', '<leader>gj' }, prev_file = { '[f', '<leader>gk' }, flip = { 'gb', '<leader>gt' },
       branch = { 'gB', '<leader>gB' }, close = { 'q', '<leader>gq' }, help = { '?' }, refresh = { 'R' }, lazygit = 'glg' },
+    -- drawer, on prompt rows (elsewhere these keys keep their normal meaning)
+    prompts = { edit = 'e', rename = 'r', delete = 'd', yank = 'y', to_library = 'L' },
+  },
+  prompts = {
+    library_dir = nil,  -- your templates (nil: stdpath('data') .. '/agent-ide/library')
+    saved_dir = nil,    -- per-project saved prompts (nil: stdpath('data') .. '/agent-ide/prompts')
+    command_dirs = { '~/.claude/commands' }, -- Claude's commands (read only)
+    skill_dirs = { '~/.claude/skills' },     -- Claude's skills (read only)
+    project_dirs = true, -- also <project>/.claude/commands and /skills of the chat's project
   },
   chat = { auto_slash = true, at_picker = true }, -- `/` opens the command menu, `@` the file picker
   icons = { open = '▾', closed = '▸', project = '', waiting = '◐', busy = '●', idle = '○', parked = '·',
-    done = '✔', failed = '✖', new = '+' },
+    done = '✔', failed = '✖', new = '+', prompts = '✎' },
 })
 ```
 
@@ -83,7 +93,7 @@ In the drawer:
 
 | Key | Action |
 |---|---|
-| `<CR>`, `o` | Expand or collapse a project; open a session; start a new session (`+ New session`) |
+| `<CR>`, `o` | Expand or collapse a project; open a session; start a new session (`+ New session`); use a prompt |
 | `za` | Expand or collapse the node under the cursor |
 | `R` | Rescan sessions and refresh running state |
 | `gp` | Jump to the tmux pane of a session running elsewhere |
@@ -91,6 +101,11 @@ In the drawer:
 | `q` | Close the drawer |
 | `glg` | Open lazygit for the row's repository (a worktree row or session: that worktree) |
 | `?` | Help |
+| `e` | Prompt row: edit its file in the main window (Claude's commands and skills open read-only) |
+| `r` | Prompt row: rename (library: `group/name` moves it to another group) |
+| `d` | Prompt row: delete the file (asks first) |
+| `y` | Prompt row: yank its text (unnamed and `+` registers) |
+| `L` | Saved prompt row: copy it into the library (asks for a name) |
 
 In the chat (transcript and prompt buffer, unless noted):
 
@@ -114,8 +129,11 @@ In the chat (transcript and prompt buffer, unless noted):
 | `<leader>af` | Prompt: pick a file and add an `[attach]` line |
 | `/` | Prompt, on an empty line: Claude's commands (menu) |
 | `@` | Prompt, after a space: pick a file to attach |
+| `<leader>al` | Pick a prompt: saved prompts, library, Claude's commands and skills |
+| `<leader>W` | Prompt: save it to the library (asks for a name; `group/name` makes a folder) |
+| `:w`, `:x`, `ZZ` | Prompt: save it (see [Prompts](#prompts)); `:x` and `ZZ` then hide the window |
 | `za` | Toggle fold |
-| `:q`, `ZZ` | Prompt: hide the window; the draft stays |
+| `:q` | Prompt: hide the window; the draft stays |
 | `:q!` | Prompt: hide the window and discard the draft |
 | `?` | Help |
 
@@ -196,6 +214,35 @@ Each git project in the drawer has two more sections below its sessions: `Change
 
 The keys are under `keys.diff` (and `keys.chat.diff`) in the configuration; each value is a key, a list of keys, or `false`. Git is only read (`git --no-optional-locks`, never a command that writes); acting is left to lazygit.
 
+## Prompts
+
+Reusable prompts one keypress away, in a `Prompts` node at the top of the drawer (it reads its folders only when you open it) and in a picker (`<leader>al` in the chat, or `require('agent-ide').prompts()`):
+
+- **Skills & commands** are Claude's own: every `*.md` under `~/.claude/commands` (a sub-folder `git/sync.md` is `/git:sync`) and every `~/.claude/skills/<name>/SKILL.md` (named by its frontmatter `name`, else the folder), plus those in `<project>/.claude/` of the chat's project (a project one wins over a user one of the same name). `<CR>` puts `/name ` as the first line of the prompt and leaves you in insert mode for the arguments; Claude loads the command itself. Nothing is copied and these files are never changed (`e` opens them read-only).
+- **Library**: your templates, one markdown file per prompt; sub-folders are groups in the drawer. The title is the frontmatter `name`, else the first heading, else the file name. `<CR>` loads the text into the prompt buffer exactly as it is in the file (frontmatter left out), for you to fill in and send. A draft already in the prompt buffer is never thrown away: you are asked whether to replace it, insert above it, or cancel.
+- **Saved prompts** belong to a project and show as `Saved prompts (n)` below its sessions once it has any.
+
+With no chat open, a saved prompt starts a new session in its project; anything else asks you to open a session first.
+
+Saving works on the prompt buffer (which is never marked modified, so `:q` and `:qa` never ask about a draft):
+
+| You do | What happens |
+|---|---|
+| `:w`, `:wq`, `:x` or `ZZ` on a new prompt | Saved under the session's project, named after its first line (`fix-the-login-bug.md`; `-2`, `-3` … when the name is taken, never overwriting another prompt; the same text twice is kept once). Further `:w` update that file |
+| `:w` after loading a template or saved prompt | That file is updated in place (its frontmatter kept). If it changed on disk since you loaded it, you are asked: overwrite, save as new, or cancel |
+| `<leader>W` | Asks for a name and saves to the library; `writing/my post` becomes `writing/my-post.md`. Names with `..`, a leading `/` or characters other than letters, digits, space, `-`, `_`, `.` are refused and asked again; a taken name is never overwritten |
+| `:w` on an empty prompt | `nothing to save`; `ZZ` just hides the window |
+| Send | The prompt goes out as typed; the buffer forgets which file it came from, so the next `:w` makes a new saved prompt and an edited template you sent without saving stays as it is on disk |
+| `:qa`, `:wqa`, `:xa` | Nothing is saved, nothing is asked |
+
+Files are written as typed, with a final newline added when the last line has none, atomically (a temporary file renamed into place; a new file is linked into place, so two Neovims saving the same name both keep theirs). New files are `0600` in folders created `0700`. The plugin writes only to the library and saved-prompts folders and never under a `.claude` folder. Drawer rows refresh on `R`, after a save, rename or delete, and when you come back to the drawer.
+
+To keep your library in git, point `library_dir` at a folder of a repository you manage (outside any `.claude` folder, so Claude does not take the templates for commands):
+
+```lua
+opts = { prompts = { library_dir = '~/notes/prompts' } }
+```
+
 ## How it works
 
 The plugin reads the local Claude Code transcripts (JSONL files), builds an index of projects and sessions, and renders a transcript as markdown on demand. A small Rust helper (`agent-ide-helper`) can do the scanning, parsing and file watching off the Neovim process. When the helper is not built, or fails, a pure Lua implementation takes over and gives identical results. Neither path blocks the editor: the drawer opens in under 50 ms with 60 projects, a 1 MB history in under 150 ms with the helper, and a cold Lua scan never blocks the UI for more than 16 ms at a time.
@@ -204,13 +251,15 @@ The plugin reads the local Claude Code transcripts (JSONL files), builds an inde
 
 Apart from Claude Code itself, everything stays on your machine. The plugin reads transcripts under `projects_dir` and the output of `claude agents --json`, and sends nothing over the network; what you type in a chat goes to the `claude` process it starts, which talks to Anthropic as it always does.
 
+Prompts you save go to `stdpath('data')/agent-ide/prompts/<project folder>-<short hash>/` (and templates to `stdpath('data')/agent-ide/library` unless you set `prompts.library_dir`).
+
 The Rust helper keeps a metadata cache in `stdpath('cache')/agent-ide/index-v3.json` (on Linux usually `~/.cache/nvim/agent-ide/index-v3.json`). It holds the path, title, working directory, branch, size and modification time of each session, so the drawer opens fast. You can delete it at any time; it is rebuilt on the next scan.
 
 ## Roadmap
 
 1. Drawer and history (done)
 2. Chat and prompt buffer (done)
-3. Prompts
+3. Prompts (done)
 4. Git review: changes, commits, diff view
 5. Omarchy indicator (done)
 6. Other agents

@@ -24,6 +24,28 @@ Where the code (or the brief given at build time) differed from this plan, the c
   commands collapsed, Library open, library groups collapsed, Saved prompts collapsed.
 - **Project commands and skills** in the top node are those of the project of the chat shown in
   the Agents tab's transcript window (rescanned when that changes).
+- **Files.** Saving lives in `prompts/save.lua` (attached by `ui/prompt.lua`'s `create`), drawer
+  row keys in `prompts/manage.lua`, the lazy entry cache in `prompts/cache.lua`, so no file grows
+  past ~350 lines (`ui/prompt.lua` was already 421). `chat.focus_prompt(s, insert)` and
+  `prompt.browsing(buf)` were added as small public functions.
+- **Origin** is kept in the buffer variable `b:agent_ide_origin = { kind, path, stamp }` (stamp:
+  mtime and size); `prompt.clear` (after a send) forgets it. A prompt shown from the history is
+  saved as a new prompt, never into the loaded file. "Insert above" the draft gives a fresh
+  prompt (no origin): the mix is not that template.
+- **`ZZ` and `:x`.** The buffer is never modified, so Neovim never writes it for `ZZ`/`:x`:
+  `ZZ` is a buffer-local map (save, then `normal! ZZ`), `:x`/`:exit` are caught in `QuitPre` from
+  the typed command line. `:wq` goes through `BufWriteCmd`. `:wqa`/`:xa` save nothing. `:w <file>`
+  is refused with a notice.
+- **Insert-mode picker key** only for a key that does not start with a printable character (the
+  default `<leader>al` would fire while typing ` al…` with a space leader).
+- **Writes are synchronous** (one small file, before `:wq` quits); scans stay asynchronous. New
+  files: temp file + hard link (no clobber, falls back to an exclusive create); updates: temp
+  file + rename, keeping the file's mode and its frontmatter. Same text saved twice is kept once.
+- **File names.** Lower-cased with `tolower()`; letters include non-ASCII word characters
+  (umlauts, CJK), emoji become `-`. Library names typed for `<leader>W`, `r` and `L` keep their
+  case, spaces become `-`; a taken name re-asks with the next free name.
+- **No chat open** from a Saved prompt row starts a session for that row's project; "a project
+  row was last selected" is not tracked (top-level rows only notify).
 - **Existing tests** that counted drawer lines from the top (`tests/test_chat.lua`,
   `tests/test_git_budget.lua`) now skip the Prompts row; `tests/run.lua` gives every test Neovim a
   temporary `XDG_DATA_HOME`, so no test reads or writes the user's data folder.
