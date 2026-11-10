@@ -52,9 +52,23 @@ function M.is_ours(buf) return ours[buf] == true end
 
 local saved = {} -- buf -> { [lhs] = maparg dict|false }
 
----Map `lhs` in normal mode on `buf`, remembering a buffer-local mapping it replaces.
+---Keys of a config value: a key, a list of keys, or false/nil (none).
+---@param v string|string[]|false|nil
+---@return string[]
+function M.keys(v)
+  if type(v) == 'string' then return { v } end
+  if type(v) == 'table' then return vim.tbl_filter(function(k) return type(k) == 'string' and k ~= '' end, v) end
+  return {}
+end
+
+---Map `lhs` (a key or a list of keys) in normal mode on `buf`, remembering buffer-local
+---mappings they replace.
 function M.map(buf, lhs, fn, desc)
-  if not lhs then return end
+  if type(lhs) ~= 'string' then
+    for _, k in ipairs(M.keys(lhs)) do M.map(buf, k, fn, desc) end
+    return
+  end
+  if lhs == '' then return end
   if not ours[buf] then
     saved[buf] = saved[buf] or {}
     if saved[buf][lhs] == nil then
@@ -82,9 +96,17 @@ end
 function M.real(path)
   local buf = vim.fn.bufadd(path)
   if not api.nvim_buf_is_loaded(buf) then
-    local au = api.nvim_create_autocmd('SwapExists', { once = true, callback = function() vim.v.swapchoice = 'o' end })
+    local swapped = false
+    local au = api.nvim_create_autocmd('SwapExists', { once = true, callback = function()
+      vim.v.swapchoice = 'o'
+      swapped = true
+    end })
     pcall(vim.fn.bufload, buf)
     pcall(api.nvim_del_autocmd, au)
+    if swapped then
+      vim.notify('Agent-IDE: ' .. vim.fn.fnamemodify(path, ':~:.') .. ' opened read-only: it has a swap file (open elsewhere?)',
+        vim.log.levels.WARN)
+    end
   elseif not vim.bo[buf].modified and vim.o.autoread then
     pcall(vim.cmd, 'checktime ' .. buf)
   end

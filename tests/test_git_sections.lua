@@ -74,19 +74,31 @@ T['expanded project: section labels with counts, collapsed by default; loading r
     { status = 'A', path = 'img.png', binary = true },
     { status = 'M', path = 'sub', submodule = true },
     { status = '?', path = 'ü.txt', added = 2, removed = 0, untracked = true },
+    { status = '?', path = 'nested/', untracked = true, dir = true },
   })
   cache._set('/x/r', 'commits', { { hash = 'aaaa', short = 'aaaa', subject = 'two', date = 0, files = 2 } })
   l = lines(p, { ['/x/r'] = true, ['/x/r/git/changes'] = true, ['/x/r/git/commits'] = true })
   eq(vim.list_slice(l, 4), {
-    '  v Changes vs origin/main (5)',
+    '  v Changes vs origin/main (6)',
     '      M a b.lua  +3 −1',
     '      R old.lua → new.lua  +0 −0',
     '      A img.png  bin',
     '      M sub  submodule',
     '      ? ü.txt  +2 −0',
+    '      ? nested/  dir',
     '  v Commits on branch (1)',
     '      > aaaa two  2 files  now',
   })
+end
+
+T['an untracked folder (nested repository) is listed but cannot be opened'] = function()
+  local p = project('/x/r')
+  cache._set('/x/r', 'head', BRANCH)
+  cache._set('/x/r', 'base', BRANCH)
+  cache._set('/x/r', 'changes', { { status = '?', path = 'nested/', untracked = true, dir = true },
+    { status = 'M', path = 'f', added = 1, removed = 0 } })
+  local t = tree.build({ p }, parked, { ['/x/r'] = true, ['/x/r/git/changes'] = true }, 0, icons, nil, nil, gs.rows)
+  eq({ t.lines[5], t.nodes[5].open, type(t.nodes[6].open) }, { '      ? nested/  dir', nil, 'function' })
 end
 
 T['default branch labels and recent commits'] = function()

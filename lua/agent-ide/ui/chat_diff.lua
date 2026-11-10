@@ -25,27 +25,21 @@ local function headers(s)
   return out
 end
 
----File path of the Edit/Write fold at `row` of transcript `buf`, or nil.
+---File path of the Edit/Write fold at `row` of transcript `buf`, or nil. Only the line that
+---starts the fold (level `>1`) is taken for its header, so a look-alike line inside a body
+---never is.
 ---@param buf integer
 ---@param s table Session
 ---@param row integer
 ---@return string|nil
 function M.target(buf, s, row)
-  local levels = history._levels(buf) or {}
+  local levels = history.levels(buf) or {}
   if (levels[row] or '0') == '0' then return nil end
   local first = row
   while first > 1 and levels[first] ~= '>1' do first = first - 1 end
-  local lines = api.nvim_buf_get_lines(buf, first - 1, row, false)
-  local known = headers(s)
-  -- the nearest call header at or above the cursor inside this fold (a subagent fold nests them)
-  for i = #lines, 1, -1 do
-    local h = lines[i]
-    while vim.startswith(h, '│ ') do h = h:sub(#'│ ' + 1) end -- body prefix of (nested) folds
-    if i == 1 or vim.startswith(h, '▸ ') then
-      if known[h] then return known[h] end
-      if vim.startswith(h, '▸ ') then return nil end
-    end
-  end
+  if levels[first] ~= '>1' then return nil end
+  local header = api.nvim_buf_get_lines(buf, first - 1, first, false)[1] or ''
+  return headers(s)[header]
 end
 
 local function root_of(s, path)
@@ -80,9 +74,10 @@ end
 
 ---Map `keys.diff` in transcript `buf` of session `s`.
 function M.map(buf, s, keys)
-  if not keys.diff then return end
-  vim.keymap.set('n', keys.diff, function() M.open(buf, s) end,
-    { buffer = buf, nowait = true, silent = true, desc = 'Agent-IDE: branch diff of this Edit/Write' })
+  for _, lhs in ipairs(require('agent-ide.ui.diff_buf').keys(keys.diff)) do
+    vim.keymap.set('n', lhs, function() M.open(buf, s) end,
+      { buffer = buf, nowait = true, silent = true, desc = 'Agent-IDE: branch diff of this Edit/Write' })
+  end
 end
 
 return M

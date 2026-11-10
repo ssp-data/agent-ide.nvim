@@ -49,38 +49,32 @@ end
 
 -- Winbars --------------------------------------------------------------------------------------
 
-local function esc(s) return (tostring(s):gsub('%%', '%%%%')) end
+local BAR_MARK = "agent-ide.ui.diff'.bar("
 
-local function position()
-  if not D.index then return 'file ?/' .. #D.list end
-  return ('file %d/%d'):format(D.index, #D.list)
-end
+-- The winbar of a diff window is an expression: it shows the label only while the view owns the
+-- window and its buffer, so a window option that travels with the user's buffer shows the
+-- global winbar instead.
+local function bar_expr(win) return ("%%{%%v:lua.require'agent-ide.ui.diff'.bar(%d)%%}"):format(win) end
 
----Labels of both sides: { left, right }.
-function M.labels(d)
-  d = d or D
-  local f = d.file
-  if d.mode == 'commit' then
-    local c = d.commit
-    return { c.short .. '^', c.short .. ' ' .. c.subject }
+local texts = {} -- win -> label text (statusline-escaped)
+
+---Winbar text of diff window `win` (statusline syntax): the label while the view shows it,
+---else the global winbar.
+---@param win integer
+---@return string
+function M.bar(win)
+  if D and texts[win] and ((win == D.left and win_buf(win) == D.lbuf) or (win == D.right and win_buf(win) == D.rbuf)) then
+    return texts[win]
   end
-  local b = d.base or {}
-  local left = 'base ' .. (b.label or '?')
-  if b.rev then left = left .. ' (' .. b.rev:sub(1, 7) .. ')' end
-  local right = 'working tree'
-  if f.status == 'D' then right = right .. ' (deleted)' end
-  return { left, right }
+  return vim.go.winbar
 end
 
-local function set_winbars()
-  local l = M.labels()
-  local pos = position()
-  local name = D.file.old_path and (D.file.old_path .. ' → ' .. D.file.path) or D.file.path
-  local opts = { scope = 'local' }
-  opts.win = D.left
-  if valid_win(D.left) then api.nvim_set_option_value('winbar', esc(l[1] .. ' · ' .. name .. ' · ' .. pos), opts) end
-  opts.win = D.right
-  if valid_win(D.right) then api.nvim_set_option_value('winbar', esc(l[2] .. ' · ' .. pos), opts) end
+local function set_winbars(note)
+  local t = require('agent-ide.ui.diff_sides').winbars(D, note)
+  texts = { [D.left] = t[1], [D.right] = t[2] }
+  for _, w in ipairs({ D.left, D.right }) do
+    if valid_win(w) then api.nvim_set_option_value('winbar', bar_expr(w), { scope = 'local', win = w }) end
+  end
 end
 
 -- Teardown -------------------------------------------------------------------------------------
@@ -90,6 +84,7 @@ local function release_real(d, still_shown)
   scratch.unmap(d.real)
   if still_shown and valid_win(d.right) then
     api.nvim_set_option_value('winbar', d.real_winbar or '', { scope = 'local', win = d.right })
+    d.real_winbar = nil
   elseif api.nvim_buf_is_valid(d.real) then
     tainted[d.real] = true -- it left the window with 'diff' on: fixed when shown again
   end
@@ -107,16 +102,24 @@ local function teardown(keep)
   api.nvim_clear_autocmds({ group = augroup })
   cache.off_update(on_update)
   switching = true
-  for _, w in ipairs({ d.left, d.right }) do diffoff(w) end
-  release_real(d, win_buf(d.right) == d.real)
-  local close = keep == d.left and d.right or d.left
-  if valid_win(close) and #vim.tbl_filter(function(w) return api.nvim_win_get_config(w).relative == '' end,
-      api.nvim_tabpage_list_wins(api.nvim_win_get_tabpage(close))) > 1 then
-    local b = win_buf(close)
-    if b == d.lbuf or b == d.rbuf or b == d.real then pcall(api.nvim_win_close, close, true) end
-  end
-  if keep == d.left and valid_win(d.left) then pcall(api.nvim_set_option_value, 'winbar', '', { scope = 'local', win = d.left }) end
+  local ok, err = pcall(function()
+    for _, w in ipairs({ d.left, d.right }) do
+      diffoff(w)
+      if valid_win(w) and api.nvim_get_option_value('winbar', { scope = 'local', win = w }):find(BAR_MARK, 1, true) then
+        api.nvim_set_option_value('winbar', '', { scope = 'local', win = w })
+      end
+    end
+    release_real(d, win_buf(d.right) == d.real)
+    local close = keep == d.left and d.right or d.left
+    if valid_win(close) and #vim.tbl_filter(function(w) return api.nvim_win_get_config(w).relative == '' end,
+        api.nvim_tabpage_list_wins(api.nvim_win_get_tabpage(close))) > 1 then
+      local b = win_buf(close)
+      if b == d.lbuf or b == d.rbuf or b == d.real then pcall(api.nvim_win_close, close, true) end
+    end
+  end)
   switching = false
+  texts = {}
+  if not ok then vim.notify('Agent-IDE: closing the diff view: ' .. tostring(err), vim.log.levels.ERROR) end
   return d
 end
 
@@ -127,14 +130,14 @@ local function abs(path) return D.root .. '/' .. path end
 local function map_keys(buf) require('agent-ide.ui.diff_keys').map(buf, M) end
 
 ---Put the sides into the windows and turn diff mode on.
-local function apply(left_lines, right, keep_cursor)
+local function apply(left_raw, right_raw, keep_cursor)
+  local left_lines, right, eol_note = require('agent-ide.ui.diff_sides').sides(left_raw, right_raw)
   local f = D.file
   local note = f.submodule and 'submodule: not shown (no descent)'
     or (f.binary or left_lines == true or right == true) and 'binary file, not shown' or nil
-  switching = true
+  local cursors = keep_cursor and { api.nvim_win_get_cursor(D.left), api.nvim_win_get_cursor(D.right) }
   diffoff(D.left)
   diffoff(D.right)
-  local cursors = keep_cursor and { api.nvim_win_get_cursor(D.left), api.nvim_win_get_cursor(D.right) }
   local l_rev = D.mode == 'commit' and (D.commit.short .. '^') or (D.base and D.base.rev and D.base.rev:sub(1, 7) or 'empty')
   local lbuf = scratch.get(l_rev, f.old_path or f.path, note and { note } or left_lines or {})
   local rbuf, real
@@ -145,12 +148,16 @@ local function apply(left_lines, right, keep_cursor)
     rbuf = scratch.get(r_rev, f.path, note and { note } or (type(right) == 'table' and right) or {})
   end
   if D.real and D.real ~= real then release_real(D, true) end
-  if real and D.real ~= real then
-    D.real_winbar = api.nvim_get_option_value('winbar', { scope = 'local', win = D.right })
-  end
+  local prev_bar = api.nvim_get_option_value('winbar', { scope = 'local', win = D.right })
   if win_buf(D.left) ~= lbuf then api.nvim_win_set_buf(D.left, lbuf) end
   if win_buf(D.right) ~= rbuf then api.nvim_win_set_buf(D.right, rbuf) end
-  D.lbuf, D.rbuf, D.real, D.shown = lbuf, rbuf, real, f
+  if real and D.real ~= real then
+    -- the buffer's own winbar in this window (captured after it entered); one that only came
+    -- with the window (the chat title, our label) is not the buffer's
+    local own = api.nvim_get_option_value('winbar', { scope = 'local', win = D.right })
+    D.real_winbar = (own == prev_bar or own:find(BAR_MARK, 1, true)) and '' or own
+  end
+  D.lbuf, D.rbuf, D.real, D.shown, D.shown_mode = lbuf, rbuf, real, f, D.mode
   tainted[rbuf] = nil
   map_keys(lbuf)
   map_keys(rbuf)
@@ -158,7 +165,7 @@ local function apply(left_lines, right, keep_cursor)
     diffthis(D.left)
     diffthis(D.right)
   end
-  set_winbars()
+  set_winbars(not note and eol_note or nil)
   if cursors then
     pcall(api.nvim_win_set_cursor, D.left, cursors[1])
     pcall(api.nvim_win_set_cursor, D.right, cursors[2])
@@ -168,7 +175,6 @@ local function apply(left_lines, right, keep_cursor)
       if vim.fn.diff_hlID(1, 1) == 0 and vim.fn.diff_filler(1) == 0 then pcall(vim.cmd, 'normal! ]c') end
     end)
   end
-  switching = false
 end
 
 ---Load the current file's sides and show them (`keep_cursor` on refresh).
@@ -181,12 +187,15 @@ local function show(keep_cursor)
     pending = pending - 1
     if pending > 0 or D ~= d or d.seq ~= seq then return end
     if not (valid_win(d.left) and valid_win(d.right)) then return teardown() end
-    apply(left, right, keep_cursor)
+    switching = true
+    local ok, err = pcall(apply, left, right, keep_cursor)
+    switching = false
+    if not ok then vim.notify('Agent-IDE: diff view: ' .. tostring(err), vim.log.levels.ERROR) end
   end
   local function fetch_left()
     if f.status == 'A' or f.status == '?' then return done() end
     git.show(d.root, left_rev, f.old_path or f.path, function(c)
-      left = scratch.lines_of(c)
+      left = c
       done()
     end)
   end
@@ -194,7 +203,7 @@ local function show(keep_cursor)
   if d.mode == 'commit' then
     if f.status == 'D' then return done() end
     git.show(d.root, d.commit.hash, f.path, function(c)
-      right = scratch.lines_of(c)
+      right = c or nil
       done()
     end)
   elseif f.status == 'D' or f.submodule or vim.fn.filereadable(abs(f.path)) ~= 1 then
@@ -225,7 +234,9 @@ local function autocmds()
       -- the left window becomes the main window: it shows what was there before the view
       vim.schedule(function() if d and valid_win(d.left) then M._restore(d, d.left) end end)
     elseif w == D.left then
-      teardown(D.right)
+      -- like q: the right window shows what was there before the view
+      local d = teardown(D.right)
+      vim.schedule(function() if d and valid_win(d.right) then M._restore(d, d.right) end end)
     end
   end })
   api.nvim_create_autocmd('TabClosed', { group = augroup, callback = function()
@@ -237,9 +248,11 @@ end
 -- A real buffer that left a diff window with 'diff' still on gets it back from Neovim when shown
 -- in that window again: turn it off there unless the window is part of the view.
 api.nvim_create_autocmd('BufWinEnter', { group = repair_group, callback = function(ev)
-  if not tainted[ev.buf] then return end
   local w = api.nvim_get_current_win()
   if D and (w == D.left or w == D.right) then return end
+  local bar = api.nvim_get_option_value('winbar', { scope = 'local', win = w })
+  if bar:find(BAR_MARK, 1, true) then api.nvim_set_option_value('winbar', '', { scope = 'local', win = w }) end
+  if not tainted[ev.buf] then return end
   if vim.wo[w].diff then vim.cmd('diffoff') end
   tainted[ev.buf] = nil
 end })
@@ -260,12 +273,16 @@ function M.open(opts)
     local chat = package.loaded['agent-ide.ui.chat']
     prev.chat = chat and prev.buf and chat.session_of(prev.buf) or nil
     switching = true
-    local p = wins.get().prompt
-    if p and p ~= right and api.nvim_win_get_tabpage(p) == tab then pcall(api.nvim_win_close, p, false) end
-    local left = api.nvim_open_win(scratch.empty(), false, { split = 'left', win = right })
-    local total = api.nvim_win_get_width(left) + api.nvim_win_get_width(right)
-    api.nvim_win_set_width(left, math.floor(total / 2))
+    local ok, left = pcall(function()
+      local p = wins.get().prompt
+      if p and p ~= right and api.nvim_win_get_tabpage(p) == tab then pcall(api.nvim_win_close, p, false) end
+      local w = api.nvim_open_win(scratch.empty(), false, { split = 'left', win = right })
+      local total = api.nvim_win_get_width(w) + api.nvim_win_get_width(right)
+      api.nvim_win_set_width(w, math.floor(total / 2))
+      return w
+    end)
     switching = false
+    if not ok then return notify('cannot open the diff view: ' .. tostring(left)) end
     D = { tab = tab, left = left, right = right, prev = prev, seq = 0, lbuf = win_buf(left), rbuf = prev.buf }
     autocmds()
   end
@@ -273,6 +290,10 @@ function M.open(opts)
   D.commit = opts.commit
   D.base = opts.mode == 'branch' and cache.base(opts.root) or nil
   api.nvim_set_current_win(D.right)
+  -- the tab follows what is shown (as for a chat): lazygit or a picker started here sees this tree
+  if require('agent-ide.config').get().tcd and vim.fn.isdirectory(D.root) == 1 then
+    api.nvim_win_call(D.right, function() vim.cmd.tcd(vim.fn.fnameescape(D.root)) end)
+  end
   if D.mode == 'branch' and not D.base then
     local d = D
     return cache.when(opts.root, 'base', function(b)
@@ -306,6 +327,18 @@ function M._restore(d, win)
     api.nvim_win_set_buf(win, b)
   elseif shown == d.rbuf or shown == d.lbuf then
     api.nvim_win_set_buf(win, scratch.empty())
+  end
+end
+
+---Reload the shown file (and, in the branch view, the list and the base: the repository's git
+---data is invalidated).
+function M.refresh()
+  if not D then return end
+  if D.mode == 'branch' then
+    cache.invalidate(D.root)
+    cache.when(D.root, 'changes', function() end) -- the list reload shows the file again
+  else
+    show(true)
   end
 end
 

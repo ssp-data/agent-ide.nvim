@@ -17,6 +17,7 @@ local function drawer() return require('agent-ide.ui.drawer') end
 ---@return table[]
 function M.stats(f)
   if f.submodule then return { { 'submodule', 'AgentIdeAge' } } end
+  if f.dir then return { { 'dir', 'AgentIdeAge' } } end
   if f.binary then return { { 'bin', 'AgentIdeAge' } } end
   if not f.added then return {} end
   return { { '+' .. f.added, 'AgentIdeGitAdd' }, { ' ' }, { '−' .. (f.removed or 0), 'AgentIdeGitDel' } }
