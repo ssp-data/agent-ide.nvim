@@ -245,7 +245,7 @@ function actions.close() M.close() end
 -- is neither mapped nor listed. The header line shows the hints in this order.
 local KEYS = {
   { '<CR>', 'open' }, { 'o', 'open' }, { 'za', 'fold' }, { 'R', 'refresh', 'refresh' }, { 'gp', 'jump' },
-  { 'x', 'park' }, { 'glg', 'lazygit', 'lazygit' }, { 'q', 'close' }, { 's', 'search' }, { '?', 'help', 'help' },
+  { 'x', 'park' }, { 'glg', 'lazygit', 'lazygit' }, { 'q', 'close' }, { 's', 'search' }, { '?', 'help', 'help' }, { 'g?', 'help' },
 }
 local OWN = {}
 for _, k in ipairs(KEYS) do OWN[vim.keycode(k[1])] = true end
@@ -311,7 +311,7 @@ function actions.help()
     { key = 'x', desc = 'park the session: stop its Claude process here' },
     { key = 'glg', desc = 'lazygit for the project (or the row\'s worktree)' },
     { key = 'q', desc = 'close drawer' },
-    { key = '?', desc = 'this help' },
+    { key = '? / g?', desc = 'this help' },
     { key = '/', desc = 'search (built-in)' },
   }
   for _, k in ipairs(provider_keys()) do rows[#rows + 1] = { key = k.lhs, desc = k.desc } end

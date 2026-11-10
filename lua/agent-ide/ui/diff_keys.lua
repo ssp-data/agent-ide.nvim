@@ -1,5 +1,5 @@
--- Keys of the diff view (buffer-local on both sides), its help, and the flip between the whole
--- branch and one commit.
+-- Keys of the diff view (buffer-local on both sides; one-character keys only on the plugin's
+-- side), its help, and the flip between the whole branch and one commit.
 local cache = require('agent-ide.git_cache')
 local config = require('agent-ide.config')
 local git = require('agent-ide.git')
@@ -8,6 +8,9 @@ local scratch = require('agent-ide.ui.diff_buf')
 local M = {}
 
 local function notify(msg) vim.notify('Agent-IDE: ' .. msg, vim.log.levels.INFO) end
+
+-- A key of one character (`q`, `?`, `R`): a Neovim command the user needs in their own file.
+local function single(lhs) return vim.fn.strchars(vim.keycode(lhs)) == 1 and not lhs:find('^<') end
 
 ---`config.keys.diff` (name -> lhs or false).
 function M.keys()
@@ -75,13 +78,17 @@ local HELP = {
 
 function M.help()
   local keys = M.keys()
-  local rows = {}
+  local rows, short = {}, false
   for _, h in ipairs(HELP) do
     local list = scratch.keys(keys[h[1]])
+    for _, k in ipairs(list) do short = short or single(k) end
     if #list > 0 then rows[#rows + 1] = { key = table.concat(list, ' / '), desc = h[2] } end
   end
-  rows[#rows + 1] = { key = ']c / [c', desc = 'next / previous hunk (Neovim)' }
+  rows[#rows + 1] = { key = ']c / [c', desc = 'next / previous hunk (Neovim\'s, also where a plugin maps them)' }
   rows[#rows + 1] = { key = 'do / dp', desc = 'diff get / put (Neovim; right side is your file)' }
+  if short then
+    rows[#rows + 1] = { key = '', desc = 'one-character keys work on the left side only; on your file use the others' }
+  end
   require('agent-ide.ui.help').open('Agent-IDE diff', rows)
 end
 
@@ -90,17 +97,27 @@ end
 ---@param view table the diff module
 function M.map(buf, view)
   local keys = M.keys()
-  scratch.map(buf, keys.next_file, function() view.step(1) end, 'next changed file')
-  scratch.map(buf, keys.prev_file, function() view.step(-1) end, 'previous changed file')
-  scratch.map(buf, keys.flip, function() M.flip(view) end, 'flip branch / commit')
-  scratch.map(buf, keys.branch, function() M.to_branch(view) end, 'branch diff')
-  scratch.map(buf, keys.close, view.close, 'close diff')
-  scratch.map(buf, keys.refresh, view.refresh, 'refresh diff')
-  scratch.map(buf, keys.help, M.help, 'diff help')
-  scratch.map(buf, keys.lazygit, function()
+  local real = not scratch.is_ours(buf) -- the user's own file
+  local function map(lhs, fn, desc)
+    for _, k in ipairs(scratch.keys(lhs)) do
+      if not (real and single(k)) then scratch.map(buf, k, fn, desc) end
+    end
+  end
+  map(keys.next_file, function() view.step(1) end, 'next changed file')
+  map(keys.prev_file, function() view.step(-1) end, 'previous changed file')
+  map(keys.flip, function() M.flip(view) end, 'flip branch / commit')
+  map(keys.branch, function() M.to_branch(view) end, 'branch diff')
+  map(keys.close, view.close, 'close diff')
+  map(keys.refresh, view.refresh, 'refresh diff')
+  map(keys.help, M.help, 'diff help')
+  map(keys.lazygit, function()
     local d = view.state()
     if d then require('agent-ide.ui.lazygit').open(d.root) end
   end, 'lazygit')
+  -- Neovim's hunk motions, also where a filetype plugin maps ]c / [c on the buffer
+  for _, m in ipairs({ { ']c', 'next hunk' }, { '[c', 'previous hunk' } }) do
+    scratch.map(buf, m[1], function() vim.cmd('normal! ' .. vim.v.count1 .. m[1]) end, m[2])
+  end
 end
 
 return M

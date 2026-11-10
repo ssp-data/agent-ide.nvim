@@ -324,7 +324,7 @@ T['help lists the hand-off key'] = function()
   start()
   open_fixture()
   child.lua('_G.help_rows = nil; require("agent-ide.ui.help").open = function(_, rows) _G.help_rows = rows end')
-  child.type_keys('?')
+  child.type_keys('g?')
   local rows = child.lua_get('_G.help_rows')
   local found
   for _, r in ipairs(rows) do

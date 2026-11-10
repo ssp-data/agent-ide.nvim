@@ -613,13 +613,13 @@ T['a session running elsewhere refuses to send and keeps the text'] = function()
   eq(fake.log(log), {})
 end
 
-T['? opens the chat help'] = function()
+T['g? opens the chat help'] = function()
   start()
   open_new()
-  child.type_keys('?')
+  child.type_keys('g?')
   wait_for(function() return child.lua_get('vim.api.nvim_win_get_config(0).relative') ~= '' end, 'help float')
   local text = table.concat(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), '\n')
-  for _, key in ipairs({ '<C-CR>', '<leader><CR>', '<C-c>', '<leader>ap', '?', 'za', ':w', 'i / a / o' }) do
+  for _, key in ipairs({ '<C-CR>', '<leader><CR>', '<C-c>', '<leader>ap', 'g?', 'za', ':w', 'i / a / o' }) do
     eq(text:find(key, 1, true) ~= nil, true)
   end
 end

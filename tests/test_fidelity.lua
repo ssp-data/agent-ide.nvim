@@ -273,7 +273,7 @@ end
 T['the chat help lists gr and gR'] = function()
   start()
   open_chat()
-  child.type_keys('?')
+  child.type_keys('g?')
   local lines = cur_lines()
   eq(has_line(lines, 'gr  ') ~= nil, true)
   eq(has_line(lines, 'gR  ') ~= nil, true)

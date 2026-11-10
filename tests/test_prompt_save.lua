@@ -347,7 +347,7 @@ T[':w <file> is refused; the prompt stays unmodified'] = function()
   set_prompt({ 'Text' })
   pcall(child.cmd, 'write ' .. tmp .. '/other.md')
   eq(vim.uv.fs_stat(tmp .. '/other.md'), nil)
-  eq(last_note(), 'Agent-IDE: the prompt is saved with :w (no file name); see ? for the keys')
+  eq(last_note(), 'Agent-IDE: the prompt is saved with :w (no file name); see g? for the keys')
   eq(modified(), false)
 end
 

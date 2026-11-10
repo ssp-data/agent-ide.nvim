@@ -206,7 +206,9 @@ function M.attach(buf)
   api.nvim_create_autocmd('BufWriteCmd', { buffer = buf, callback = function(ev)
     vim.bo[ev.buf].modified = false
     if ev.file ~= '' and ev.file ~= api.nvim_buf_get_name(ev.buf) then
-      return notify('the prompt is saved with :w (no file name); see ? for the keys', vim.log.levels.WARN)
+      local help = require('agent-ide.util.keys').label(keys().help)
+      return notify('the prompt is saved with :w (no file name)' .. (help and ('; see ' .. help .. ' for the keys') or ''),
+        vim.log.levels.WARN)
     end
     local ok, err = pcall(M.save, ev.buf, is_exit(last_cmd), is_exit(last_cmd) or is_wq(last_cmd))
     if not ok then failed(err) end
@@ -233,7 +235,7 @@ function M.attach(buf)
     if not ok then failed(err) end
     vim.cmd('normal! ZZ')
   end, { buffer = buf, nowait = true, silent = true, desc = 'Agent-IDE: save the prompt and hide it' })
-  for _, lhs in ipairs(require('agent-ide.ui.diff_buf').keys(keys().save_library)) do
+  for _, lhs in ipairs(require('agent-ide.util.keys').list(keys().save_library)) do
     vim.keymap.set('n', lhs, function() M.save_to_library(buf) end,
       { buffer = buf, nowait = true, silent = true, desc = 'Agent-IDE: save the prompt to the library' })
   end
