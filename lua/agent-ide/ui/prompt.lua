@@ -525,10 +525,11 @@ end
 local function edge_key(buf, dir, key, insert)
   return function()
     local st = bufs[buf]
-    if not st or not can_step(st, dir) then return key end
+    if not st then return key end
+    -- the cheap checks first: most presses are not on the edge line
     local row = api.nvim_win_get_cursor(0)[1]
     local at_edge = (dir < 0 and row == 1) or (dir > 0 and row == api.nvim_buf_line_count(buf))
-    if not at_edge or (insert and menu_visible()) then return key end
+    if not at_edge or (insert and menu_visible()) or not can_step(st, dir) then return key end
     return ('<Cmd>lua require("agent-ide.ui.prompt").step(%d, %d)<CR>'):format(buf, dir)
   end
 end

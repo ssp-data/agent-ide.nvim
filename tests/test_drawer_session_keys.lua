@@ -174,11 +174,20 @@ T['alive session: <S-Tab> and <leader>aM on its row ask its Claude; <C-c> only w
   child.type_keys('<C-c>')
   vim.wait(150)
   eq(#requests(), 2)
-  -- working: <C-c> interrupts it
+  -- working: <C-c> asks first (a reflex key in normal mode); No keeps it working, Yes interrupts
   child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.chat")._windows().prompt)')
   child.type_keys('i', 'Second', '<Esc>', '\\<CR>')
   wait_for(function() return sess().state == 'busy' end, 'busy')
   drawer_cursor_to('Alpha basics')
+  child.lua([[_G.confirms, _G.answers = {}, { 2, 1 }
+    vim.fn.confirm = function(msg, choices, default)
+      table.insert(_G.confirms, { msg, choices, default })
+      return table.remove(_G.answers, 1) or default
+    end]])
+  child.type_keys('<C-c>')
+  vim.wait(150)
+  eq(#requests(), 2)
+  eq(child.lua_get('_G.confirms'), { { 'Interrupt Claude in "Alpha basics"?', '&Interrupt\n&Cancel', 2 } })
   child.type_keys('<C-c>')
   wait_for(function() return #requests() == 3 end, 'interrupt request')
   eq(requests()[3].subtype, 'interrupt')

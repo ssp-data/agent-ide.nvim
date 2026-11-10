@@ -252,7 +252,7 @@ In the drawer:
 | `x` | Park the session: stop the Claude process this Neovim runs for it |
 | `H` | Hide the session into its project's `Hidden (n)` group; on a hidden session: show it again (Vim's `H` motion is not available in the drawer) |
 | `D` | Delete an inactive session: move it to the plugin's trash after a confirm (see [Deleting sessions](#deleting-sessions)) |
-| `<leader>aM`, `<S-Tab>`, `<C-c>`, `<leader>at`, `gr` | On a session row, what they do in its chat, for that session and without opening it: pick the model, next permission mode, interrupt (only while Claude works), continue in native Claude in a tmux pane, raw view in the main window. A session without a process takes the mode or model when it starts; one running in another Claude is refused (the raw view still opens). On other rows `<S-Tab>` and `<C-c>` keep their Vim meaning |
+| `<leader>aM`, `<S-Tab>`, `<C-c>`, `<leader>at`, `gr` | On a session row, what they do in its chat, for that session and without opening it: pick the model, next permission mode, interrupt (only while Claude works, after a confirm), continue in native Claude in a tmux pane, raw view in the main window. A session without a process takes the mode or model when it starts; one running in another Claude is refused (the raw view still opens). On other rows `<S-Tab>` and `<C-c>` keep their Vim meaning |
 | `X` | Close the Claude that runs the session in a tmux pane, after a confirm (see [Closing terminal sessions](#closing-terminal-sessions)) |
 | `q` | Close the drawer |
 | `gL` | Show or hide the legend of the state marks |
