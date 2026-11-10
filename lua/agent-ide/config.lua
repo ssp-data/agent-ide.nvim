@@ -17,6 +17,8 @@ local function defaults()
     keys = {
       toggle = '<leader>aa',
       next_waiting = '<leader>an', -- global: the next session that needs you
+      search = '<leader>as', -- global: search all sessions (titles, prompts, answers)
+      prompt_history = '<leader>aP', -- global: every prompt, newest first
       -- chat view, buffer-local in the transcript and the prompt
       chat = { send = '<C-CR>', send_alt = '<leader><CR>', interrupt = '<C-c>', prompt = '<leader>ap', help = '?',
         history_prev = '<C-p>', history_next = '<C-n>', attach = '<leader>af',

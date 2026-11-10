@@ -17,6 +17,8 @@ function M.setup(opts)
   local globals = {
     toggle = { M.toggle, 'toggle Agents tab' },
     next_waiting = { M.next_waiting, 'next session that needs you' },
+    search = { function() M.search() end, 'search all sessions' },
+    prompt_history = { function() M.prompt_history() end, 'prompt history' },
   }
   for name, g in pairs(globals) do
     if keys[name] then
@@ -36,6 +38,16 @@ end
 function M.next_waiting()
   require('agent-ide.ui.highlights').setup()
   require('agent-ide.ui.waiting').next_waiting()
+end
+
+---Search titles, prompts and answers of every session (fuzzy with the helper).
+---@param opts? { query?: string, kinds?: string[], scope?: 'all'|'project'|'session', project?: table, title?: string }
+function M.search(opts) require('agent-ide.ui.search').open(opts) end
+
+---Every prompt you sent, newest first; type to filter.
+---@param opts? table as for `search`
+function M.prompt_history(opts)
+  M.search(vim.tbl_extend('force', { kinds = { 'prompt' }, title = 'Prompt history' }, opts or {}))
 end
 
 ---@return string text for a statusline (percent signs doubled)

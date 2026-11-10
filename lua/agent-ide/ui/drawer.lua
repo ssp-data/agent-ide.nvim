@@ -185,12 +185,19 @@ end
 
 function actions.close() M.close() end
 
+function actions.search()
+  local node = current_node()
+  local p = node and node.project
+  require('agent-ide').search(p and { scope = 'project', project = p } or nil)
+end
+
 function actions.help()
   require('agent-ide.ui.help').open('Agent-IDE drawer', {
     { key = '<CR> / o', desc = 'open session, start a new one, or toggle project' },
     { key = 'za', desc = 'toggle fold' },
     { key = 'R', desc = 'refresh' },
     { key = 'gp', desc = 'jump to tmux pane' },
+    { key = 's', desc = 'search this project (<Tab> in the picker: all sessions)' },
     { key = 'q', desc = 'close drawer' },
     { key = '?', desc = 'this help' },
     { key = '/', desc = 'search (built-in)' },
@@ -212,6 +219,7 @@ local function ensure_buf()
   map('R', actions.refresh)
   map('gp', actions.jump)
   map('q', actions.close)
+  map('s', actions.search)
   map('?', actions.help)
   S.buf = buf
   return buf
