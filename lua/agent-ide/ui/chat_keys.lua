@@ -17,7 +17,7 @@ local HELP = {
   { 'answer', 'answer what Claude asks (permission, question, plan)' },
   { 'mode', 'next permission mode (manual, acceptEdits, plan, auto)' },
   { 'model', 'pick the model' },
-  { 'raw', 'transcript: raw view of what was sent (>>) and received (<<); q or the same key returns' },
+  { 'raw', 'transcript: raw view of the wire lines (>> sent, << received), not the rendered answer; q or the same key returns' },
   { 'raw_event', 'transcript: raw view at the line of the unknown fold under the cursor' },
   { 'help', 'this help' },
   { 'history_prev', 'prompt: older prompt (also <Up>) on the first line' },

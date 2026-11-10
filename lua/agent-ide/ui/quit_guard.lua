@@ -4,15 +4,14 @@
 -- closes. A forced quit (`:qa!`, `:q!`, ...) is not asked about.
 --
 -- Cancelling: an autocommand cannot return a value, so the quit is made to fail the way
--- Neovim itself refuses to leave a modified buffer: a hidden unnamed-file buffer is marked
--- modified (E162). Neovim then switches the window to that buffer; the next tick puts the
+-- Neovim itself refuses to leave a modified buffer: a hidden unnamed buffer is marked
+-- modified (E162, or E141 for :wqa / :xa). Neovim then switches the window to that buffer; the next tick puts the
 -- window back and deletes the buffer.
 local api = vim.api
 
 local M = {}
 
 local MESSAGE = 'Agent-IDE: %d session(s) still working. Quit anyway?'
-local BUFFER_NAME = 'Agent-IDE: sessions still working'
 
 local last_cmd ---@type string|nil the typed ex command being executed (cleared on the next tick)
 local asking = false
@@ -38,28 +37,43 @@ function M.working()
   return n
 end
 
+local pending ---@type { win: integer, prev: integer, scratch: integer }|nil a refusal not yet cleaned up
+
+-- Put the window back on the buffer it showed and delete the scratch buffer.
+local function cleanup()
+  local p = pending
+  pending = nil
+  if not p then return end
+  if api.nvim_win_is_valid(p.win) and api.nvim_buf_is_valid(p.prev) and api.nvim_win_get_buf(p.win) ~= p.prev then
+    pcall(api.nvim_win_set_buf, p.win, p.prev)
+  end
+  pcall(api.nvim_buf_delete, p.scratch, { force = true })
+end
+
+-- The scratch buffer stays unnamed on purpose: `:qa` reports it as changed (E162) and `:wqa` /
+-- `:xa` cannot write it (E141), so every quit command fails and nothing lands on disk.
 local function refuse_quit()
-  local win, prev = api.nvim_get_current_win(), api.nvim_get_current_buf()
   local scratch = api.nvim_create_buf(false, true)
   vim.bo[scratch].buftype = ''
-  pcall(api.nvim_buf_set_name, scratch, BUFFER_NAME)
   vim.bo[scratch].modified = true
-  vim.schedule(function()
-    if api.nvim_win_is_valid(win) and api.nvim_buf_is_valid(prev) and api.nvim_win_get_buf(win) ~= prev then
-      pcall(api.nvim_win_set_buf, win, prev)
-    end
-    pcall(api.nvim_buf_delete, scratch, { force = true })
-  end)
+  pending = { win = api.nvim_get_current_win(), prev = api.nvim_get_current_buf(), scratch = scratch }
+  vim.schedule(cleanup)
 end
 
 local function on_exit_pre()
+  cleanup() -- a second quit before the next tick: the first refusal's buffer must not block it
+  if #api.nvim_list_uis() == 0 then return end -- scripts never wait for a question
   if asking then return end
   local n = M.working()
   if n == 0 or M._forced(last_cmd) then return end
   asking = true -- one question per quit, whatever fires this event again
   local choice = vim.fn.confirm(MESSAGE:format(n), '&Quit\n&Cancel', 2)
-  vim.schedule(function() asking = false end)
-  if choice ~= 1 then refuse_quit() end
+  if choice == 1 then
+    vim.schedule(function() asking = false end)
+  else
+    asking = false -- the quit is refused: the next one is a new question
+    refuse_quit()
+  end
 end
 
 function M.setup()

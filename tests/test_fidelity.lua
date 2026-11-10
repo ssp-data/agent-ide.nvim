@@ -65,6 +65,7 @@ local function start(steps, opts)
     _G.notes, _G.levels, _G.confirms, _G.answer = {}, {}, {}, 2
     vim.notify = function(msg, level) table.insert(_G.notes, msg); table.insert(_G.levels, level) end
     vim.ui.select = function() end
+    vim.api.nvim_list_uis = function() return { {} } end -- the test child has no UI; the quit guard needs one
     vim.fn.confirm = function(msg, choices, default)
       table.insert(_G.confirms, { msg = msg, choices = choices, default = default })
       vim.fn.writefile({ 'asked' }, asked, 'a') -- survives the child's exit
@@ -360,6 +361,7 @@ T['quitting with working sessions asks; Cancel keeps everything, Quit stops the 
   local buf, win = child.lua_get('vim.api.nvim_get_current_buf()'), child.lua_get('vim.api.nvim_get_current_win()')
   child.lua('vim.api.nvim_win_set_cursor(0, { 1, 0 })')
   local modified_now = 'vim.tbl_map(function(b) return b.name end, vim.fn.getbufinfo({ bufmodified = 1 }))'
+  local nbufs = child.lua_get('#vim.fn.getbufinfo()')
   local modified = child.lua_get(modified_now) -- the transcript counts: Neovim keeps it modified, unwritable
 
   quit(':qa<CR>') -- the stub answers Cancel
@@ -374,13 +376,90 @@ T['quitting with working sessions asks; Cancel keeps everything, Quit stops the 
   -- the window, its buffer and the buffer list are as before; nothing is left modified
   eq({ child.lua_get('vim.api.nvim_get_current_buf()'), child.lua_get('vim.api.nvim_get_current_win()') }, { buf, win })
   eq(child.lua_get(modified_now), modified)
-  eq(child.lua_get('vim.fn.bufnr("Agent-IDE: sessions still working")'), -1)
+  eq(child.lua_get('#vim.fn.getbufinfo()'), nbufs)
 
   child.lua('_G.answer = 1')
   quit(':qa<CR>')
   wait_for(function() return not responds() end, 'Neovim to exit')
   wait_for(function() return not alive(pids[1]) and not alive(pids[2]) end, 'processes to stop')
   eq(#vim.fn.readfile(asked), 2) -- one question per quit
+end
+
+T['Cancel also holds for :wqa and :xa: Neovim stays, no file is written, sessions untouched'] = function()
+  start(WORK)
+  open_chat()
+  send('Work')
+  wait_for(function() return child.lua_get('#_G.S.raw') >= 2 end, 'running')
+  local cwd = tmp .. '/cwd'
+  vim.fn.mkdir(cwd, 'p')
+  -- a named buffer of the user's, modified: Neovim's own :wqa writes it before it refuses
+  child.lua('vim.cmd.cd(...); vim.cmd.edit("mine.txt"); vim.api.nvim_buf_set_lines(0, 0, -1, false, { "mine" })', { cwd })
+  local pid = child.lua_get('_G.S.pid')
+  for i, cmd in ipairs({ ':wqa<CR>', ':xa<CR>' }) do
+    quit(cmd)
+    wait_for(function() return responds() and #child.lua_get('_G.confirms') == i end, 'question ' .. cmd)
+    dismiss_hit_enter()
+    eq(responds(), true)
+    eq(child.lua_get('_G.S.state'), 'busy')
+    eq(alive(pid), true)
+    local files = vim.fn.readdir(cwd)
+    table.sort(files)
+    eq(files, { 'mine.txt' }) -- nothing else was created
+  end
+  -- observed on 0.12.6: the named modified buffer is written by :wqa before the refusal
+  eq(vim.fn.readfile(cwd .. '/mine.txt'), { 'mine' })
+end
+
+T['a second quit before the next tick asks again'] = function()
+  start(WORK)
+  open_chat()
+  send('Work')
+  wait_for(function() return child.lua_get('#_G.S.raw') >= 2 end, 'running')
+  child.lua('pcall(vim.cmd, "qa"); pcall(vim.cmd, "qa")') -- no tick between the two
+  eq(#child.lua_get('_G.confirms'), 2)
+  eq(responds(), true)
+  vim.uv.sleep(100)
+  eq(child.lua_get('#vim.fn.getbufinfo({ bufmodified = 1 }) <= 1'), true)
+end
+
+T['without a UI there is no question'] = function()
+  start(WORK)
+  open_chat()
+  send('Work')
+  wait_for(function() return child.lua_get('#_G.S.raw') >= 2 end, 'running')
+  local pid = child.lua_get('_G.S.pid')
+  child.lua('vim.api.nvim_list_uis = function() return {} end')
+  quit(':qa<CR>')
+  wait_for(function() return not responds() end, 'Neovim to exit')
+  wait_for(function() return not alive(pid) end, 'process to stop')
+  eq(vim.fn.filereadable(asked), 0)
+end
+
+T['the raw view has no folds; the transcript folds are back after q'] = function()
+  start(flat({ expect = 'Go' }, raw(INIT), raw('{"type":"mystery","n":1}'), raw(SAY), raw(RESULT)))
+  open_chat()
+  send('Go')
+  wait_for(function() return state() ~= 'busy' end, 'turn end')
+  local header = has_line(transcript(), '▸ unknown: mystery')
+  eq(child.lua_get('vim.fn.foldclosed(...)', { header }), header)
+  child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.chat")._windows().transcript)')
+  child.type_keys('gr')
+  eq(child.lua_get('{ vim.wo.foldmethod, vim.wo.foldenable, vim.fn.foldclosed(1) }'), { 'manual', false, -1 })
+  child.type_keys('q')
+  eq(child.lua_get('vim.wo.foldmethod'), 'expr')
+  eq(child.lua_get('vim.fn.foldclosed(...)', { header }), header)
+end
+
+T['while the raw view is shown the chat is not on screen; q marks it seen'] = function()
+  start(flat({ expect = 'Go' }, raw(INIT), { sleep_ms = 300 }, raw(RESULT)))
+  open_chat()
+  send('Go')
+  wait_for(function() return child.lua_get('#_G.S.raw') >= 2 end, 'running')
+  child.type_keys('gr')
+  wait_for(function() return state() ~= 'busy' end, 'turn end')
+  eq({ state(), child.lua_get('_G.S.visible'), child.lua_get('_G.S.unread') }, { 'done', false, true })
+  child.type_keys('q')
+  eq({ state(), child.lua_get('_G.S.visible'), child.lua_get('_G.S.unread') }, { 'idle', true, false })
 end
 
 T[':qa! and :q! do not ask'] = function()
