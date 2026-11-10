@@ -115,8 +115,27 @@ T['same first line, different text: two files; the same text again: no copy'] = 
   set_prompt({ 'Review', 'one' })
   child.cmd('write')
   eq(files(folder()), { 'review-2.md', 'review.md' })
-  eq(origin().path, folder() .. '/review.md')
   eq(last_note(), 'Agent-IDE: already saved → Saved prompts/repo/review')
+  -- the buffer is not tied to that file: editing and saving again never changes it
+  eq(origin(), vim.NIL)
+  set_prompt({ 'Review', 'one, tweaked' })
+  child.cmd('write')
+  eq(read(folder() .. '/review.md'), 'Review\none\n')
+  eq(read(folder() .. '/review-3.md'), 'Review\none, tweaked\n')
+end
+
+T['pasting a saved prompt, :w, edit, :w: the original is never overwritten'] = function()
+  start()
+  in_prompt()
+  vim.fn.mkdir(folder(), 'p')
+  vim.fn.writefile({ 'Same text' }, folder() .. '/same-text.md')
+  set_prompt({ 'Same text' })
+  child.cmd('write')
+  eq(last_note(), 'Agent-IDE: already saved → Saved prompts/repo/same-text')
+  set_prompt({ 'Same text', 'more' })
+  child.cmd('write')
+  eq(read(folder() .. '/same-text.md'), 'Same text\n')
+  eq(read(folder() .. '/same-text-2.md'), 'Same text\nmore\n')
 end
 
 T['file names: attach lines skipped, umlauts kept, emoji dropped, 60 characters, a timestamp when empty'] = function()
@@ -353,6 +372,177 @@ T[':qa with a draft quits without saving or asking'] = function()
   pcall(child.type_keys, ':qa<CR>')
   wait_for(function() return not pcall(child.lua_get, '1') end, 'Neovim to exit', 3000)
   eq(vim.uv.fs_stat(saved), nil)
+end
+
+for _, cmd in ipairs({ 'wqa', 'xa' }) do
+  T[':' .. cmd .. ' with a draft quits without saving or asking'] = function()
+    start()
+    in_prompt()
+    set_prompt({ 'draft' })
+    pcall(child.type_keys, ':' .. cmd .. '<CR>')
+    wait_for(function() return not pcall(child.lua_get, '1') end, 'Neovim to exit', 3000)
+    eq(vim.uv.fs_stat(saved), nil)
+    eq(vim.uv.fs_stat(lib .. '/draft.md'), nil)
+  end
+end
+
+-- Origin and history stay consistent whatever writes into the prompt ---------------------------
+
+T['queued prompts put back (interrupt, park) make a loaded template a new prompt'] = function()
+  start()
+  load_invoice()
+  in_prompt()
+  child.lua('require("agent-ide.ui.prompt").restore(..., { "queued one" })', { pbuf() })
+  eq(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'),
+    { 'queued one', '', 'Please write an invoice text for [client].' })
+  eq(origin(), vim.NIL)
+  child.cmd('write')
+  eq(read(lib .. '/invoice.md'):find('queued', 1, true), nil)
+  eq(read(folder() .. '/queued-one.md') ~= nil, true)
+end
+
+T['restore while browsing the history puts the draft back first'] = function()
+  start()
+  in_prompt()
+  set_prompt({ 'my draft' })
+  child.lua('require("agent-ide.session").all()[1].events = { { kind = "prompt", text = "old prompt" } }')
+  child.lua('vim.api.nvim_win_set_cursor(0, { 1, 0 })')
+  child.type_keys('<C-p>')
+  eq(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), { 'old prompt' })
+  child.lua('require("agent-ide.ui.prompt").restore(..., { "queued" })', { pbuf() })
+  eq(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), { 'queued', '', 'my draft' })
+  eq(child.lua_get('require("agent-ide.ui.prompt").browsing(...)', { pbuf() }), false)
+end
+
+T['loading a template while the history is shown asks about the real draft and leaves the history'] = function()
+  start()
+  in_prompt()
+  set_prompt({ 'my draft' })
+  child.lua('require("agent-ide.session").all()[1].events = { { kind = "prompt", text = "old prompt" } }')
+  child.lua('vim.api.nvim_win_set_cursor(0, { 1, 0 })')
+  child.type_keys('<C-p>')
+  child.lua('_G.answers = { 1 }')
+  load_invoice()
+  eq(#child.lua_get('_G.asked'), 1)
+  eq(child.lua_get('require("agent-ide.ui.prompt").browsing(...)', { pbuf() }), false)
+  set_prompt({ 'edited invoice' })
+  child.lua('vim.api.nvim_win_set_cursor(0, { 1, 0 })')
+  child.type_keys('<Down>') -- no history to step out of: the text stays
+  eq(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), { 'edited invoice' })
+  child.cmd('write')
+  eq(read(lib .. '/invoice.md'):find('edited invoice', 1, true) ~= nil, true)
+  -- a command inserted while the history is shown lands above the real draft
+  child.lua('require("agent-ide.ui.prompt").clear(...)', { pbuf() })
+  set_prompt({ 'draft two' })
+  child.lua('vim.api.nvim_win_set_cursor(0, { 1, 0 })')
+  child.type_keys('<C-p>')
+  child.lua('require("agent-ide.prompts.actions").use({ kind = "command", insert = "/x", title = "/x", path = "/nonexistent" })')
+  eq(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), { '/x ', 'draft two' })
+end
+
+T['a command inserted above a loaded template, or a reused search hit, makes it a new prompt'] = function()
+  start()
+  load_invoice()
+  in_prompt()
+  child.lua('require("agent-ide.prompts.actions").use({ kind = "command", insert = "/x", title = "/x", path = "/nonexistent" })')
+  eq(origin(), vim.NIL)
+  child.type_keys('<Esc>')
+  child.lua('_G.answers = { 1 }') -- replace the draft
+  load_invoice()
+  child.lua('require("agent-ide.ui.search_open").reuse("from search")')
+  eq(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'),
+    { 'Please write an invoice text for [client].', '', 'from search' })
+  eq(origin(), vim.NIL)
+end
+
+T['a saved prompt or library file that starts with a --- block is loaded whole and saved back byte for byte'] = function()
+  start()
+  vim.fn.mkdir(folder(), 'p')
+  local cases = {
+    { kind = 'saved', path = folder() .. '/rule.md', text = '---\nname: looks like yaml\n---\nbody\n' },
+    { kind = 'template', path = lib .. '/rule-pair.md', text = '---\nhello there\n---\nbody\n' },
+    { kind = 'template', path = lib .. '/mixed.md', text = '---\nnote: x\njust a sentence\n---\nbody\n' },
+  }
+  for _, c in ipairs(cases) do
+    local f = assert(io.open(c.path, 'wb'))
+    f:write(c.text)
+    f:close()
+    child.lua('_G.answers = { 1 }')
+    child.lua('require("agent-ide.prompts.actions").use({ kind = ..., path = select(2, ...), title = "t" })', { c.kind, c.path })
+    wait_for(function() return origin() ~= vim.NIL and origin().path == c.path end, 'loaded ' .. c.path)
+    eq(child.lua_get('table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\\n") .. "\\n"'), c.text)
+    child.cmd('write')
+    eq(read(c.path), c.text)
+  end
+  -- real frontmatter in a library file: still left out
+  child.lua('_G.answers = { 1 }')
+  load_invoice()
+  eq(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), { 'Please write an invoice text for [client].' })
+end
+
+local function async_select()
+  child.lua([[vim.ui.select = function(items, opts, cb)
+    _G.pending = { cb = cb, items = items, prompt_shown = require('agent-ide.ui.chat')._windows().prompt ~= nil }
+  end]])
+end
+
+for _, how in ipairs({ 'ZZ', ':x' }) do
+  T['changed on disk, ' .. how .. ' with an asynchronous picker: the question opens after the hide'] = function()
+    start()
+    load_invoice()
+    in_prompt()
+    vim.uv.sleep(20)
+    vim.fn.writefile({ 'changed elsewhere' }, lib .. '/invoice.md')
+    set_prompt({ 'mine' })
+    async_select()
+    child.type_keys(how == 'ZZ' and 'ZZ' or ':x<CR>')
+    wait_for(function() return child.lua_get('_G.pending ~= nil') end, 'question')
+    eq(child.lua_get('_G.pending.prompt_shown'), false)
+    child.lua('_G.pending.cb("Overwrite", 1)')
+    eq(read(lib .. '/invoice.md'), 'mine\n')
+  end
+end
+
+T['a renamed file keeps the changed-on-disk check of the buffer loaded from it'] = function()
+  start()
+  load_invoice()
+  in_prompt()
+  vim.uv.sleep(20)
+  vim.fn.writefile({ 'changed elsewhere' }, lib .. '/invoice.md')
+  child.lua([[require('agent-ide.prompts.store').rename({ kind = 'template', path = ... }, 'renamed', function() end)]], { lib .. '/invoice.md' })
+  eq(origin().path, lib .. '/renamed.md')
+  set_prompt({ 'mine' })
+  child.lua('_G.answers = { 3 }')
+  child.cmd('write')
+  eq(#child.lua_get('_G.asked'), 1)
+  eq(read(lib .. '/renamed.md'), 'changed elsewhere\n')
+end
+
+T[':file and :saveas do not turn the prompt into a file buffer'] = function()
+  start()
+  in_prompt()
+  set_prompt({ 'Text' })
+  local name = child.lua_get('vim.api.nvim_buf_get_name(0)')
+  pcall(child.cmd, 'file ' .. tmp .. '/renamed.md')
+  eq(child.lua_get('vim.api.nvim_buf_get_name(0)'), name)
+  eq(last_note(), 'Agent-IDE: the prompt buffer keeps its name; save it with :w')
+  pcall(child.cmd, 'saveas ' .. tmp .. '/saved-as.md')
+  eq(child.lua_get('vim.api.nvim_buf_get_name(0)'), name)
+  eq(vim.uv.fs_stat(tmp .. '/saved-as.md'), nil)
+  eq(vim.uv.fs_stat(tmp .. '/renamed.md'), nil)
+  eq(child.lua_get('vim.bo.buftype'), 'acwrite')
+  -- still saves normally
+  child.cmd('write')
+  eq(read(folder() .. '/text.md'), 'Text\n')
+end
+
+T['file names are limited by bytes'] = function()
+  start()
+  local res = child.lua_get('{ require("agent-ide.prompts.store").clean_name(...) }', { string.rep('ü', 121) })
+  eq(res, { vim.NIL, 'a name part is longer than 240 bytes' })
+  res = child.lua_get('{ require("agent-ide.prompts.store").clean_name(...) }', { string.rep('ü', 120) })
+  eq(res, { string.rep('ü', 120) })
+  eq(#child.lua_get('require("agent-ide.prompts.store").slug(...)', { { string.rep('ü', 200) } }) <= 240, true)
 end
 
 return T

@@ -7,7 +7,8 @@ local M = {}
 
 local FILE_MODE, DIR_MODE = 384, 448 -- 0600, 0700
 local SLUG_MAX = 60
-local NAME_MAX = 100 -- characters per path component of a library name
+-- bytes per file name part: 255 (Linux NAME_MAX) minus room for `-NNNN.md`
+local NAME_BYTES = 240
 
 -- Origins ------------------------------------------------------------------------------------
 
@@ -76,7 +77,7 @@ function M.slug(lines)
       out[#out + 1] = '-'
       dash = true
     end
-    if #out >= SLUG_MAX then break end
+    if #out >= SLUG_MAX or #table.concat(out) + 4 > NAME_BYTES then break end
   end
   while out[#out] == '-' do out[#out] = nil end
   local s = table.concat(out)
@@ -105,7 +106,7 @@ function M.clean_name(typed, flat)
         return nil, 'only letters, digits, space, - _ and . are allowed'
       end
     end
-    if vim.fn.strchars(part) > NAME_MAX then return nil, 'a name part is longer than ' .. NAME_MAX .. ' characters' end
+    if #part > NAME_BYTES then return nil, 'a name part is longer than ' .. NAME_BYTES .. ' bytes' end
     parts[#parts + 1] = (part:gsub('%s+', '-'))
   end
   return table.concat(parts, '/')
@@ -219,7 +220,7 @@ function M.frontmatter_of(path)
   if not f then return '' end
   local text = f:read('a') or ''
   f:close()
-  return require('agent-ide.prompts.sources').parse(text).frontmatter or ''
+  return require('agent-ide.prompts.sources').parse(text, { yaml = true }).frontmatter or ''
 end
 
 -- Rename and delete --------------------------------------------------------------------------------
@@ -258,7 +259,8 @@ function M.rename(e, new_name, cb)
   end
   for _, b in ipairs(prompt_bufs()) do
     local o = M.origin(b)
-    if o and o.path == e.path then M.set_origin(b, { kind = o.kind, path = dest }) end
+    -- the old stamp moves along: a change made on disk before the rename is still noticed
+    if o and o.path == e.path then vim.b[b].agent_ide_origin = { kind = o.kind, path = dest, stamp = o.stamp } end
   end
   cb(dest)
 end

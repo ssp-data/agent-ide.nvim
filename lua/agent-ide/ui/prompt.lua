@@ -409,20 +409,55 @@ function M.clear(buf)
   vim.bo[buf].modified = false
 end
 
+---Stop showing a history entry: the draft it stood in for comes back, the history resets.
+---@param buf integer
+function M.leave_history(buf)
+  local st = bufs[buf]
+  if not st or not st.idx then return end
+  local draft = st.draft or { '' }
+  reset_history(buf)
+  api.nvim_buf_set_lines(buf, 0, -1, false, draft)
+  vim.bo[buf].modified = false
+end
+
+---The one way the plugin writes text into a prompt buffer (loading a prompt, inserting a
+---command, queued prompts coming back, a reused search hit). The history is left first, so
+---the text lands next to the real draft, and the buffer forgets the file it was loaded from:
+---the result is a new prompt (a caller that loads a file sets the origin again).
+---  'replace': `lines` are the whole text; 'above' / 'below': next to the current text with a
+---  blank line between; 'first': `lines` become the first lines (no blank line).
+---An empty buffer just gets `lines`.
+---@param buf integer
+---@param lines string[]
+---@param how 'replace'|'above'|'below'|'first'
+---@return string[] lines now in the buffer
+function M.put(buf, lines, how)
+  M.leave_history(buf)
+  vim.b[buf].agent_ide_origin = nil
+  local cur = api.nvim_buf_get_lines(buf, 0, -1, false)
+  local empty = #cur == 1 and cur[1] == ''
+  local out
+  if how == 'replace' or empty then
+    out = vim.list_extend({}, lines)
+  elseif how == 'below' then
+    out = vim.list_extend(vim.list_extend(cur, { '' }), lines)
+  elseif how == 'first' then
+    out = vim.list_extend(vim.list_extend({}, lines), cur)
+  else
+    out = vim.list_extend(vim.list_extend(vim.list_extend({}, lines), { '' }), cur)
+  end
+  if #out == 0 then out = { '' } end
+  api.nvim_buf_set_lines(buf, 0, -1, false, out)
+  vim.bo[buf].modified = false
+  return out
+end
+
 ---Put prompts back (e.g. dropped from the queue) above the text already in the buffer,
 ---separated by blank lines.
 ---@param buf integer
 ---@param texts string[]
 function M.restore(buf, texts)
-  reset_history(buf)
-  local lines = vim.split(table.concat(texts, '\n\n'), '\n', { plain = true })
-  local cur = api.nvim_buf_get_lines(buf, 0, -1, false)
-  if #cur > 1 or cur[1] ~= '' then
-    lines[#lines + 1] = ''
-    vim.list_extend(lines, cur)
-  end
-  api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  vim.bo[buf].modified = false
+  M.put(buf, vim.split(table.concat(texts, '\n\n'), '\n', { plain = true }), 'above')
 end
 
 return M

@@ -127,11 +127,7 @@ end
 function M.reuse(text)
   local buf, win = M.prompt_target()
   if not buf then return false end
-  local new = vim.split(text, '\n', { plain = true })
-  local cur = api.nvim_buf_get_lines(buf, 0, -1, false)
-  local lines = (#cur == 1 and cur[1] == '') and new or vim.list_extend(vim.list_extend(cur, { '' }), new)
-  api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  vim.bo[buf].modified = false
+  local lines = require('agent-ide.ui.prompt').put(buf, vim.split(text, '\n', { plain = true }), 'below')
   if api.nvim_get_current_tabpage() ~= api.nvim_win_get_tabpage(win) then
     api.nvim_set_current_tabpage(api.nvim_win_get_tabpage(win))
   end

@@ -60,12 +60,31 @@ local function fields(block)
   return out
 end
 
+-- A block that reads as YAML: at least one `key:` line, and every other non-blank line a key
+-- line, an indented continuation, a `- item` or a `#` comment.
+local function yaml_like(block)
+  local keys = 0
+  for line in (block .. '\n'):gmatch('(.-)\n') do
+    line = line:gsub('\r$', '')
+    if line:match('^[%w_%-]+%s*:') then
+      keys = keys + 1
+    elseif line:find('%S') and not (line:match('^%s') or line:match('^#') or line:match('^%-%s') or line == '-') then
+      return false
+    end
+  end
+  return keys > 0
+end
+
 ---Split optional YAML frontmatter (`---` fenced at the very top) from the body. Reads only
 ---`name` and `description`; never raises. `frontmatter` holds the block's bytes, both fences and
 ---the newline after the closing one included, so a file can be rewritten with it unchanged.
+---`opts.yaml`: a block counts only when it reads as YAML (library files: a prompt may start
+---with a pair of markdown rules); Claude's commands and skills take any block.
 ---@param text string
+---@param opts? { yaml?: boolean }
 ---@return { name: string|nil, description: string|nil, body: string, frontmatter: string|nil }
-function M.parse(text)
+function M.parse(text, opts)
+  local yaml = opts and opts.yaml
   local ok, res = pcall(function()
     local start = text:sub(1, 3) == '\239\187\191' and 4 or 1 -- a UTF-8 byte order mark
     local first = text:match('^%-%-%-[ \t]*\r?\n', start)
@@ -77,6 +96,7 @@ function M.parse(text)
       local line = text:sub(pos, (nl or #text + 1) - 1):gsub('\r$', '')
       if line:match('^%-%-%-[ \t]*$') or line:match('^%.%.%.[ \t]*$') then
         local stop = nl or #text
+        if yaml and not yaml_like(text:sub(from, pos - 1)) then return { body = text } end
         local f = fields(text:sub(from, pos - 1))
         return { name = f.name, description = f.description, body = text:sub(stop + 1), frontmatter = text:sub(1, stop) }
       end
@@ -92,9 +112,11 @@ end
 -- Files ------------------------------------------------------------------------------------
 
 -- The first HEAD_BYTES of a file; up to 64 KiB when a frontmatter block is longer than that.
+M._reads = 0 -- file heads read (tests)
 local function read_head(path)
   local f = io.open(path, 'rb')
   if not f then return nil end
+  M._reads = M._reads + 1
   local text = f:read(M.HEAD_BYTES) or ''
   if #text == M.HEAD_BYTES and text:match('^%-%-%-') and not M.parse(text).frontmatter then
     text = text .. (f:read(65536 - M.HEAD_BYTES) or '')
@@ -114,7 +136,9 @@ local function pretty(file) return (file:gsub('%.md$', ''):gsub('[-_]+', ' ')) e
 
 local function stamp(st) return st and (st.mtime.sec .. '.' .. st.mtime.nsec .. ':' .. st.size) or '' end
 
----Text of a template or saved prompt without its frontmatter, byte for byte.
+---Text of a template (without a YAML frontmatter block) or a saved prompt (the whole file:
+---the plugin never writes frontmatter, so a leading `---` block is the user's text), byte for
+---byte.
 ---@param entry table PromptEntry
 ---@param cb fun(text: string|nil, err: string|nil)
 function M.read(entry, cb)
@@ -125,7 +149,8 @@ function M.read(entry, cb)
   if not f then return cb(nil, 'cannot read the file') end
   local text = f:read('a') or ''
   f:close()
-  cb(M.parse(text).body)
+  if entry.kind == 'saved' then return cb(text) end
+  cb(M.parse(text, { yaml = true }).body)
 end
 
 -- Scan -------------------------------------------------------------------------------------
@@ -150,12 +175,21 @@ local function is_file(path, typ)
   return false
 end
 
--- Build the entry of one file; nil when it cannot be read.
-local function make(src, path, rel)
+-- Build the entry of one file; nil when it cannot be read. An entry of `known` (the last scan)
+-- whose file has not changed is reused without reading the file.
+local function make(src, path, rel, known)
+  local st = stamp(uv.fs_stat(path))
+  local old = known and known[path]
+  if old and old.stamp == st and old.kind == src.kind and old.scope == src.scope then return old end
   local head = read_head(path)
   if not head then return nil end
-  local p = M.parse(head)
-  local e = { kind = src.kind, path = path, scope = src.scope, stamp = stamp(uv.fs_stat(path)), description = p.description }
+  local p
+  if src.kind == 'saved' then
+    p = { body = head }
+  else
+    p = M.parse(head, { yaml = src.kind == 'template' })
+  end
+  local e = { kind = src.kind, path = path, scope = src.scope, stamp = st, description = p.description }
   if src.kind == 'command' then
     e.name = rel:gsub('%.md$', ''):gsub('/', ':')
     e.title, e.insert = e.name, '/' .. e.name
@@ -191,8 +225,9 @@ function M.scan(opts, cb)
     add('command', 'project', opts.project_root .. '/.claude/commands', 'tree')
     add('skill', 'project', opts.project_root .. '/.claude/skills', 'skills')
   end
-  for _, d in ipairs(opts.command_dirs or {}) do add('command', 'user', d, 'tree') end
-  for _, d in ipairs(opts.skill_dirs or {}) do add('skill', 'user', d, 'skills') end
+  local function list(v) return type(v) == 'string' and { v } or (type(v) == 'table' and v or {}) end
+  for _, d in ipairs(list(opts.command_dirs)) do add('command', 'user', d, 'tree') end
+  for _, d in ipairs(list(opts.skill_dirs)) do add('skill', 'user', d, 'skills') end
   add('template', 'library', opts.library_dir, 'tree')
   if opts.saved_dir and opts.project_name then add('saved', 'saved', expand(opts.saved_dir) .. '/' .. opts.project_name, 'flat') end
 
@@ -270,7 +305,7 @@ function M.scan(opts, cb)
         if item.dir then
           list(item)
         else
-          local e = make(item.src, item.file, item.rel)
+          local e = make(item.src, item.file, item.rel, opts.known)
           if e then found[#found + 1] = { e = e, order = item.src.order } end
         end
       end)

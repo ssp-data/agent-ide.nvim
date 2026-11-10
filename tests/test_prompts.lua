@@ -121,6 +121,20 @@ T['a frontmatter block longer than the first read still gives the name'] = funct
   eq(vim.fn.strchars(e[1].description), 500)
 end
 
+T['two files giving the same command name list it once'] = function()
+  write(tmp .. '/cmds/g/s.md', 'folder one\n')
+  write(tmp .. '/cmds/g:s.md', 'colon one\n')
+  local e = scan({ command_dirs = { tmp .. '/cmds' } })
+  eq(#e, 1)
+  eq(e[1].insert, '/g:s')
+end
+
+T['folders given as a string are one folder'] = function()
+  local e = scan({ command_dirs = FIX .. '/commands', skill_dirs = FIX .. '/skills' })
+  eq(by(e, 'insert', '/fix-grammar') ~= nil, true)
+  eq(by(e, 'insert', '/dataviz-pro') ~= nil, true)
+end
+
 T['read: the body without frontmatter, byte for byte; a gone file'] = function()
   local got
   sources.read({ path = FIX .. '/library/writing/linkedin-post.md' }, function(t) got = t end)

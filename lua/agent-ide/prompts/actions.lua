@@ -15,6 +15,7 @@ local DRAFT_CHOICES = { 'Replace the draft', 'Insert above it', 'Cancel' }
 local function notify(msg, level) vim.notify(msg, level or vim.log.levels.INFO) end
 
 local function chat() return require('agent-ide.ui.chat') end
+local function prompt() return require('agent-ide.ui.prompt') end
 
 ---Lines of a text as the prompt buffer holds them: a final newline is implied by the buffer.
 ---@param text string
@@ -66,22 +67,11 @@ local function prompt_of(s)
   return pbuf
 end
 
-local function set_lines(buf, lines)
-  api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  vim.bo[buf].modified = false
-end
-
 local function insert_command(s, e)
   local buf = prompt_of(s)
   if not buf then return end
-  local cur = api.nvim_buf_get_lines(buf, 0, -1, false)
   local line = e.insert .. ' '
-  if #cur == 1 and cur[1] == '' then
-    set_lines(buf, { line })
-  else
-    api.nvim_buf_set_lines(buf, 0, 0, false, { line })
-    vim.bo[buf].modified = false
-  end
+  prompt().put(buf, { line }, 'first')
   local win = api.nvim_get_current_win()
   if api.nvim_win_get_buf(win) == buf then api.nvim_win_set_cursor(win, { 1, #line }) end
   vim.cmd('startinsert!')
@@ -91,15 +81,13 @@ local function load_text(s, e, text)
   local buf = prompt_of(s)
   if not buf then return end
   local lines = M.to_lines(text)
+  prompt().leave_history(buf) -- the question is about the real draft, not a history entry
   local function done(mode)
     if mode == 'replace' then
-      set_lines(buf, lines)
+      prompt().put(buf, lines, 'replace')
       store.set_origin(buf, e)
     else -- above the draft, a blank line between; the mix is a new prompt, not that file
-      local cur = api.nvim_buf_get_lines(buf, 0, -1, false)
-      local all = vim.list_extend(vim.list_extend({}, lines), { '' })
-      set_lines(buf, vim.list_extend(all, cur))
-      store.set_origin(buf, nil)
+      prompt().put(buf, lines, 'above')
     end
     local win = api.nvim_get_current_win()
     if api.nvim_win_get_buf(win) == buf then api.nvim_win_set_cursor(win, { 1, 0 }) end

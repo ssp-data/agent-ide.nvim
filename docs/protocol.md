@@ -67,6 +67,10 @@ Request ids we send are free-form strings (`r1`, ...). Ids Claude sends are UUID
   id (`claude-haiku-5-5`); `permissionMode` uses Claude's names, so the plugin's `manual`
   comes back as `default` (started with `--permission-mode manual` → `default`).
   `apiKeySource` was `none` (subscription login).
+  `slash_commands` names a project command file `.claude/commands/<folder>/<name>.md` as
+  `<folder>:<name>` and `.claude/commands/<name>.md` as `<name>` (observed with
+  `--setting-sources project` in a temporary folder holding one of each; the drawer's
+  Skills & commands use the same rule).
 - `status`: `type, subtype, status, session_id, uuid`, optionally `permissionMode`.
   `status` is `"requesting"` when an API request starts (once per model call, so several
   per turn) and `null` on the status objects that announce a mode change

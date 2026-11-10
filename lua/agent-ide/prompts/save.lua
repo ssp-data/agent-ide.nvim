@@ -56,15 +56,17 @@ local function project_of(buf)
   return s and chat.project_of(s) or nil
 end
 
-local function saved(buf, kind, path, project_name, already)
+local function saved(buf, kind, path, project_name)
   store.set_origin(buf, { kind = kind, path = path })
-  notify((already and 'already saved → ' or 'saved → ') .. M.short(kind, path, project_name))
+  notify('saved → ' .. M.short(kind, path, project_name))
   cache.invalidate()
 end
 
 local function failed(err) notify('could not save: ' .. tostring(err), vim.log.levels.WARN) end
 
--- A new file `<base>.md` (or the next free name) in `dir`; one with the same text is reused.
+-- A new file `<base>.md` (or the next free name) in `dir`. When one holds exactly this text
+-- nothing is written, and the buffer is NOT tied to that file: it may be someone else's prompt
+-- (pasted with `y`), and the next edit and `:w` must not overwrite it.
 local function save_new(buf, kind, dir, base, text, project_name)
   for _ = 1, 1000 do
     local rel = store.free_name(dir, base)
@@ -72,7 +74,7 @@ local function save_new(buf, kind, dir, base, text, project_name)
     for n = 1, 50 do
       local cand = dir .. '/' .. (n == 1 and base or (base .. '-' .. n)) .. '.md'
       if not vim.uv.fs_stat(cand) then break end
-      if read(cand) == text then return saved(buf, kind, cand, project_name, true) end
+      if read(cand) == text then return notify('already saved → ' .. M.short(kind, cand, project_name)) end
     end
     local path = dir .. '/' .. rel .. '.md'
     local ok, err = store.write_new(path, text)
@@ -90,15 +92,24 @@ local function save_fresh(buf, lines)
 end
 
 local CHANGED = '%s changed on disk since it was loaded. Overwrite, save as new, or cancel?'
+local ask
 
 local function save_origin(buf, o, lines)
   local text = text_of(lines)
   local function write()
-    local ok, err = store.replace(o.path, store.frontmatter_of(o.path) .. text)
+    -- only a library file has frontmatter to keep; a saved prompt is the text, byte for byte
+    local fm = o.kind == 'template' and store.frontmatter_of(o.path) or ''
+    local ok, err = store.replace(o.path, fm .. text)
     if not ok then return failed(err) end
     saved(buf, o.kind, o.path)
   end
   if store.stamp(o.path) == o.stamp then return write() end
+  -- after the current command: `ZZ` / `:x` / `:wq` hide the prompt first, so an asynchronous
+  -- picker's window is not the one they close (the buffer stays valid)
+  vim.schedule(function() ask(buf, o, text, write) end)
+end
+
+function ask(buf, o, text, write)
   vim.ui.select({ 'Overwrite', 'Save as new', 'Cancel' }, { prompt = CHANGED:format(M.short(o.kind, o.path)) }, function(_, idx)
     if not api.nvim_buf_is_valid(buf) then return end
     if idx == 1 then
@@ -182,6 +193,18 @@ function M.attach(buf)
     if not is_exit(last_cmd) or api.nvim_get_current_buf() ~= ev.buf then return end
     local ok, err = pcall(M.save, ev.buf, true)
     if not ok then failed(err) end
+  end })
+  -- `:file name` / `:saveas name` would make it a file buffer: the name is put back
+  local name = api.nvim_buf_get_name(buf)
+  api.nvim_create_autocmd('BufFilePost', { buffer = buf, callback = function(ev)
+    if api.nvim_buf_get_name(ev.buf) == name then return end
+    -- the old name went to a new alternate buffer; drop it so the name is free again
+    local other = vim.fn.bufnr('^' .. vim.fn.escape(name, '\\/.*$^~[]') .. '$')
+    if other > 0 and other ~= ev.buf then pcall(api.nvim_buf_delete, other, { force = true }) end
+    pcall(api.nvim_buf_set_name, ev.buf, name)
+    vim.bo[ev.buf].buftype = 'acwrite'
+    vim.bo[ev.buf].modified = false
+    notify('the prompt buffer keeps its name; save it with :w', vim.log.levels.WARN)
   end })
   vim.keymap.set('n', 'ZZ', function()
     local ok, err = pcall(M.save, buf, true)
