@@ -24,11 +24,15 @@ local function cap(lines, max)
   return out
 end
 
+local function first_line(s)
+  return split(s)[1]
+end
+
 local function summary(input)
   if type(input) ~= 'table' then return '' end
   for _, field in ipairs(SUMMARY_FIELDS) do
     if input[field] ~= nil then
-      return vim.fn.strcharpart(split(input[field])[1], 0, 80)
+      return vim.fn.strcharpart(first_line(input[field]), 0, 80)
     end
   end
   return ''
@@ -57,8 +61,8 @@ local function result_lines(res)
   return cap(lines, CAP_RESULT)
 end
 
----Emit rendered events into `out` ({lines, folds}); `results` maps id -> results, `known` is the set of call ids.
-local function emit(events, results, known, out)
+---Emit rendered events into `out` ({lines, folds}); `results` maps id -> results, `known` is the set of call ids; `nested` renders a sidechain group's own events without regrouping.
+local function emit(events, results, known, out, nested)
   local function block(header, body)
     local first = #out.lines + 1
     out.lines[first] = header
@@ -86,12 +90,12 @@ local function emit(events, results, known, out)
         plain({ '## Claude', '' })
         after_prompt = false
       end
-      if ev.sidechain then
+      if ev.sidechain and not nested then
         local j = i
         while j <= #events and events[j].sidechain do j = j + 1 end
         local group = vim.list_slice(events, i, j - 1)
         local inner = { lines = {}, folds = {} }
-        emit(group, results, known, inner)
+        emit(group, results, known, inner, true)
         block(('▸ subagent (%d events)'):format(#group), inner.lines)
         i = j
       else
@@ -103,15 +107,15 @@ local function emit(events, results, known, out)
           for _, res in ipairs(results[ev.id] or {}) do
             vim.list_extend(body, result_lines(res))
           end
-          block(('▸ %s: %s'):format(ev.name or '?', summary(ev.input)), body)
+          block(('▸ %s: %s'):format(first_line(ev.name or '?'), summary(ev.input)), body)
         elseif ev.kind == 'tool_result' then
           block('▸ result (no matching call)', result_lines(ev))
         elseif ev.kind == 'thinking' then
           block('▸ thinking', split(ev.text))
         elseif ev.kind == 'meta' then
-          block('▸ ' .. tostring(ev.label), split(ev.text))
+          block('▸ ' .. first_line(ev.label), split(ev.text))
         else
-          block('▸ unknown: ' .. tostring(ev.label), cap(split(ev.raw), CAP_UNKNOWN))
+          block('▸ unknown: ' .. first_line(ev.label), cap(split(ev.raw), CAP_UNKNOWN))
         end
         i = i + 1
       end

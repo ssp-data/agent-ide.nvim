@@ -97,4 +97,24 @@ T['unknown body capped at 20 lines'] = function()
   eq(#r.lines, 1 + 20 + 1)
   eq(r.lines[#r.lines], '│ … 10 more lines')
 end
+T['sidechain group between main-thread events'] = function()
+  local r = render.render({
+    { kind = 'text', text = 'main' },
+    { kind = 'text', text = 'sub', sidechain = true },
+    { kind = 'tool_call', id = 's', name = 'Bash', input = { command = 'ls' }, sidechain = true },
+    { kind = 'tool_result', id = 's', text = 'out', is_error = false, sidechain = true },
+    { kind = 'text', text = 'after' },
+  })
+  eq(r.lines, { 'main', '', '▸ subagent (3 events)', '│ sub', '│ ', '│ ▸ Bash: ls', '│ │ $ ls', '│ │ out', 'after', '' })
+  eq(r.folds, { { first = 3, last = 8 } })
+end
+T['headers use only the first line of name and label'] = function()
+  local r = render.render({
+    { kind = 'tool_call', id = 'a', name = 'Na\nme', input = {} },
+    { kind = 'meta', label = 'la\nbel', text = 't' },
+    { kind = 'unknown', label = 'un\r\nk', raw = 'r' },
+  })
+  eq(r.lines, { '▸ Na: ', '│ {}', '▸ la', '│ t', '▸ unknown: un', '│ r' })
+  for _, l in ipairs(r.lines) do eq(l:find('[\r\n]'), nil) end
+end
 return T
