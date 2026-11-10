@@ -325,6 +325,7 @@ function M.attach(win, terms, cur, keys)
   M.clear(win)
   if #terms == 0 or not api.nvim_win_is_valid(win) then return end
   setup_autocmds()
+  require('agent-ide.ui.search_view').define() -- the groups, also after a colorscheme change
   local buf = api.nvim_win_get_buf(win)
   local st = { buf = buf, terms = terms, ids = {}, maps = {} }
   for _, t in ipairs(terms) do
