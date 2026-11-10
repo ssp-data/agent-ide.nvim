@@ -198,7 +198,7 @@ Claude Code has no command to delete one session. `D` on a session row (also in 
 
 - the transcript `projects/<slug>/<id>.jsonl` and the folder beside it, `projects/<slug>/<id>/` (subagents, tool results);
 - `file-history/<id>/`, `session-env/<id>/`, `tasks/<id>/`;
-- the lines of `history.jsonl` that belong to the session (the prompts you typed); every other line stays byte for byte, and lines Claude appends while it is rewritten are not lost.
+- the lines of `history.jsonl` that belong to the session (the prompts you typed); every other line stays byte for byte, and the plugin detects and carries over lines appended during the rewrite.
 
 Not removed: pasted-text cache files (`paste-cache/`), usage statistics (`stats-cache.json`) and settings. Only an inactive session can be deleted: `D` is refused while the session is active in this Neovim (park it first with `x`), handed to native Claude, running in another Claude (asked afresh with `claude agents --json`; when that fails, nothing is deleted), or while its prompt holds unsent text. Its chat and raw buffers are closed and it leaves `hidden.json`.
 
@@ -256,6 +256,7 @@ In the drawer:
 | `X` | Close the Claude that runs the session in a tmux pane, after a confirm (see [Closing terminal sessions](#closing-terminal-sessions)) |
 | `q` | Close the drawer |
 | `gL` | Show or hide the legend of the state marks |
+| `gG` | Commit graph of the row's repository (a worktree session: that worktree; see [Commit graph](#commit-graph)) |
 | `glg` | Open lazygit for the row's repository (a worktree row or session: that worktree) |
 | `gs` | Scope: only the row's project (else the working directory's), or back to all projects (see [Project scope](#project-scope)) |
 | `?`, `g?` | Help (`/` searches in it, `q` or `<Esc>` closes it) |
