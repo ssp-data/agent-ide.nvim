@@ -29,6 +29,9 @@ bench: deps
 test-omarchy:
 	node --test omarchy/io.github.sspaeti.agent-ide/test/*.test.js
 
+install-omarchy:
+	cp -r omarchy/io.github.sspaeti.agent-ide ~/.config/omarchy/plugins/
+
 # The changelog section that a release would carry (VERSION=x.y.z prints a released one).
 release-notes:
 	@scripts/release-notes.sh $(if $(VERSION),$(VERSION),Unreleased)
