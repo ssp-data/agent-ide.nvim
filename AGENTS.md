@@ -52,7 +52,7 @@ Run one file or case: `TEST_FILE=tests/test_tree.lua make test`, `TEST_CASE='tex
 6. **The plugin works without the helper.** Every helper feature has a Lua fallback (search is limited there).
 7. **Git is read-only.** Queries use `--no-optional-locks`; staging, committing and the like are left to lazygit.
 8. **Writes stay in the plugin's own folders** (`stdpath` data, state, cache, and the runtime dir), files 0600 in 0700 folders, written atomically. The only writes inside Claude's folder are the explicit, confirmed session delete and its restore.
-9. **Never stop a Claude process the plugin did not start**, and never let two Claude processes drive one session.
+9. **Never stop a Claude process the plugin did not start**, with one exception: the explicit, confirmed close of a Claude in a tmux pane (`X` in the drawer, `:AgentsCloseIdle`), which types Claude's own exit keys (Ctrl-C twice) into that pane after checking again that the pane still runs that process, and never sends it a signal. Never let two Claude processes drive one session.
 10. **No dependencies** on other plugins. Neovim 0.12+. Optional integrations are guarded (`pcall`, `package.loaded`).
 11. **Privacy.** The repository is public. No personal paths, names of private projects, real session ids, or content from real transcripts in code, tests, docs or commits. Fixtures are synthetic. Tests run with data, cache, state and runtime dirs pointed at temporary folders (`tests/run.lua`) and must not touch the real ones.
 

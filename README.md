@@ -203,6 +203,10 @@ Not removed: pasted-text cache files (`paste-cache/`), usage statistics (`stats-
 
 The trash is `stdpath('data')/agent-ide/trash/<YYYYMMDD-HHMMSS>-<id>/` (folder `0700`; files keep their modes): the moved entries in their layout, `history.jsonl` with the removed lines and `manifest.json` (where each entry came from, title, project, time). **The trash still holds the whole session**, prompts and answers included, until you empty it: for sensitive data run `:AgentsTrash empty` afterwards. `:AgentsTrash` lists the trashed sessions to restore one (refused when something is at its old place; the history lines go back in time order) or delete it for good; `:AgentsTrash empty` deletes all of them for good after a confirm. Nothing is purged automatically unless you set `trash = { keep_days = 30 }`, which purges older entries at setup.
 
+### Closing terminal sessions
+
+`X` on a session row that runs in another Claude in a tmux pane (the row shows `tmux <window>.<pane>`) ends that Claude the way you would there: after a confirm (default: no) it types Ctrl-C into the pane, and again 300 ms later (Claude's own exit). Right before, it checks again that the pane still exists and still runs that Claude, so the keys never land in a pane that meanwhile runs something else; the process itself is never signalled. A session that is working or waiting for input asks a second time. If Claude still runs 5 s later, a notice says so and nothing more happens. Outside tmux, or when the pane is not known (`elsewhere`), `X` says it cannot reach the session; for a session running in this Neovim use `x`. `:AgentsCloseIdle` closes every Claude that is idle in a tmux pane, after one confirm with their count.
+
 ## Keys
 
 Global:
@@ -229,6 +233,7 @@ In the drawer:
 | `H` | Hide the session into its project's `Hidden (n)` group; on a hidden session: show it again (Vim's `H` motion is not available in the drawer) |
 | `D` | Delete an inactive session: move it to the plugin's trash after a confirm (see [Deleting sessions](#deleting-sessions)) |
 | `<leader>aM`, `<S-Tab>`, `<C-c>`, `<leader>at`, `gr` | On a session row, what they do in its chat, for that session and without opening it: pick the model, next permission mode, interrupt (only while Claude works), continue in native Claude in a tmux pane, raw view in the main window. A session without a process takes the mode or model when it starts; one running in another Claude is refused (the raw view still opens). On other rows `<S-Tab>` and `<C-c>` keep their Vim meaning |
+| `X` | Close the Claude that runs the session in a tmux pane, after a confirm (see [Closing terminal sessions](#closing-terminal-sessions)) |
 | `q` | Close the drawer |
 | `gL` | Show or hide the legend of the state marks |
 | `glg` | Open lazygit for the row's repository (a worktree row or session: that worktree) |

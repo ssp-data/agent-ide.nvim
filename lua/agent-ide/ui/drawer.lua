@@ -390,6 +390,12 @@ function actions.close() M.close() end
 
 function actions.legend() legend.toggle() end
 
+-- `X`: close the Claude running the session in a tmux pane (ui/tmux_close.lua). Other rows: nothing.
+function actions.close_tmux()
+  local node = current_node()
+  if node and node.type == 'session' then require('agent-ide.ui.tmux_close').close_row(node) end
+end
+
 -- The drawer's own keys (lhs, action name); a provider row key with the same lhs is neither
 -- mapped nor listed. `?` (actions.help) lists them all.
 local KEYS = {
@@ -398,6 +404,7 @@ local KEYS = {
   { 'g?', 'help' },
   { 'gG', 'graph' }, -- commit graph of the row's repository (ui/graph.lua)
   { 'gL', 'legend' }, -- legend of the state marks (ui/drawer_legend.lua)
+  { 'X', 'close_tmux' }, -- close a Claude in a tmux pane (ui/tmux_close.lua)
 }
 local OWN = {}
 for _, k in ipairs(KEYS) do OWN[vim.keycode(k[1])] = true end
@@ -468,6 +475,7 @@ function actions.help()
     { key = '/', desc = 'search (built-in)' },
     { key = 'gG', desc = 'commit graph of the project (or the row\'s worktree)' },
     { key = 'gL', desc = 'show or hide the legend of the state marks' },
+    { key = 'X', desc = 'close the Claude running it in a tmux pane (Ctrl-C twice there; asks first)' },
   }
   for _, k in ipairs(provider_keys()) do rows[#rows + 1] = { key = k.lhs, desc = k.desc } end
   vim.list_extend(rows, require('agent-ide.ui.drawer_session_keys').help_rows(OWN))
