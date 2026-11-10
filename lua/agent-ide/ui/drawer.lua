@@ -136,6 +136,7 @@ end
 local function start_live()
   local cfg = config.get()
   live.start({ interval_ms = cfg.live.interval_ms, cmd = cfg.live.cmd, on_poll = function()
+    require('agent-ide.status').refresh()
     render()
     local chat = package.loaded['agent-ide.ui.chat']
     if chat then chat.refresh_winbars() end

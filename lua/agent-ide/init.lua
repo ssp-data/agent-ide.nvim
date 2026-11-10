@@ -8,6 +8,7 @@ local mapped = {} -- global keys this module mapped last: name -> lhs
 function M.setup(opts)
   local cfg = config.setup(opts)
   require('agent-ide.ui.highlights').setup()
+  require('agent-ide.status').setup()
   for name, lhs in pairs(mapped) do
     pcall(vim.keymap.del, 'n', lhs)
     mapped[name] = nil
@@ -36,5 +37,14 @@ function M.next_waiting()
   require('agent-ide.ui.highlights').setup()
   require('agent-ide.ui.permission').next_waiting()
 end
+
+---@return string text for a statusline (percent signs doubled)
+function M.statusline() return require('agent-ide.status').statusline() end
+
+---@return string highlight group `AgentIdeLevel1..4`
+function M.statusline_hl() return require('agent-ide.status').statusline_hl() end
+
+---@return table lualine component
+function M.lualine() return require('agent-ide.status').lualine() end
 
 return M

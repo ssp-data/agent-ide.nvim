@@ -3,12 +3,17 @@ local M = {}
 
 local GROUPS = {
   AgentIdeProject = { bold = true },
-  AgentIdeWaiting = { fg = '#a277ff', ctermfg = 141 }, -- violet
-  AgentIdeBusy = { link = 'DiagnosticWarn' }, -- yellow
-  AgentIdeIdle = { link = 'DiagnosticOk' }, -- green
+  -- overall status levels (statusline, status file); the drawer's state groups link to them
+  AgentIdeLevel1 = { fg = '#9ece6a', ctermfg = 114 }, -- green
+  AgentIdeLevel2 = { fg = '#e0af68', ctermfg = 179 }, -- yellow
+  AgentIdeLevel3 = { fg = '#ff9e64', ctermfg = 215 }, -- orange
+  AgentIdeLevel4 = { fg = '#a277ff', ctermfg = 141 }, -- violet
+  AgentIdeWaiting = { link = 'AgentIdeLevel4' },
+  AgentIdeBusy = { link = 'AgentIdeLevel2' },
+  AgentIdeIdle = { link = 'AgentIdeLevel1' },
   AgentIdeParked = { link = 'Comment' }, -- dimmed
-  AgentIdeDone = { fg = '#ff9e64', ctermfg = 215 }, -- orange: the result waits to be read
-  AgentIdeFailed = { fg = '#ff9e64', ctermfg = 215 },
+  AgentIdeDone = { link = 'AgentIdeLevel3' }, -- the result waits to be read
+  AgentIdeFailed = { link = 'AgentIdeLevel3' },
   AgentIdeMissing = { link = 'Comment' },
   AgentIdeAge = { link = 'Comment' },
   AgentIdeSection = { link = 'Directory' },

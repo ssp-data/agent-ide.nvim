@@ -405,8 +405,8 @@ end
 T['highlight groups survive a colorscheme change; waiting is violet'] = function()
   start()
   child.cmd('colorscheme default')
-  eq(child.lua_get('vim.api.nvim_get_hl(0, { name = "AgentIdeWaiting" }).fg'), 0xa277ff)
-  eq(child.lua_get('vim.api.nvim_get_hl(0, { name = "AgentIdeBusy" }).link'), 'DiagnosticWarn')
+  eq(child.lua_get('vim.api.nvim_get_hl(0, { name = "AgentIdeWaiting", link = false }).fg'), 0xa277ff)
+  eq(child.lua_get('vim.api.nvim_get_hl(0, { name = "AgentIdeBusy" }).link'), 'AgentIdeLevel2')
 end
 
 T['a relative project key never changes the tab cwd'] = function()
