@@ -30,7 +30,7 @@ local T = MiniTest.new_set({ hooks = {
         cache._set(root, 'commits', { { hash = 'c', short = 'c', subject = 's', date = 0, files = 1 } })
       end
       require('agent-ide').toggle()
-      assert(vim.wait(3000, function() return #require('agent-ide.ui.drawer').state().nodes == 32 end, 10))
+      assert(vim.wait(3000, function() return #require('agent-ide.ui.drawer').state().nodes == 31 end, 10))
       _G.best = function(fn)
         local best = math.huge
         for _ = 1, ]] .. RUNS .. [[ do
@@ -54,7 +54,7 @@ end
 T['re-render with 30 collapsed git projects under 5 ms'] = function()
   local ms = child.lua_get('_G.best(require("agent-ide.ui.drawer").refresh)')
   local n = child.lua_get('#vim.api.nvim_buf_get_lines(require("agent-ide.ui.drawer").state().buf, 0, -1, false)')
-  eq(n, 32) -- the header, the Prompts node and 30 projects
+  eq(n, 31) -- the Prompts node and 30 projects
   check('re-render, 30 collapsed projects', ms, 5)
 end
 
@@ -70,7 +70,7 @@ T['re-render with 30 expanded git projects, sections collapsed, under 5 ms'] = f
     end
   ]])
   local n = child.lua_get('#vim.api.nvim_buf_get_lines(require("agent-ide.ui.drawer").state().buf, 0, -1, false)')
-  eq(n, 2 + 30 * (1 + 1 + 1 + 5 + 2))
+  eq(n, 1 + 30 * (1 + 1 + 1 + 5 + 2))
   check('re-render, 30 expanded projects', child.lua_get('_G.best(require("agent-ide.ui.drawer").refresh)'), 5)
 end
 
@@ -105,11 +105,11 @@ T['re-render with 60 projects and 300 visible aligned rows (multi-byte titles) u
     end
   ]])
   local lines = child.lua_get('vim.api.nvim_buf_get_lines(require("agent-ide.ui.drawer").state().buf, 0, -1, false)')
-  eq(#lines, 2 + 60 + 30 * (1 + 1 + 4 + 2))
+  eq(#lines, 1 + 60 + 30 * (1 + 1 + 4 + 2))
   for _, l in ipairs(lines) do
     if l:find('Übersetzung', 1, true) or l:find('日本語', 1, true) or l:find('🎉', 1, true) then eq(vim.fn.strdisplaywidth(l), 44) end
   end
-  check('re-render, 60 projects, 302 rows', child.lua_get('_G.best(require("agent-ide.ui.drawer").refresh)'), 5)
+  check('re-render, 60 projects, 301 rows', child.lua_get('_G.best(require("agent-ide.ui.drawer").refresh)'), 5)
 end
 
 T['300 changed files on screen within 150 ms of the data arriving'] = function()
@@ -123,7 +123,7 @@ T['300 changed files on screen within 150 ms of the data arriving'] = function()
     -- expand the project and its Changes section while the data is still unknown
     s.projects[1].root = root
     vim.api.nvim_set_current_win(s.win)
-    vim.api.nvim_win_set_cursor(s.win, { 3, 0 }) -- line 1: the header, 2: the Prompts node
+    vim.api.nvim_win_set_cursor(s.win, { 2, 0 }) -- line 1: the Prompts node
     vim.api.nvim_feedkeys(vim.keycode('<CR>'), 'x', false)
     for i, node in ipairs(drawer.state().nodes) do
       if node.id == root .. '#changes' then vim.api.nvim_win_set_cursor(s.win, { i, 0 }) end

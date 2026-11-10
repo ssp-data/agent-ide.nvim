@@ -140,7 +140,7 @@ end
 -- Expand the project and its Changes section.
 local function open_changes()
   child.lua('require("agent-ide").toggle()')
-  press_on('P r  ')
+  press_on(' r  ')
   press_on('Changes vs main (5)')
   wait_for(function() return has_line(drawer_lines(), 'M a.lua') ~= nil end, 'changed files')
 end
@@ -171,7 +171,7 @@ T['drawer: branch suffix, Changes and Commits sections with counts, files with s
   start()
   child.lua('require("agent-ide").toggle()')
   wait_for(function() return has_line(drawer_lines(), '  feat') ~= nil end, 'branch suffix')
-  press_on('P r  ')
+  press_on(' r  ')
   wait_for(function() return has_line(drawer_lines(), 'Changes vs main (5)') ~= nil end, 'changes count')
   wait_for(function() return has_line(drawer_lines(), 'Commits on branch (2)') ~= nil end, 'commits count')
   local l = drawer_lines()
@@ -200,7 +200,7 @@ T['non-git project shows no git sections'] = function()
     projects .. '/-plain/' .. ID .. '.jsonl')
   start()
   child.lua('require("agent-ide").toggle()')
-  press_on('P plain  ')
+  press_on(' plain  ')
   wait_for(function() return has_line(drawer_lines(), 'Sessions (1)') ~= nil end, 'sessions')
   vim.wait(200)
   eq(has_line(drawer_lines(), 'Changes'), nil)
@@ -277,7 +277,7 @@ T['q returns to the chat that was open; keys and diff options are gone from the 
   end)]], { repo .. '/a.lua' })
   child.lua('vim.go.winbar = "GLOBAL"')
   child.lua('require("agent-ide").toggle()')
-  press_on('P r  ')
+  press_on(' r  ')
   press_on('Work on it')
   wait_for(function() return child.lua_get('require("agent-ide.ui.chat")._windows().prompt ~= nil') end, 'chat')
   press_on('Changes vs main (5)')
@@ -356,7 +356,7 @@ T['the base side is read like the working file: CRLF, latin1, BOM; a final newli
   R.write(repo, 'eol.txt', 'x')
   start()
   child.lua('require("agent-ide").toggle()')
-  press_on('P r  ')
+  press_on(' r  ')
   press_on('Changes vs main (')
   local function open(row, path)
     press_on(row)
@@ -418,7 +418,7 @@ T['a session in a linked worktree: one row per work tree, diffs, gd, lazygit and
   start()
   child.lua('_G.Snacks = { lazygit = function(o) _G.snacks_cwd = o.cwd end }')
   child.lua('require("agent-ide").toggle()')
-  press_on('P r  ')
+  press_on(' r  ')
   wait_for(function() return has_line(drawer_lines(), '⎇ wtb · wt') ~= nil end, 'worktree row')
   local l = drawer_lines()
   eq(has_line(l, '⎇ feat · r') < has_line(l, '⎇ wtb · wt'), true) -- the main checkout first
@@ -458,10 +458,10 @@ end
 T['late git results after collapsing the project or closing the tab are harmless'] = function()
   start()
   child.lua('require("agent-ide").toggle()')
-  press_on('P r  ')
-  press_on('P r  ') -- collapse again before git answers
+  press_on(' r  ')
+  press_on(' r  ') -- collapse again before git answers
   vim.wait(300)
-  press_on('P r  ')
+  press_on(' r  ')
   press_on('Changes vs main (5)')
   press_on('M a.lua')
   child.lua('vim.cmd("tabclose")') -- the diff's git show is still on its way
@@ -528,7 +528,7 @@ T['glg: Snacks.lazygit when loaded, a terminal tab otherwise, a notice without l
     return { buf = b }
   end }]])
   child.lua('require("agent-ide").toggle()')
-  press_on('P r  ')
+  press_on(' r  ')
   wait_for(function() return has_line(drawer_lines(), 'Changes vs main (5)') ~= nil end, 'changes')
   press_on('Sessions (1)', 'glg')
   eq(child.lua_get('_G.snacks_cwd'), repo)
@@ -580,7 +580,7 @@ T['gd on an Edit or Write fold in the chat opens the branch diff of that file'] 
   })
   start()
   child.lua('require("agent-ide").toggle()')
-  press_on('P r  ')
+  press_on(' r  ')
   press_on('Work on it')
   local function tline(text)
     local lines
@@ -612,7 +612,7 @@ end
 T['q returns to a parked or handed-off session\'s chat; the hand-off key outside tmux keeps working'] = function()
   start()
   child.lua('require("agent-ide").toggle()')
-  press_on('P r  ')
+  press_on(' r  ')
   press_on('Work on it')
   wait_for(function() return child.lua_get('require("agent-ide.ui.chat")._windows().prompt ~= nil') end, 'chat')
   -- outside tmux <leader>at parks the session and shows the command
@@ -704,7 +704,7 @@ T['gd inside a subagent fold: a nested Edit opens its file, a look-alike in a ne
   })
   start()
   child.lua('require("agent-ide").toggle()')
-  press_on('P r  ')
+  press_on(' r  ')
   press_on('Work on it')
   local lines
   wait_for(function()

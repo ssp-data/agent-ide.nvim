@@ -217,12 +217,12 @@ T['scope: drawer s searches the project, <Tab> cycles to all; / stays built-in; 
   child.lua('require("agent-ide").toggle()')
   local drawer_buf = child.lua_get('require("agent-ide.ui.drawer").state().buf')
   wait_for(function()
-    return vim.iter(child.lua_get('vim.api.nvim_buf_get_lines(...,0,-1,false)', { drawer_buf })):any(function(l) return l:find('P beta', 1, true) ~= nil end)
+    return vim.iter(child.lua_get('vim.api.nvim_buf_get_lines(...,0,-1,false)', { drawer_buf })):any(function(l) return l:find(' beta ', 1, true) ~= nil end)
   end, 'drawer rows')
   eq(child.lua_get('vim.fn.maparg("/", "n", false, true).buffer'), vim.NIL)
   local rows = child.lua_get('vim.api.nvim_buf_get_lines(...,0,-1,false)', { drawer_buf })
   local row
-  for i, l in ipairs(rows) do if l:find('P beta', 1, true) then row = i end end
+  for i, l in ipairs(rows) do if l:find(' beta ', 1, true) then row = i end end
   child.lua('local s = require("agent-ide.ui.drawer").state(); vim.api.nvim_set_current_win(s.win); vim.api.nvim_win_set_cursor(s.win, { ..., 0 })', { row })
   child.type_keys('s')
   wait_for(function() local s = state(); return s ~= vim.NIL and s.backend ~= nil end, 'picker')

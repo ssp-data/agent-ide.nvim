@@ -64,7 +64,7 @@ local function project_lines()
   local n = 0
   if s.buf then
     for _, l in ipairs(vim.api.nvim_buf_get_lines(s.buf, 0, -1, false)) do
-      if l:find('^[v>] P ') then n = n + 1 end
+      if l:find('^[v>] ') and not l:find('Prompts$') then n = n + 1 end
     end
   end
   return n

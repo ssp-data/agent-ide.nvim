@@ -76,11 +76,11 @@ end
 
 T['expanded: loading, then sections; groups open and close independently; nodes carry the entry'] = function()
   local e = { prompts = true }
-  eq(build(e).lines, { 'v * Prompts', '    loading…', '> P alpha  . now', '> P beta  . 1m' })
+  eq(build(e).lines, { 'v * Prompts', '    loading…', '> alpha  . now', '> beta  . 1m' })
   loaded()
   local t = build(e)
   eq(vim.list_slice(t.lines, 1, 6), { 'v * Prompts', '  > Skills & commands (3)', '  v Library (3)',
-    '      Invoice text  Short invoice text for a client', '    > writing (2)', '> P alpha  . now' })
+    '      Invoice text  Short invoice text for a client', '    > writing/ (2)', '> alpha  . now' })
   eq(t.nodes[4].entry.title, 'Invoice text')
   eq(t.nodes[4].type, 'prompt')
   eq(t.nodes[5].fold.key, 'prompts/group/writing')
@@ -91,15 +91,15 @@ T['expanded: loading, then sections; groups open and close independently; nodes 
     '      /dataviz-pro  Make clean charts from compact specs.',
     '      /fix-grammar  Fix grammar and spelling in the given text',
     '      /git:sync', '  v Library (3)',
-    '      Invoice text  Short invoice text for a client', '    v writing (2)', '        LinkedIn post',
-    '      > social (1)', '> P alpha  . now' })
+    '      Invoice text  Short invoice text for a client', '    v writing/ (2)', '        LinkedIn post',
+    '      > social/ (1)', '> alpha  . now' })
   e['prompts/group/writing/social'] = true
   t = build(e)
-  eq(vim.list_slice(t.lines, 10, 11), { '      v social (1)', '          tweet' })
+  eq(vim.list_slice(t.lines, 10, 11), { '      v social/ (1)', '          tweet' })
   -- closing the parent hides the open sub-group
   e['prompts/group/writing'] = false
   t = build(e)
-  eq(vim.list_slice(t.lines, 8, 9), { '    > writing (2)', '> P alpha  . now' })
+  eq(vim.list_slice(t.lines, 8, 9), { '    > writing/ (2)', '> alpha  . now' })
   e['prompts/library'] = false
   eq(build(e).lines[6], '  > Library (3)')
 end
@@ -138,8 +138,8 @@ T['Saved prompts: shown after Sessions only when the project has some'] = functi
   build(e)
   vim.wait(2000, function() return cache.saved(projects[1]) ~= nil and cache.saved(projects[2]) ~= nil end, 5)
   local t = build(e)
-  eq(t.lines, { '> * Prompts', 'v P alpha  . now', '    + New session', '  v Sessions (1)', '      . Fix  now',
-    '  > Saved prompts (1)', 'v P beta  . 1m', '    + New session', '  v Sessions (1)', '      . B  1m' })
+  eq(t.lines, { '> * Prompts', 'v alpha  . now', '    + New session', '  v Sessions (1)', '      . Fix  now',
+    '  > Saved prompts (1)', 'v beta  . 1m', '    + New session', '  v Sessions (1)', '      . B  1m' })
   e['/r/alpha/saved'] = true
   t = build(e)
   eq(t.lines[7], '      add idle support')
@@ -208,7 +208,7 @@ T['300 library entries: re-render under 5 ms collapsed and 20 ms expanded'] = fu
     local d = require('agent-ide.ui.drawer')
     local s = d.state()
     vim.api.nvim_set_current_win(s.win)
-    vim.api.nvim_win_set_cursor(s.win, { 2, 0 }) -- line 1: the header
+    vim.api.nvim_win_set_cursor(s.win, { 1, 0 }) -- line 1: the Prompts node
     vim.api.nvim_feedkeys(vim.keycode('<CR>'), 'x', false)
     assert(vim.wait(5000, function() return #d.state().nodes > 5 end, 5))
     for i = 0, 9 do
@@ -221,15 +221,15 @@ T['300 library entries: re-render under 5 ms collapsed and 20 ms expanded'] = fu
       end
     end
   ]])
-  eq(child.lua_get('#vim.api.nvim_buf_get_lines(require("agent-ide.ui.drawer").state().buf, 0, -1, false)'), 1 + 1 + 1 + 1 + 10 + 300 + 1) -- header, Prompts, Skills & commands (0), Library, groups, entries, no sessions
+  eq(child.lua_get('#vim.api.nvim_buf_get_lines(require("agent-ide.ui.drawer").state().buf, 0, -1, false)'), 1 + 1 + 1 + 10 + 300 + 1) -- Prompts, Skills & commands (0), Library, groups, entries, no sessions
   local expanded = child.lua_get('_G.best()')
   -- the entries stay loaded; the Prompts node collapsed again
   child.lua([[
     local s = require('agent-ide.ui.drawer').state()
-    vim.api.nvim_win_set_cursor(s.win, { 2, 0 })
+    vim.api.nvim_win_set_cursor(s.win, { 1, 0 })
     vim.api.nvim_feedkeys(vim.keycode('<CR>'), 'x', false)
   ]])
-  eq(child.lua_get('#vim.api.nvim_buf_get_lines(require("agent-ide.ui.drawer").state().buf, 0, -1, false)'), 3)
+  eq(child.lua_get('#vim.api.nvim_buf_get_lines(require("agent-ide.ui.drawer").state().buf, 0, -1, false)'), 2)
   eq(#child.lua_get('require("agent-ide.prompts.cache").global()'), 300)
   local collapsed = child.lua_get('_G.best()')
   if collapsed >= 5 then error(('collapsed re-render %.2f ms, budget < 5 ms'):format(collapsed)) end
@@ -254,20 +254,19 @@ T['the drawer on the session fixtures: Prompts on top, every other line as befor
   local function lines() return child.lua_get('vim.api.nvim_buf_get_lines(require("agent-ide.ui.drawer").state().buf, 0, -1, false)') end
   vim.wait(3000, function() return #lines() > 3 end, 10)
   local l = lines()
-  eq(l[1], 'Agents      R refresh · glg lazygit · ? help')
-  eq(l[2], '> ✎ Prompts')
+  eq(l[1], '> Prompts')
   -- newest first, as the fixed mtimes say; the ages depend on today
-  local rest = vim.tbl_map(function(x) return x:match('^> P (%S+) %(folder missing%) +%. %S+$') or x end, vim.list_slice(l, 3))
+  local rest = vim.tbl_map(function(x) return x:match('^> (%S+) %(folder missing%) +%. %S+$') or x end, vim.list_slice(l, 2))
   eq(rest, { 'alpha', 'docs', 'notes', '-nocwd' })
-  for _, x in ipairs(vim.list_slice(l, 3)) do eq(vim.fn.strdisplaywidth(x), 44) end
-  -- exactly what the drawer builds without any provider (below the header and the Prompts node)
+  for _, x in ipairs(vim.list_slice(l, 2)) do eq(vim.fn.strdisplaywidth(x), 44) end
+  -- exactly what the drawer builds without any provider (below the Prompts node)
   local plain = child.lua_get([[(function()
     local d, cfg = require('agent-ide.ui.drawer'), require('agent-ide.config').get()
     local m = require('agent-ide.ui.drawer_model')
     return require('agent-ide.ui.tree').build(d.state().projects, m.state_of, {}, os.time(), cfg.icons, cfg.projects_dir,
       nil, nil, { width = 44 }).lines
   end)()]])
-  eq(vim.list_slice(lines(), 3), plain)
+  eq(vim.list_slice(lines(), 2), plain)
   vim.fn.delete(fixtures, 'rf')
 end
 

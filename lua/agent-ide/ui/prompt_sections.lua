@@ -72,24 +72,22 @@ end
 local NO_RIGHT = {}
 local PROJECT_TAG = { { 'project', HL_DIM } }
 
--- Display parts of an entry (cached per entry table, indent and icon): the kind's icon and the
--- label, the description dimmed (cut to the drawer width, dropped when no room is left), and a
+-- Display parts of an entry (cached per entry table and indent): the label, the description dimmed (cut to the drawer width, dropped when no room is left), and a
 -- right-aligned `project` tag for a project's own command or skill.
 local row_cache = setmetatable({}, { __mode = 'k' }) -- entry -> its display parts
-local function entry_pieces(e, indent, icons)
-  local icon = icons[e.kind]
+local function entry_pieces(e, indent)
   local c = row_cache[e]
-  if c and c.indent == indent and c.icon == icon then return c.pieces, c.right end
+  if c and c.indent == indent then return c.pieces, c.right end
   local label = (e.insert or e.title):gsub('[\r\n]', ' ')
-  local pieces = { { indent .. prefix(icon) .. label } }
+  local pieces = { { indent .. label } }
   if e.description then pieces[2] = { '  ' .. e.description:gsub('[\r\n\t]', ' '), HL_DIM, fit = 'drop' } end
   local right = e.scope == 'project' and PROJECT_TAG or NO_RIGHT
-  row_cache[e] = { indent = indent, icon = icon, pieces = pieces, right = right }
+  row_cache[e] = { indent = indent, pieces = pieces, right = right }
   return pieces, right
 end
 
 local function entry_row(out, e, indent, ctx, parent, project)
-  local pieces, right = entry_pieces(e, indent, ctx.icons)
+  local pieces, right = entry_pieces(e, indent)
   out[#out + 1] = { pieces = pieces, right = right, node = { type = 'prompt', id = 'prompt:' .. e.path,
     entry = e, project = project, open = use, keys = row_handlers(),
     fold = { key = parent.key, default = parent.default, focus = parent.id } } }
@@ -124,7 +122,7 @@ local function library_rows(out, list, ctx, parent)
         open_groups[path] = open
         if shown_parent then
           local ind = '    ' .. string.rep('  ', depth)
-          out[#out + 1] = fold_row({ { ind .. (open and ctx.icons.open or ctx.icons.closed) .. ' ' .. prefix(ctx.icons.group) .. part, HL_SECTION },
+          out[#out + 1] = fold_row({ { ind .. (open and ctx.icons.open or ctx.icons.closed) .. ' ' .. part .. '/', HL_SECTION },
             { ' (' .. counts[path] .. ')', HL_DIM } }, id, key, false)
         end
       end
@@ -147,7 +145,7 @@ end
 function M.top(ctx)
   local open = is_open(ctx.expanded, 'prompts', false)
   cache.visible = { global = open, saved = {} } -- top() runs first on every render
-  local icon = ctx.icons.prompts or '✎'
+  local icon = ctx.icons.prompts
   local out = { fold_row({ { (open and ctx.icons.open or ctx.icons.closed) .. ' ' .. prefix(icon) }, { 'Prompts', 'AgentIdeProject' } },
     'prompts', 'prompts', false) }
   if not open then return out end
@@ -164,11 +162,10 @@ function M.top(ctx)
     out[#out + 1] = hint('    ', save_hint())
     return out
   end
-  -- `name` is also the icon key (`skills`, `library`)
   local function section(name, label, list, default)
     local key, id = 'prompts/' .. name, 'prompts#' .. name
     local o = is_open(ctx.expanded, key, default)
-    out[#out + 1] = fold_row({ { '  ' .. (o and ctx.icons.open or ctx.icons.closed) .. ' ' .. prefix(ctx.icons[name]) .. label, HL_SECTION },
+    out[#out + 1] = fold_row({ { '  ' .. (o and ctx.icons.open or ctx.icons.closed) .. ' ' .. label, HL_SECTION },
       { ' (' .. #list .. ')', HL_DIM } }, id, key, default)
     return o, { key = key, default = default, id = id }
   end
@@ -197,7 +194,7 @@ function M.rows(project, ctx)
   local key, id = project.key .. '/saved', project.key .. '#saved'
   local o = is_open(ctx.expanded, key, false)
   if o then cache.visible.saved[cache.folder(project)] = true end
-  local out = { fold_row({ { '  ' .. (o and ctx.icons.open or ctx.icons.closed) .. ' ' .. prefix(ctx.icons.saved_prompts) .. 'Saved prompts', HL_SECTION },
+  local out = { fold_row({ { '  ' .. (o and ctx.icons.open or ctx.icons.closed) .. ' ' .. 'Saved prompts', HL_SECTION },
     { ' (' .. #list .. ')', HL_DIM } }, id, key, false, project) }
   if o then
     local parent = { key = key, default = false, id = id }

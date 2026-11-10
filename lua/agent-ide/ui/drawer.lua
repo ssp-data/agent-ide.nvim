@@ -37,7 +37,6 @@ local function node_key(node)
   if node.type == 'section' then return 's:' .. node.key end
   if node.type == 'session' then return 'x:' .. node.session.id end
   if node.type == 'new' then return 'n:' .. node.project.key end
-  if node.type == 'header' then return 'h:' end
 end
 
 ---State shown for a session (see `drawer_model.state_of`).
@@ -60,8 +59,7 @@ local function render(focus)
   local cfg = config.get()
   local t = tree.build(model.with_unsaved(S.projects), model.state_of, S.expanded, os.time(), cfg.icons, cfg.projects_dir,
     model.note_of, sections.collect,
-    { top = sections.collect_top, width = text_width(cfg),
-      header = { title = 'Agents', hints = M.hints() } })
+    { top = sections.collect_top, width = text_width(cfg) })
   local row = S.win and api.nvim_win_get_cursor(S.win)[1]
   focus = focus or (row and node_key(S.nodes[row]))
   vim.bo[S.buf].modifiable = true
@@ -220,24 +218,14 @@ end
 
 function actions.close() M.close() end
 
--- The drawer's own keys (lhs, action name, header hint); a provider row key with the same lhs
--- is neither mapped nor listed. The header line shows the hints in this order.
+-- The drawer's own keys (lhs, action name); a provider row key with the same lhs is neither
+-- mapped nor listed. `?` (actions.help) lists them all.
 local KEYS = {
-  { '<CR>', 'open' }, { 'o', 'open' }, { 'za', 'fold' }, { 'R', 'refresh', 'refresh' }, { 'gp', 'jump' },
-  { 'x', 'park' }, { 'glg', 'lazygit', 'lazygit' }, { 'q', 'close' }, { 's', 'search' }, { '?', 'help', 'help' },
+  { '<CR>', 'open' }, { 'o', 'open' }, { 'za', 'fold' }, { 'R', 'refresh' }, { 'gp', 'jump' },
+  { 'x', 'park' }, { 'glg', 'lazygit' }, { 'q', 'close' }, { 's', 'search' }, { '?', 'help' },
 }
 local OWN = {}
 for _, k in ipairs(KEYS) do OWN[vim.keycode(k[1])] = true end
-
----Key hints of the header line, from the drawer's own keys: `R refresh`, `glg lazygit`, `? help`.
----@return string[]
-function M.hints()
-  local out = {}
-  for _, k in ipairs(KEYS) do
-    if k[3] then out[#out + 1] = k[1] .. ' ' .. k[3] end
-  end
-  return out
-end
 
 local function provider_keys()
   return vim.tbl_filter(function(k) return not OWN[vim.keycode(k.lhs)] end, sections.keys())
@@ -324,10 +312,6 @@ local function open_drawer()
     set_opt(S.win, name, value)
   end
   render()
-  -- a cursor on the header line (a new window) starts below it
-  if api.nvim_win_get_cursor(S.win)[1] == 1 and S.nodes[1] and S.nodes[1].type == 'header' and #S.nodes > 1 then
-    api.nvim_win_set_cursor(S.win, { 2, 0 })
-  end
   refresh_shown()
 end
 

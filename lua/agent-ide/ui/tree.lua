@@ -1,9 +1,8 @@
 -- Pure drawer model: projects + session states -> lines, one node per line, highlight ranges.
--- Every row has a left part (indent, fold arrow, icon, title) and a right part (state word,
+-- Every row has a left part (indent, fold arrow, mark, title) and a right part (state word,
 -- age, git stats) aligned to the drawer's right edge (see ui/layout.lua).
 local live = require('agent-ide.live')
 local layout = require('agent-ide.ui.layout')
-local prefix = require('agent-ide.ui.icons').prefix
 
 local M = {}
 
@@ -68,9 +67,9 @@ end
 ---@param projects_dir string|nil
 ---@param note_of? fun(session_id: string, state: string): table|string|nil the state word of a session row (`{ text, hl_group }`)
 ---@param extra? fun(project: table, ctx: table): table[]|nil, table[]|nil extra rows and a project-row suffix (see ui/sections.lua)
----@param opts? { top?: fun(ctx: table): table[]|nil, width?: integer, header?: { title?: string, hints?: string[] } }
+---@param opts? { top?: fun(ctx: table): table[]|nil, width?: integer }
 ---  top: rows above the projects (see ui/sections.lua); width: the drawer width (nil: no
----  alignment, the right part follows after two spaces); header: a first line with key hints
+---  alignment, the right part follows after two spaces)
 function M.build(projects, state_of, expanded, now, icons, projects_dir, note_of, extra, opts)
   opts = opts or {}
   local width = opts.width
@@ -95,16 +94,6 @@ function M.build(projects, state_of, expanded, now, icons, projects_dir, note_of
     if r.right then add_row(r.pieces, r.right, r.node) else add(r.pieces, r.node) end
   end
 
-  if opts.header then
-    local h = opts.header
-    local title = prefix(icons.agents) .. (h.title or 'Agents')
-    local hints = vim.list_slice(h.hints or {}, 1)
-    local tw = layout.width(title)
-    while width and #hints > 0 and tw + 2 + layout.width(table.concat(hints, ' · ')) > width do table.remove(hints) end
-    local right = #hints > 0 and { { table.concat(hints, ' · '), 'AgentIdeAge' } } or {}
-    add_row({ { title, 'AgentIdeSection', fit = true } }, right, { type = 'header' })
-  end
-
   if opts.top then
     for _, r in ipairs(opts.top({ expanded = expanded, icons = icons, now = now, width = width }) or {}) do add_provided(r) end
   end
@@ -120,7 +109,7 @@ function M.build(projects, state_of, expanded, now, icons, projects_dir, note_of
     for i, s in ipairs(project.sessions) do states[i] = state_of(s.id) end
     local rolled = live.rollup(states)
     local left = {
-      { (is_open and icons.open or icons.closed) .. ' ' .. prefix(icons.project) },
+      { (is_open and icons.open or icons.closed) .. ' ' },
       { one_line(project.name), rolled == 'parked' and 'AgentIdeParked' or 'AgentIdeProject', fit = true },
     }
     local rows, suffix
@@ -130,10 +119,10 @@ function M.build(projects, state_of, expanded, now, icons, projects_dir, note_of
     add_row(left, project_right(rolled, states, icons, M.ago(project.activity, now)), { type = 'project', project = project })
 
     if is_open then
-      add({ { '    ' .. prefix(icons.new or '+') .. 'New session' } }, { type = 'new', project = project })
+      add({ { '    + New session' } }, { type = 'new', project = project })
       local key = project.key .. '/sessions'
       local sec_open = expanded[key] ~= false
-      add({ { '  ' .. (sec_open and icons.open or icons.closed) .. ' ' .. prefix(icons.sessions)
+      add({ { '  ' .. (sec_open and icons.open or icons.closed) .. ' '
         .. 'Sessions (' .. #project.sessions .. ')', 'AgentIdeSection' } }, { type = 'section', project = project, key = key })
       if sec_open then
         for i, s in ipairs(project.sessions) do

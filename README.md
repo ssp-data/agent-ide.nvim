@@ -124,17 +124,17 @@ require('agent-ide').setup({
   },
   chat = { auto_slash = true, at_picker = true }, -- `/` opens the command menu, `@` the file picker
   icons_style = 'nerd', -- 'nerd' (needs a Nerd Font) or 'plain' (characters of any monospace font)
-  icons = {}, -- override single icons of that set, for example { busy = '●', project = '' }; '' hides one
+  icons = {}, -- override single icons of that set, for example { busy = '*', changes = '' }; '' hides one
 })
 ```
 
-Icon keys: `open`, `closed` (fold arrows), `agents` (drawer header), `prompts`, `project`, `new`; sections `sessions`, `saved_prompts`, `changes`, `commits`, `skills`, `library`, `group`, `worktree`; session states `waiting`, `busy`, `idle`, `parked`, `done`, `failed`; prompt rows `command`, `skill`, `template`, `saved`. The plain set is `▾ ▸` for folds, `◐ ● ○ · ✔ ✖` for waiting, busy, idle, parked, done and failed, `✎` for Prompts, `+` for a new session and `⎇` for a worktree, and no icon for the rest.
+Icon keys: `open`, `closed` (fold arrows), `prompts`, `changes`, `commits`, `worktree`, and the session states `waiting`, `busy`, `idle`, `parked`, `done`, `failed`. Both sets use `▾ ▸` for folds, `⎇` for a worktree and the characters `● ◐ ● ○ ✓ ✗` for waiting, busy, idle, parked, done and failed (waiting and idle differ by colour). The nerd set differs in two places only: a notebook glyph (nf-md-notebook_outline) on the Prompts row and one git glyph (nf-oct-git_compare) on both the `Changes` and `Commits` rows. Nothing else carries an icon: no project icon, no section icons, no per-kind prompt icons.
 
 `:Agents` (or the toggle key) opens the Agents tab with the drawer. Inside the Agents tab it closes or reopens the drawer; from any other tab it switches to the Agents tab.
 
 ## Drawer
 
-The first line names the drawer's main keys. Each row shows its state icon and title on the left and, aligned to the right edge, what needs you and how old it is; a title too long for the drawer is cut with `…`, the right part never.
+The drawer has no header line; `?` lists every key. Each row shows its state mark and title on the left and, aligned to the right edge, what needs you and how old it is; a title too long for the drawer is cut with `…`, the right part never.
 
 | Row | Right part |
 |---|---|
@@ -144,7 +144,7 @@ The first line names the drawer's main keys. Each row shows its state icon and t
 | Project | the state icon of its most urgent session; `input (n)` while sessions wait, `review (n)` for done or failed ones; then the age of its newest session |
 | Changed file, commit | `+added −removed`, the commit's age |
 
-Ages read `now`, `5m`, `3h`, `12d`, then months (`14mo`) and years (`2y`). Colours: waiting violet (bold), busy yellow, idle green, done orange, failed red, parked and ages dimmed; the groups are `AgentIdeWaiting`, `AgentIdeBusy`, `AgentIdeIdle`, `AgentIdeDone`, `AgentIdeFailed`, `AgentIdeParked`, `AgentIdeAge` and `AgentIdeSection`, and a colorscheme can set them. A project whose folder is gone says `(folder missing)`; a session started in a sub-folder of its project shows `<subfolder>/ · <title>`.
+Ages read `now`, `5m`, `3h`, `12d`, then months (`14mo`) and years (`2y`). Colours: waiting violet (bold), busy yellow, idle green, done orange, failed red, parked rows (mark, title, age) and ages dimmed, never italic; the groups are `AgentIdeWaiting`, `AgentIdeBusy`, `AgentIdeIdle`, `AgentIdeDone`, `AgentIdeFailed`, `AgentIdeParked`, `AgentIdeAge` and `AgentIdeSection`, and a colorscheme can set them. The dim groups (`AgentIdeParked`, `AgentIdeAge`, `AgentIdeMissing`, `AgentIdeBranch`, `AgentIdeGitUntracked`) take the foreground of `Comment` at setup and on every `ColorScheme`, without italic or bold. A project row is its fold arrow and bold name; a parked project's name is dimmed. A project whose folder is gone says `(folder missing)`; a session started in a sub-folder of its project shows `<subfolder>/ · <title>`.
 
 ## Keys
 
