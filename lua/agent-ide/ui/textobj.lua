@@ -8,9 +8,19 @@ local M = {}
 
 local NOTICE = 'Agent-IDE: no Claude answer here'
 
----Answers in the transcript of `s`, oldest first: `{ header, last }` buffer lines (1-based). An
----answer runs from its `## Claude` header up to the line before the next `## You` header (or the
----end of the buffer).
+---Streaming lines the view shows below the events of the last turn (the answer so far, without
+---the trailing blank line `render` adds to a finished text).
+local function stream_lines(s)
+  if s.streaming == '' then return 0 end
+  return #render.render({ { kind = 'text', text = s.streaming } }).lines - 1
+end
+
+---Answers in the transcript of `s`, oldest first: `{ header, last }` buffer lines (1-based).
+---Boundaries are computed from the rendered line counts of the answer's own events, never from
+---the buffer end. Rule: an answer is its `## Claude` header plus the lines `render` makes for
+---the events of its turn, plus (last turn only) the streaming text below them. Anything else the
+---view shows after the events, for example a pending-permission block, is not part of it. A
+---later task that renders such a block must put it after the events and the streaming lines.
 ---@param buf integer transcript buffer
 ---@param s table Session
 ---@return { header: integer, last: integer }[]
@@ -27,18 +37,20 @@ function M.answers(buf, s)
   local out, offset = {}, 0
   for k, turn in ipairs(turns) do
     local n = #render.render(turn).lines
-    local next_offset = offset + n
     if render.starts_turn(turn[1]) then
-      local streaming = k == #turns and #turn == 1 and s.streaming ~= ''
-      if #turn > 1 or streaming then
-        local header = offset + #render.render({ turn[1] }).lines + 1
-        local last = k == #turns and count or (next_offset + 1)
-        if header <= count and api.nvim_buf_get_lines(buf, header - 1, header, false)[1] == '## Claude' then
-          out[#out + 1] = { header = header, last = math.min(last, count) }
+      local is_last = k == #turns
+      local extra = is_last and stream_lines(s) or 0
+      if #turn > 1 or extra > 0 then
+        local prompt_n = #render.render({ turn[1] }).lines
+        local header = offset + prompt_n + 1
+        local last = offset + n + extra
+        if #turn == 1 then last = last + 2 end -- the `## Claude` header and its blank line
+        if last <= count and api.nvim_buf_get_lines(buf, header - 1, header, false)[1] == '## Claude' then
+          out[#out + 1] = { header = header, last = last }
         end
       end
     end
-    offset = next_offset
+    offset = offset + n
   end
   return out
 end

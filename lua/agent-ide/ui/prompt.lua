@@ -4,15 +4,16 @@ local config = require('agent-ide.config')
 
 local M = {}
 
----Opening fence of a line (`` ``` `` or `~~~`, three or more, after optional blanks): char and length.
+-- Fence rule: a fenced block OPENS only at a line that starts at column 0 with three or more
+-- backticks or tildes (an indented fence line is plain text), and CLOSES at the next line that
+-- starts at column 0 with the same character at least as many times. Unclosed: runs to the end.
 local function open_fence(line)
-  local run = line:match('^%s*(```+)') or line:match('^%s*(~~~+)')
+  local run = line:match('^(```+)') or line:match('^(~~~+)')
   if run then return run:sub(1, 1), #run end
 end
 
----True when `line` closes a fence of `char` with at least `len` characters.
 local function closes_fence(line, char, len)
-  local run = line:match('^%s*(' .. (char == '`' and '`' or '~') .. '+)')
+  local run = line:match('^(' .. (char == '`' and '`' or '~') .. '+)')
   return run ~= nil and #run >= len
 end
 
@@ -59,6 +60,27 @@ end
 local function chat_opts()
   local c = config.get().chat
   return type(c) == 'table' and c or {}
+end
+
+---True while a completion menu is open: the native one or that of a completion plugin that
+---is already loaded (nvim-cmp, blink.cmp); never loads one.
+local function menu_visible()
+  if vim.fn.pumvisible() == 1 then return true end
+  local cmp = package.loaded['cmp']
+  if type(cmp) == 'table' and type(cmp.visible) == 'function' then
+    local ok, v = pcall(cmp.visible)
+    if ok and v then return true end
+  end
+  local blink = package.loaded['blink.cmp']
+  if type(blink) == 'table' then
+    for _, name in ipairs({ 'is_menu_visible', 'is_visible' }) do
+      if type(blink[name]) == 'function' then
+        local ok, v = pcall(blink[name])
+        if ok and v then return true end
+      end
+    end
+  end
+  return false
 end
 
 local function reset_history(buf)
@@ -153,7 +175,7 @@ local function walk(root, cb)
     if finished then return end
     finished = true
     table.sort(files)
-    cb(files)
+    cb(files, #files >= M.MAX_WALK)
   end
   local function scan(rel)
     pending = pending + 1
@@ -182,18 +204,23 @@ local function walk(root, cb)
   scan('')
 end
 
----Files of the project at `cwd`, relative to it, sorted: `git ls-files` (tracked and untracked,
----not ignored) in a git work tree, else a walk. Asynchronous: `cb(files)` runs on the main loop.
+---Files of the project at `cwd`, relative to it, sorted, at most `MAX_WALK`: `git ls-files`
+---(tracked and untracked, not ignored) in a git work tree, else a walk. Asynchronous: `cb(files,
+---truncated)` runs on the main loop.
 ---@param cwd string
----@param cb fun(files: string[])
+---@param cb fun(files: string[], truncated: boolean)
 function M.list_files(cwd, cb)
-  local function by_walk() walk(cwd, function(files) vim.schedule(function() cb(files) end) end) end
+  local function by_walk()
+    walk(cwd, function(files, truncated) vim.schedule(function() cb(files, truncated) end) end)
+  end
   local ok = pcall(vim.system, { 'git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard' },
     { cwd = cwd, text = true }, function(res)
       if res.code ~= 0 then return by_walk() end
       local files = vim.split(res.stdout or '', '\0', { plain = true, trimempty = true })
       table.sort(files)
-      vim.schedule(function() cb(files) end)
+      local truncated = #files > M.MAX_WALK
+      if truncated then files = vim.list_slice(files, 1, M.MAX_WALK) end
+      vim.schedule(function() cb(files, truncated) end)
     end)
   if not ok then by_walk() end
 end
@@ -206,13 +233,15 @@ local pick_ns = api.nvim_create_namespace('agent-ide.prompt.pick')
 ---@param typed boolean
 function M.pick(buf, typed)
   local st = bufs[buf]
-  if not st then return end
+  if not st or st.picking then return end
+  st.picking = true
   local win = api.nvim_get_current_win()
   local row, col = unpack(api.nvim_win_get_cursor(win))
   -- follows edits made while the file list is being read
   local mark = api.nvim_buf_set_extmark(buf, pick_ns, row - 1, col, { right_gravity = false })
 
   local function place(fn)
+    st.picking = false
     if not api.nvim_buf_is_valid(buf) then return end
     local pos = api.nvim_buf_get_extmark_by_id(buf, pick_ns, mark, {})
     api.nvim_buf_del_extmark(buf, pick_ns, mark)
@@ -220,24 +249,25 @@ function M.pick(buf, typed)
     local cur = api.nvim_win_is_valid(win) and api.nvim_win_get_buf(win) == buf and api.nvim_win_get_cursor(win)
     fn(pos[1], pos[2], cur)
   end
-  local function literal_at()
+  local function cancel()
     place(function(r, c, cur)
+      if not typed then return end
       api.nvim_buf_set_text(buf, r, c, r, c, { '@' })
       if cur and cur[1] == r + 1 and cur[2] >= c then api.nvim_win_set_cursor(win, { cur[1], cur[2] + 1 }) end
     end)
   end
 
-  M.list_files(st.s.cwd, function(files)
+  local cwd = st.s.cwd or vim.fn.getcwd(-1, 0)
+  M.list_files(cwd, function(files, truncated)
+    -- the list arrived late: only a prompt that is still being used gets the picker
+    if not api.nvim_buf_is_valid(buf) or api.nvim_get_current_buf() ~= buf then return cancel() end
     if #files == 0 then
-      vim.notify('Agent-IDE: no files found in ' .. st.s.cwd, vim.log.levels.INFO)
-      if typed then literal_at() else place(function() end) end
-      return
+      vim.notify('Agent-IDE: no files found in ' .. cwd, vim.log.levels.INFO)
+      return cancel()
     end
-    vim.ui.select(files, { prompt = 'Attach file' }, function(choice)
-      if not choice then
-        if typed then literal_at() else place(function() end) end
-        return
-      end
+    local prompt = truncated and ('Attach file (first %d files)'):format(#files) or 'Attach file'
+    vim.ui.select(files, { prompt = prompt }, function(choice)
+      if not choice then return cancel() end
       place(function(r, _, cur)
         api.nvim_buf_set_lines(buf, r, r, false, { '[attach] ' .. choice })
         if cur and cur[1] >= r + 1 then api.nvim_win_set_cursor(win, { cur[1] + 1, cur[2] }) end
@@ -248,11 +278,22 @@ end
 
 -- Buffer setup --------------------------------------------------------------------------------------------
 
+---True when a history step in `dir` would change the buffer.
+local function can_step(st, dir)
+  if dir < 0 then
+    if st.idx then return st.idx > 1 end
+    return #history_of(st.s) > 0
+  end
+  return st.idx ~= nil
+end
+
 local function edge_key(buf, dir, key, insert)
   return function()
+    local st = bufs[buf]
+    if not st or not can_step(st, dir) then return key end
     local row = api.nvim_win_get_cursor(0)[1]
     local at_edge = (dir < 0 and row == 1) or (dir > 0 and row == api.nvim_buf_line_count(buf))
-    if not at_edge or (insert and vim.fn.pumvisible() == 1) then return key end
+    if not at_edge or (insert and menu_visible()) then return key end
     return ('<Cmd>lua require("agent-ide.ui.prompt").step(%d, %d)<CR>'):format(buf, dir)
   end
 end
@@ -264,7 +305,6 @@ function M.setup_buf(buf, s)
   bufs[buf] = { s = s }
   api.nvim_create_autocmd('BufWipeout', { buffer = buf, once = true, callback = function() bufs[buf] = nil end })
   vim.bo[buf].completefunc = "v:lua.require'agent-ide.ui.prompt'.complete"
-  vim.bo[buf].completeopt = 'menu,menuone,noinsert'
   local keys, opts = chat_keys(), chat_opts()
   local function map(modes, lhs, fn, desc)
     if not lhs then return end
@@ -273,9 +313,9 @@ function M.setup_buf(buf, s)
 
   if opts.auto_slash ~= false then
     map('i', '/', function()
-      local at_start = api.nvim_win_get_cursor(0)[2] == 0
+      local empty_line = api.nvim_get_current_line() == ''
       local commands = bufs[buf] and bufs[buf].s.slash_commands
-      if at_start and commands and #commands > 0 and vim.fn.pumvisible() == 0 then return '/<C-x><C-u>' end
+      if empty_line and commands and #commands > 0 and not menu_visible() then return '/<C-x><C-u>' end
       return '/'
     end, 'command menu')
   end
@@ -284,7 +324,8 @@ function M.setup_buf(buf, s)
     map('i', '@', function()
       local col = api.nvim_win_get_cursor(0)[2]
       local before = api.nvim_get_current_line():sub(col, col)
-      if col == 0 or before:match('%s') then
+      local st = bufs[buf]
+      if st and not st.picking and (col == 0 or before:match('%s')) then
         return ('<Cmd>lua require("agent-ide.ui.prompt").pick(%d, true)<CR>'):format(buf)
       end
       return '@'

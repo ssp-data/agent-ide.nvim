@@ -84,7 +84,11 @@ T['attach path is trimmed; tilde fences, longer fences and unclosed fences'] = f
   eq(P.text_to_send({ '````', '```', '[attach] x', '````', '[attach] y' }), '````\n```\n[attach] x\n````\n@y')
   eq(P.text_to_send({ '~~~', '```', '[attach] x', '```' }), '~~~\n```\n[attach] x\n```')
   -- an unclosed fence runs to the end
-  eq(P.text_to_send({ '  ```lua', '[attach] x' }), '  ```lua\n[attach] x')
+  eq(P.text_to_send({ '```lua', '[attach] x' }), '```lua\n[attach] x')
+  -- fences open and close at column 0 only
+  eq(P.text_to_send({ '  ```lua', '[attach] x' }), '  ```lua\n@x')
+  eq(P.text_to_send({ '```', '  ```', '[attach] x', '```', '[attach] y' }), '```\n  ```\n[attach] x\n```\n@y')
+  eq(P.text_to_send({ '~~~', '  ~~~', '[attach] x' }), '~~~\n  ~~~\n[attach] x')
   eq(P.text_to_send({ '[attach] a', '[attach] b' }), '@a\n@b')
 end
 
@@ -117,10 +121,20 @@ T['typing / at the line start opens the completion menu; auto_slash = false turn
   child.lua("require('agent-ide.session').all()[1].slash_commands = { 'compact', 'context' }")
   child.type_keys('i', '/')
   eq(child.lua_get('vim.fn.pumvisible()'), 1)
-  eq(child.lua_get('vim.api.nvim_get_current_line()'), '/')
+  eq(child.lua_get('vim.api.nvim_get_current_line()'):sub(1, 1), '/') -- the user's completeopt decides on the rest
   child.type_keys('<Esc>', 'cc', 'x/')
   eq(child.lua_get('vim.fn.pumvisible()'), 0)
   eq(child.lua_get('vim.api.nvim_get_current_line()'), 'x/')
+
+  -- only on an otherwise empty line
+  child.type_keys('<Esc>', 'cc', ' /')
+  eq(child.lua_get('vim.fn.pumvisible()'), 0)
+  -- not while a completion plugin shows its menu
+  child.type_keys('<Esc>', 'dd', 'i')
+  child.lua("package.loaded.cmp = { visible = function() return true end }")
+  child.type_keys('/')
+  eq(child.lua_get('vim.fn.pumvisible()'), 0)
+  eq(child.lua_get('vim.api.nvim_get_current_line()'), '/')
 
   start({ chat = { auto_slash = false } })
   child.lua("require('agent-ide.session').all()[1].slash_commands = { 'compact' }")
@@ -176,6 +190,32 @@ T['history in insert mode only when the menu is closed and at the first/last lin
   eq(lines_of('prompt'), { 'a', 'b' })
 end
 
+T['insert-mode history keys keep their native action when no step is possible or a plugin menu is open'] = function()
+  start()
+  -- no history: <C-p> is native (completion), the buffer is untouched
+  child.type_keys('i', 'abc', '<C-p>')
+  eq(lines_of('prompt'), { 'abc' })
+  child.type_keys('<Esc>', 'A')
+  set_events({ { kind = 'prompt', text = 'old' } })
+  -- a visible nvim-cmp menu: the key goes through
+  child.lua("package.loaded.cmp = { visible = function() return true end }")
+  child.type_keys('<C-p>', '<Esc>', 'A')
+  eq(lines_of('prompt'), { 'abc' })
+  child.lua("package.loaded.cmp = nil")
+  child.lua("package.loaded['blink.cmp'] = { is_menu_visible = function() return true end }")
+  child.type_keys('<C-p>', '<Esc>', 'A')
+  eq(lines_of('prompt'), { 'abc' })
+  child.lua("package.loaded['blink.cmp'] = nil")
+  child.type_keys('<C-p>')
+  eq(lines_of('prompt'), { 'old' })
+  -- oldest: native again (the buffer does not change)
+  child.type_keys('<C-p>')
+  eq(lines_of('prompt'), { 'old' })
+  -- at the newest end <C-n> steps forward to the draft, then is native
+  child.type_keys('<C-n>')
+  eq(lines_of('prompt'), { 'abc' })
+end
+
 T['history keys can be disabled'] = function()
   start({ keys = { chat = { history_prev = false } } })
   set_events({ { kind = 'prompt', text = 'old' } })
@@ -229,6 +269,55 @@ T['chat.at_picker = false: @ is plain'] = function()
   child.type_keys('i', '@')
   eq(lines_of('prompt'), { '@' })
   eq(child.lua_get('_G.offered'), vim.NIL)
+end
+
+T['a second @ while the list loads is a plain @; a picker for a prompt that is no longer current is dropped'] = function()
+  start()
+  stub_select(1)
+  child.type_keys('i', '@', '@')
+  wait_for(function() return #lines_of('prompt') == 2 end, 'attach line')
+  eq(lines_of('prompt'), { '[attach] a.lua', '@' })
+  -- leave the prompt before the list arrives: nothing is offered, a literal @ is inserted
+  stub_select(1)
+  child.type_keys('<Esc>', 'ccx ')
+  child.lua([[
+    local prompt = require('agent-ide.ui.prompt')
+    local orig = prompt.list_files
+    prompt.list_files = function(cwd, cb)
+      orig(cwd, function(...)
+        local args = { ... }
+        vim.api.nvim_set_current_win(require('agent-ide.ui.chat')._windows().transcript)
+        cb(unpack(args))
+      end)
+    end
+  ]])
+  child.type_keys('@')
+  wait_for(function() return lines_of('prompt')[2] == 'x @' end, 'literal @')
+  eq(child.lua_get('_G.offered'), vim.NIL)
+end
+
+T['the file list is capped (also from git) and says so; a missing session cwd uses the tab cwd'] = function()
+  git_init()
+  for i = 1, 12 do vim.fn.writefile({ '' }, repo .. '/g' .. i .. '.txt') end
+  start()
+  child.lua([[
+    require('agent-ide.ui.prompt').MAX_WALK = 5
+    _G.prompts = {}
+    vim.ui.select = function(items, o, on_choice) _G.offered, _G.prompts[1] = items, o.prompt; on_choice(nil) end
+  ]])
+  child.type_keys('i', '@')
+  wait_for(function() return child.lua_get('_G.offered') ~= vim.NIL end, 'picker')
+  eq(#child.lua_get('_G.offered'), 5)
+  eq(child.lua_get('_G.prompts[1]'), 'Attach file (first 5 files)')
+  wait_for(function() return lines_of('prompt')[1] == '@' end, 'literal @ after cancel')
+
+  child.lua([[
+    require('agent-ide.session').all()[1].cwd = nil
+    vim.cmd('tcd ' .. vim.fn.fnameescape(...))
+    _G.offered = nil
+  ]], { repo })
+  child.type_keys('<Esc>', 'cc', '@')
+  wait_for(function() return child.lua_get('_G.offered') ~= vim.NIL end, 'picker from the tab cwd')
 end
 
 T['<leader>af attaches from normal mode; cancel changes nothing'] = function()
@@ -375,6 +464,62 @@ T['answer keys can be disabled or remapped; an answer without text has no inner 
   child.type_keys('yiq')
   eq(reg(), { 'only' })
   eq(child.lua_get("vim.fn.maparg('ar', 'o', false, true).buffer"), vim.NIL)
+end
+
+T['text object boundaries: turn 0 content, an answer ending in a fold, streaming after events, extra lines'] = function()
+  start()
+  set_events({ { kind = 'text', text = 'orphan' }, { kind = 'prompt', text = 'q' }, { kind = 'text', text = 'ans' } })
+  eq(lines_of('transcript'), { 'orphan', '', '', '## You', '', 'q', '', '## Claude', '', 'ans', '' })
+  to_transcript(1)
+  child.type_keys('yir')
+  eq(reg(), { 'ans' })
+  to_transcript(1)
+  child.lua("vim.fn.setreg('\"', 'keep')")
+  child.type_keys('y2ir')
+  eq(reg(), { 'keep' }) -- turn 0 is not an answer
+
+  -- an answer that ends in a tool fold: no trailing blank, ar stops at the fold
+  start()
+  set_events({ { kind = 'prompt', text = 'q' }, { kind = 'text', text = 'ans' },
+    { kind = 'tool_call', id = 't', name = 'Bash', input = { command = 'ls' } },
+    { kind = 'tool_result', id = 't', text = 'out', is_error = false },
+    { kind = 'prompt', text = 'q2' }, { kind = 'text', text = 'last' } })
+  to_transcript(1)
+  child.type_keys('y2ir')
+  eq(reg(), { 'ans', '', '▸ Bash: ls', '│ $ ls', '│ out' })
+  to_transcript(1)
+  child.type_keys('y2ar')
+  eq(reg(), { '## Claude', '', 'ans', '', '▸ Bash: ls', '│ $ ls', '│ out' })
+
+  -- streaming text below events of the same turn is part of the answer
+  start()
+  set_events({ { kind = 'prompt', text = 'q' }, { kind = 'text', text = 'done part' } })
+  child.lua([[
+    local s = require('agent-ide.session').all()[1]
+    s.streaming = 'more'
+    s:_emit('delta')
+  ]])
+  eq(lines_of('transcript'), { '', '## You', '', 'q', '', '## Claude', '', 'done part', '', 'more' })
+  to_transcript(1)
+  child.type_keys('yir')
+  eq(reg(), { 'done part', '', 'more' })
+
+  -- lines the view shows after the events (e.g. a permission block) are not part of the answer
+  start()
+  set_events({ { kind = 'prompt', text = 'q' }, { kind = 'text', text = 'ans' } })
+  child.lua([[
+    local buf = require('agent-ide.ui.chat')._windows().transcript
+    buf = vim.api.nvim_win_get_buf(buf)
+    vim.bo[buf].modifiable = true
+    vim.api.nvim_buf_set_lines(buf, -1, -1, false, { '⏸ permission?', 'Allow  Deny' })
+    vim.bo[buf].modifiable = false
+  ]])
+  to_transcript(1)
+  child.type_keys('yir')
+  eq(reg(), { 'ans' })
+  to_transcript(1)
+  child.type_keys('yar')
+  eq(reg(), { '## Claude', '', 'ans', '' })
 end
 
 T['a streaming answer is selectable before its text event exists'] = function()
