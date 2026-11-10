@@ -13,7 +13,7 @@ local QUOTA_DEBOUNCE_MS = 1000
 -- Sources can be replaced in tests: sessions, live map, clock, focused session.
 M._src = {
   sessions = function() return session.all() end,
-  live = function() return live.get() end,
+  live = function() return live.fresh() end, -- entries not refreshed for two poll intervals do not count
   now = function() return os.time() end,
   current = function()
     local chat = package.loaded['agent-ide.ui.chat']

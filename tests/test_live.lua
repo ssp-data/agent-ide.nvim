@@ -71,6 +71,47 @@ T['stop: result arriving after stop does not call on_change'] = function()
   eq(live.get(), {})
 end
 
+T['entries not refreshed for two poll intervals do not count for the footer or next waiting'] = function()
+  local status = require('agent-ide.status')
+  local waiting = require('agent-ide.ui.waiting')
+  local orig_live = status._src.live
+  status._src.live = function() return live.fresh() end -- the default source (another file may replace it)
+  local ok, err = pcall(function()
+    live.start({ interval_ms = 40, cmd = { 'echo', '[{"sessionId":"t","status":"waiting","pid":3,"cwd":"/"}]' } })
+    assert(vim.wait(1000, function() return live.get().t ~= nil end, 5))
+    eq(status.level({}).waiting, 1)
+    eq(#waiting.needing(), 1)
+    live.stop()
+    -- within two intervals the map still counts
+    eq(live.fresh().t ~= nil, true)
+    vim.wait(150)
+    eq(live.get().t.status, 'waiting') -- kept, but no longer counted
+    eq(live.fresh(), {})
+    eq(status.level({}).waiting, 0)
+    eq(#waiting.needing(), 0)
+  end)
+  status._src.live = orig_live
+  if not ok then error(err, 0) end
+end
+
+T['query asks once, now, and stores the answer'] = function()
+  local got
+  live.query({ cmd = { 'echo', '[{"sessionId":"q","status":"idle","pid":4,"cwd":"/"}]' }, interval_ms = 50 },
+    function(ok) got = ok end)
+  assert(vim.wait(1000, function() return got ~= nil end, 5))
+  eq(got, true)
+  eq(live.fresh().q.pid, 4)
+  eq(live.active(), false)
+  got = nil
+  live.query({ cmd = { 'false' }, interval_ms = 50 }, function(ok, reason) got = { ok, reason } end)
+  assert(vim.wait(1000, function() return got ~= nil end, 5))
+  eq(got, { false, 'exit code 1' })
+  got = nil
+  live.query({ cmd = { 'agent-ide-no-such-binary' }, interval_ms = 50 }, function(ok, reason) got = { ok, reason } end)
+  assert(vim.wait(1000, function() return got ~= nil end, 5))
+  eq(got, { false, 'command not found' })
+end
+
 T['match_pane'] = function()
   local out = '/dev/pts/3 %1\n/dev/pts/9 %12\n'
   eq(tmux.match_pane('pts/9', out), '%12')

@@ -147,11 +147,14 @@ end
 
 -- Public methods -------------------------------------------------------------------------
 
+---A send now would start a Claude process (none runs here and none is being stopped).
+function Session:needs_start() return not self:_alive() and not self.parking end
+
 ---Another Claude (a terminal) runs this session. The stale live entry of our own dead
----process (same pid) does not count.
+---process (same pid) does not count, nor does a live map not refreshed for two poll intervals.
 function Session:_elsewhere()
   if self:_alive() then return false end
-  local e = require('agent-ide.live').get()[self.id]
+  local e = require('agent-ide.live').fresh()[self.id]
   return e ~= nil and (self.pid == nil or e.pid ~= self.pid)
 end
 

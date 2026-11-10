@@ -445,27 +445,44 @@ local function track_visibility()
     index.set_visible = function(v) _G.vis = v; return set_visible(v) end
   ]])
 end
-local function shown_state() return child.lua_get('{ require("agent-ide.live").active(), _G.vis }') end
+-- { live poll interval (vim.NIL: stopped), index visible }
+local function shown_state() return child.lua_get('{ require("agent-ide.live").interval() or vim.NIL, _G.vis }') end
 
-T['live polling and the change timer run only while the drawer is on screen'] = function()
+T['live polling runs normally while the drawer is on screen, slowly while hidden, not without a tab'] = function()
   start()
   track_visibility()
   child.lua('require("agent-ide").toggle()')
-  eq(shown_state(), { true, true })
+  eq(shown_state(), { 50, true })
   -- :q in the drawer window
   child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.drawer").state().win)')
   child.cmd('quit')
   eq(child.lua_get('vim.fn.tabpagenr("$")'), 2)
-  eq(shown_state(), { false, false })
+  eq(shown_state(), { 200, false })
   child.lua('require("agent-ide").toggle()')
-  eq(shown_state(), { true, true })
+  eq(shown_state(), { 50, true })
   -- another tab
   child.cmd('tabprevious')
-  eq(shown_state(), { false, false })
+  eq(shown_state(), { 200, false })
   child.cmd('tabnext')
-  eq(shown_state(), { true, true })
+  eq(shown_state(), { 50, true })
+  -- no Agents tab and no session alive here: no polling at all
   child.cmd('tabclose')
-  eq(shown_state(), { false, false })
+  eq(shown_state(), { vim.NIL, false })
+end
+
+T['without an Agents tab, polling goes on slowly while a session is alive here'] = function()
+  start()
+  child.lua('require("agent-ide").toggle()')
+  child.lua([[
+    local s = require('agent-ide.session').open({ cwd = '/tmp' })
+    s._alive = function() return true end
+    _G.alive_s = s
+  ]])
+  child.cmd('tabclose')
+  eq(child.lua_get('require("agent-ide.live").interval()'), 200)
+  -- the session ends: the next poll stops polling
+  child.lua('_G.alive_s._alive = function() return false end')
+  wait_for(function() return child.lua_get('require("agent-ide.live").active()') == false end, 'polling stopped')
 end
 
 T['highlight groups survive a colorscheme change; waiting is violet'] = function()
