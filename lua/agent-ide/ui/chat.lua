@@ -35,22 +35,104 @@ local function valid_buf(b) return b ~= nil and api.nvim_buf_is_valid(b) and api
 
 -- Winbar ----------------------------------------------------------------------------------
 
-local function winbar_text(c)
-  local s = c.s
-  local model, mode = require('agent-ide.ui.mode').labels(s)
-  local parts = {
-    c.project and c.project.name or '?',
-    s.title and (s.title:gsub('[\r\n]+', ' ')) or 'new session',
-    model,
-    mode,
-    require('agent-ide.ui.handoff').away(s) and 'in native Claude (tmux pane)' or drawer().state_of(s.id),
-  }
-  if #s.queue > 0 then parts[#parts + 1] = 'queued:' .. #s.queue end
-  return (table.concat(parts, ' · '):gsub('%%', '%%%%'))
+-- `<mark> <state word>` in the drawer's colours (its marks, groups and words), `· project`
+-- (bold) `· title` (cut with … to fit), then right-aligned the model (italic) and the
+-- permission mode as a badge (a mode other than the default one stands out). Every `%` of the
+-- text is escaped; widths are display widths, and the whole fits the window: what matters
+-- least gives way first.
+local SEP = ' · '
+
+local function esc(t) return (t:gsub('%%', '%%%%')) end
+
+local function seg(group, text) return '%#' .. group .. '#' .. esc(text) .. '%*' end
+
+local function one_line(t) return (tostring(t or ''):gsub('[\r\n\t]+', ' ')) end
+
+-- Mark, word and their groups, as the drawer's session row shows them (`tree.lua`).
+local function state_parts(s)
+  local model = require('agent-ide.ui.drawer_model')
+  local state = model.state_of(s.id)
+  local group = require('agent-ide.ui.tree').STATE_GROUP[state] or 'AgentIdeAge'
+  local icons = require('agent-ide.config').get().icons or {}
+  local note = model.note_of(s.id, state)
+  local word, word_group = state, group
+  if note and note[1] and note[1] ~= '' then word, word_group = one_line(note[1]), note[2] or group end
+  return { mark = icons[state] or '', group = group, word = word, word_group = word_group }
 end
 
+-- The default mode (`manual`, or `claude.default_mode` when set) or none: no badge colour.
+local function quiet_mode(m)
+  if m == nil or m == 'manual' then return true end
+  local c = require('agent-ide.config').get().claude
+  return type(c) == 'table' and m == c.default_mode
+end
+
+---The winbar of the chat of `s` (statusline syntax) for a window `width` columns wide.
+---@param s table Session
+---@param project table|nil
+---@param width integer
+---@return string
+local function winbar_text(s, project, width)
+  local st = state_parts(s)
+  local model_label, mode_label = require('agent-ide.ui.mode').labels(s)
+  local model = (s.model or s.model_requested) and one_line(model_label) or nil
+  local mode = (s.mode or s.mode_requested) and ('[' .. mode_label:gsub('^mode:', '') .. ']') or nil
+  local hot = mode and not (quiet_mode(s.mode) and quiet_mode(s.mode_requested))
+  local queued = #s.queue > 0 and ('queued:' .. #s.queue) or nil
+  local name = one_line(project and project.name or '?')
+  local title = one_line(s.title or 'new session')
+  local W = vim.fn.strdisplaywidth
+  local truncate = require('agent-ide.ui.layout').truncate
+  local function lw()
+    local n = (st.mark ~= '' and W(st.mark) + 1 or 0) + W(st.word) + (queued and W(SEP) + #queued or 0)
+    if name ~= '' then n = n + W(SEP) + W(name) end
+    return n
+  end
+  local function rw()
+    if not model and not mode then return 0 end
+    return 1 + (model and W(model) or 0) + (model and mode and 1 or 0) + (mode and W(mode) or 0)
+  end
+  -- the title takes what is left; without room for it the model, the queue count, the badge
+  -- and last the state word give way, and the project gets what remains
+  local room = width - lw() - rw() - W(SEP)
+  title = room >= 2 and truncate(title, room) or nil
+  if not title and lw() + rw() > width then
+    local full = name
+    name = ''
+    if lw() + rw() > width then model = nil end
+    if lw() + rw() > width then queued = nil end
+    if lw() + rw() > width then mode = nil end
+    if lw() + rw() > width then
+      local keep = width - (st.mark ~= '' and W(st.mark) + 1 or 0)
+      st.word = truncate(st.word, math.max(0, keep))
+    end
+    local spare = width - lw() - rw() - W(SEP)
+    if full ~= '' and spare >= 2 then name = truncate(full, spare) end
+  end
+  local out = {}
+  if st.mark ~= '' then out[#out + 1] = seg(st.group, st.mark) .. ' ' end
+  out[#out + 1] = seg(st.word_group, st.word)
+  if queued then out[#out + 1] = SEP .. esc(queued) end
+  if name ~= '' then out[#out + 1] = SEP .. seg('AgentIdeProject', name) end
+  if title then out[#out + 1] = SEP .. esc(title) end
+  if model or mode then
+    out[#out + 1] = '%='
+    if model then out[#out + 1] = seg('AgentIdeModel', model) end
+    if mode then out[#out + 1] = (model and ' ' or '') .. seg(hot and 'AgentIdeModeHot' or 'AgentIdeMode', mode) end
+  end
+  return table.concat(out)
+end
+
+-- Every window showing the transcript gets the winbar for its width.
 local function update_winbar(c)
-  if valid_buf(c.tbuf) then history.set_winbar(c.tbuf, winbar_text(c)) end
+  if not valid_buf(c.tbuf) then return end
+  local wins = vim.fn.win_findbuf(c.tbuf)
+  local first = wins[1] and api.nvim_win_get_width(wins[1]) or vim.o.columns
+  history.set_winbar(c.tbuf, winbar_text(c.s, c.project, first))
+  for i = 2, #wins do
+    api.nvim_set_option_value('winbar', winbar_text(c.s, c.project, api.nvim_win_get_width(wins[i])),
+      { scope = 'local', win = wins[i] })
+  end
 end
 
 -- Visibility -------------------------------------------------------------------------------
@@ -87,6 +169,17 @@ local function setup_autocmds()
     later()
   end })
   api.nvim_create_autocmd('TabLeave', { group = augroup, callback = later })
+  -- the winbar fits its window: computed again for a transcript window that changed size
+  api.nvim_create_autocmd('WinResized', { group = augroup, callback = function()
+    local seen = {}
+    for _, w in ipairs(vim.v.event.windows or {}) do
+      local c = api.nvim_win_is_valid(w) and by_buf[api.nvim_win_get_buf(w)]
+      if c and c.tbuf == api.nvim_win_get_buf(w) and not seen[c] then
+        seen[c] = true
+        update_winbar(c)
+      end
+    end
+  end })
 end
 
 -- Session changes ----------------------------------------------------------------------------
@@ -461,6 +554,9 @@ end
 
 ---Chats by session id (tests).
 function M._chats() return chats end
+
+---The winbar of session `s` in `project` for a window `width` columns wide (tests).
+function M._winbar(s, project, width) return winbar_text(s, project, width) end
 
 ---Chat windows (tests): { transcript = win|nil, prompt = win|nil }, only those still valid.
 function M._windows()

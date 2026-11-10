@@ -191,7 +191,12 @@ local function transcript()
   return child.lua_get('vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().transcript), 0, -1, false)')
 end
 
-local function winbar() return child.lua_get('vim.wo[require("agent-ide.ui.chat")._windows().transcript].winbar') end
+-- The transcript's winbar as text: highlight groups dropped, the right-align gap `%=` as two
+-- spaces, `%%` as `%`.
+local function winbar()
+  local bar = child.lua_get('vim.wo[require("agent-ide.ui.chat")._windows().transcript].winbar')
+  return (bar:gsub('%%#[^#]*#', ''):gsub('%%%*', ''):gsub('%%=', '  '):gsub('%%%%', '%%'))
+end
 local function mode() return child.lua_get('vim.api.nvim_get_mode().mode') end
 local function selects() return child.lua_get('_G.selects') end
 local function pick(label) child.lua('_G.pick(...)', { label }) end
@@ -472,7 +477,7 @@ T['ExitPlanMode: approve and accept edits sends the next mode with the approval'
   wait_for(function() return has_line(transcript(), 'Going.') ~= nil end, 'answer')
   eq(answers()[1], { subtype = 'success', request_id = 'x1', response = { behavior = 'allow', updatedInput = plan,
     updatedPermissions = { { type = 'setMode', mode = 'acceptEdits', destination = 'session' } } } })
-  wait_for(function() return winbar():find('mode:acceptEdits ·', 1, true) ~= nil end, 'mode confirmed')
+  wait_for(function() return winbar():find('[acceptEdits]', 1, true) ~= nil end, 'mode confirmed')
   eq(controls(), {})
 end
 
@@ -504,7 +509,7 @@ T['suggestions: the mode Claude reports after a setMode answer reaches the winba
   send_normal('Write it')
   wait_for(function() return #selects() == 1 end, 'select')
   pick('Allow and switch to acceptEdits for this session')
-  wait_for(function() return winbar():find('mode:acceptEdits ·', 1, true) ~= nil end, 'mode confirmed')
+  wait_for(function() return winbar():find('[acceptEdits]', 1, true) ~= nil end, 'mode confirmed')
 end
 
 T['suggestions: always allow only for verified destinations; the rule goes back in updatedPermissions'] = function()
@@ -572,17 +577,17 @@ T['<S-Tab> cycles the mode; the winbar follows what Claude confirms; a control e
       error_code = 'invalid_mode' } } }))
   local id = open_new()
   send_normal('hi')
-  wait_for(function() return winbar():find('mode:manual ·', 1, true) ~= nil and current().state == 'idle' end, 'first turn')
+  wait_for(function() return winbar():find('[manual]', 1, true) ~= nil and current().state == 'idle' end, 'first turn')
   child.type_keys('<S-Tab>')
   wait_for(function() return #controls() == 1 end, 'first set_permission_mode')
   eq(controls()[1], { subtype = 'set_permission_mode', mode = 'acceptEdits' })
-  eq(winbar():find('mode:manual→acceptEdits ·', 1, true) ~= nil, true)
+  eq(winbar():find('[manual→acceptEdits]', 1, true) ~= nil, true)
   child.lua('require("agent-ide.session").get(...):_write({ type = "go" })', { id })
-  wait_for(function() return winbar():find('mode:acceptEdits ·', 1, true) ~= nil end, 'confirmed')
+  wait_for(function() return winbar():find('[acceptEdits]', 1, true) ~= nil end, 'confirmed')
   child.type_keys('<S-Tab>')
   wait_for(function() return #controls() == 2 end, 'second set_permission_mode')
   eq(controls()[2], { subtype = 'set_permission_mode', mode = 'plan' })
-  wait_for(function() return winbar():find('mode:acceptEdits ·', 1, true) ~= nil end, 'error keeps the mode')
+  wait_for(function() return winbar():find('[acceptEdits]', 1, true) ~= nil end, 'error keeps the mode')
   local notes = child.lua_get('_G.notes')
   eq(notes[#notes], 'Agent-IDE: cannot switch mode to plan: bad mode')
   -- the cycle and the names sent to Claude
@@ -599,7 +604,7 @@ T['the mode list comes from config; manual is sent as default'] = function()
   eq(child.lua_get('require("agent-ide.ui.mode").next_mode("plan")'), 'manual')
   child.type_keys('<S-Tab>')
   -- default_mode plan: the first press asks for manual
-  eq(winbar():find('mode:?→manual ·', 1, true) ~= nil, true)
+  eq(winbar():find('[?→manual]', 1, true) ~= nil, true)
   eq(child.lua_get('require("agent-ide.ui.chat").current().deferred'),
     { { subtype = 'set_permission_mode', mode = 'default' } })
 end
@@ -609,7 +614,7 @@ T['<S-Tab> before the first turn: pending in the winbar, sent right after start'
     { expect = 'hi' }, init('acceptEdits'), status(), say('hey'), result('hey')))
   open_new()
   child.type_keys('<S-Tab>')
-  eq(winbar():find('mode:?→acceptEdits ·', 1, true) ~= nil, true)
+  eq(winbar():find('[?→acceptEdits]', 1, true) ~= nil, true)
   vim.wait(200)
   eq(fake.log(log), {}) -- no process started
   send_normal('hi')
@@ -617,7 +622,7 @@ T['<S-Tab> before the first turn: pending in the winbar, sent right after start'
   local ins = fake_ins()
   eq(ins[1], { type = 'control_request', request_id = 'r1', request = { subtype = 'set_permission_mode', mode = 'acceptEdits' } })
   eq(ins[2].type, 'user')
-  eq(winbar():find('mode:acceptEdits ·', 1, true) ~= nil, true)
+  eq(winbar():find('[acceptEdits]', 1, true) ~= nil, true)
 end
 
 T['<leader>aM picks a model; the winbar shows it pending until Claude confirms'] = function()
@@ -625,16 +630,16 @@ T['<leader>aM picks a model; the winbar shows it pending until Claude confirms']
     { expect = 'set_model' }, { expect = '"go"' }, ok('r1')))
   local id = open_new()
   send_normal('hi')
-  wait_for(function() return winbar():find('haiku-5-5 ·', 1, true) ~= nil and current().state == 'idle' end, 'first turn')
+  wait_for(function() return winbar():find('haiku-5-5 [', 1, true) ~= nil and current().state == 'idle' end, 'first turn')
   child.type_keys('\\aM')
   wait_for(function() return #selects() == 1 end, 'model select')
   eq(selects()[1].labels, { 'fable', 'opus', 'sonnet', 'haiku' })
   pick('sonnet')
   wait_for(function() return #controls() == 1 end, 'set_model')
   eq(controls()[1], { subtype = 'set_model', model = 'sonnet' })
-  eq(winbar():find('haiku-5-5→sonnet ·', 1, true) ~= nil, true)
+  eq(winbar():find('haiku-5-5→sonnet [', 1, true) ~= nil, true)
   child.lua('require("agent-ide.session").get(...):_write({ type = "go" })', { id })
-  wait_for(function() return winbar():find(' · sonnet · ', 1, true) ~= nil end, 'model confirmed')
+  wait_for(function() return winbar():find('  sonnet [', 1, true) ~= nil end, 'model confirmed')
 end
 
 T['next_waiting: nothing needs you; done sessions are opened; global key mapped'] = function()

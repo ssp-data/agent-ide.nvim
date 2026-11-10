@@ -1,12 +1,11 @@
 -- Windows of the search picker: an input line on top, the results list below it and a preview
 -- of the selected hit beside it (below it on narrow screens). Rendering only; no state.
 local api = vim.api
-local match = require('agent-ide.search.match')
 
 local M = {}
 
 local ns = api.nvim_create_namespace('agent-ide.search')
-local PREVIEW_HL_LINES = 200 -- query words are highlighted this far around the hit
+local ns_cur = api.nvim_create_namespace('agent-ide.search.current')
 
 M.TAGS = { title = 'title ', prompt = 'you   ', answer = 'claude', tool = 'tool  ', project = 'proj  ' }
 local KIND_HL = { title = 'AgentIdeSearchKindTitle', prompt = 'AgentIdeSearchKindPrompt',
@@ -14,6 +13,7 @@ local KIND_HL = { title = 'AgentIdeSearchKindTitle', prompt = 'AgentIdeSearchKin
 
 local GROUPS = {
   AgentIdeSearchMatch = { link = 'Search' },
+  AgentIdeSearchMatchCurrent = { link = 'CurSearch' },
   AgentIdeSearchTarget = { link = 'CursorLine' },
   AgentIdeSearchMeta = { link = 'Comment' },
   AgentIdeSearchLimited = { link = 'WarningMsg' },
@@ -23,7 +23,7 @@ local GROUPS = {
   AgentIdeSearchKindTool = { link = 'Comment' },
 }
 
-local function define()
+function M.define()
   for name, def in pairs(GROUPS) do api.nvim_set_hl(0, name, vim.tbl_extend('force', def, { default = true })) end
 end
 
@@ -62,7 +62,7 @@ end
 
 ---Open the three windows; the input is focused.
 function M.create()
-  define()
+  M.define()
   local L = layout()
   local v = { input_buf = scratch(), list_buf = scratch(), preview_buf = scratch('markdown') }
   vim.bo[v.input_buf].buftype = 'nofile'
@@ -158,8 +158,36 @@ function M.select(v, sel)
   api.nvim_win_set_cursor(v.list_win, { math.max(1, math.min(sel, n)), 0 })
 end
 
----Show `lines` in the preview, `target` highlighted and centred, `words` marked around it.
-function M.render_preview(v, out, target, words, title, footer)
+---Mark the occurrences `occ` (from `search_hl.occurrences`) in `buf`.
+function M.mark(buf, occ)
+  for _, o in ipairs(occ) do
+    api.nvim_buf_set_extmark(buf, ns, o.line - 1, o.s, { end_col = o.e, hl_group = 'AgentIdeSearchMatch', priority = 200 })
+  end
+end
+
+---Show occurrence `o` as the current one: marked, on screen (its fold open, centred), with
+---`footer` below the preview.
+function M.show_match(v, o, footer)
+  local buf, win = v.preview_buf, v.preview_win
+  api.nvim_buf_clear_namespace(buf, ns_cur, 0, -1)
+  if o then
+    api.nvim_buf_set_extmark(buf, ns_cur, o.line - 1, o.s, { end_col = o.e, hl_group = 'AgentIdeSearchMatchCurrent',
+      priority = 210 })
+    api.nvim_win_set_cursor(win, { o.line, o.s })
+    api.nvim_win_call(win, function() vim.cmd('normal! zvzz') end)
+  end
+  if footer then M.set_preview_footer(v, footer) end
+end
+
+function M.set_preview_footer(v, footer)
+  api.nvim_win_set_config(v.preview_win, { footer = { { ' ' .. footer .. ' ', 'FloatFooter' } }, footer_pos = 'right' })
+end
+
+---Show `out.lines` in the preview, line `target` (the hit) marked; `occ` (occurrences of the
+---query) marked, occurrence `cur` current and on screen; without one, `top` shows the first
+---line, else the hit is centred.
+---@param m { occ: table[], cur: integer|nil, top: boolean|nil }
+function M.render_preview(v, out, target, m, title, footer)
   local lines, buf, win = out.lines, v.preview_buf, v.preview_win
   -- folded like the chat (tool blocks closed), through the same fold expression
   local history = require('agent-ide.ui.history')
@@ -171,24 +199,26 @@ function M.render_preview(v, out, target, words, title, footer)
   history.apply_win(win, buf)
   vim.wo[win].winbar = ''
   api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+  api.nvim_buf_clear_namespace(buf, ns_cur, 0, -1)
   target = math.max(1, math.min(target or 1, #lines))
   if #lines > 0 and target then
     api.nvim_buf_set_extmark(buf, ns, target - 1, 0, { line_hl_group = 'AgentIdeSearchTarget' })
   end
-  if #words > 0 then
-    for l = math.max(1, target - PREVIEW_HL_LINES), math.min(#lines, target + PREVIEW_HL_LINES) do
-      for _, r in ipairs(match.positions(lines[l], words)) do
-        api.nvim_buf_set_extmark(buf, ns, l - 1, r[1], { end_col = r[2], hl_group = 'AgentIdeSearchMatch' })
-      end
-    end
-  end
+  m = m or { occ = {} }
+  M.mark(buf, m.occ)
   api.nvim_win_set_config(win, {
     title = { { ' ' .. (title or ''):gsub('[\r\n]+', ' ') .. ' ', 'FloatTitle' } }, title_pos = 'center',
     footer = { { ' ' .. (footer or '') .. ' ', 'FloatFooter' } }, footer_pos = 'right',
   })
-  api.nvim_win_set_cursor(win, { target, 0 })
-  -- the hit's fold (if any) open, the hit in the middle
-  api.nvim_win_call(win, function() vim.cmd('normal! zxzz') end) -- zx: folds recomputed, then zv
+  local o = m.cur and m.occ[m.cur]
+  if o then
+    api.nvim_win_set_cursor(win, { o.line, o.s })
+    api.nvim_win_call(win, function() vim.cmd('normal! zx') end) -- folds recomputed, then zv
+    return M.show_match(v, o)
+  end
+  api.nvim_win_set_cursor(win, { m.top and 1 or target, 0 })
+  -- the hit's fold (if any) open, the hit in the middle (or the top on screen)
+  api.nvim_win_call(win, function() vim.cmd(m.top and 'normal! zxzt' or 'normal! zxzz') end) -- zx: folds recomputed, then zv
 end
 
 return M

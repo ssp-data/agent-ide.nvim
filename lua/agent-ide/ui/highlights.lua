@@ -25,6 +25,14 @@ local GROUPS = {
   AgentIdeMissing = M.dim,
   AgentIdeAge = M.dim,
   AgentIdeSection = { link = 'Directory' },
+  -- chat winbar: the model in italic (Normal's foreground), the permission mode as a badge; a
+  -- mode other than the default one in a warning colour
+  AgentIdeModel = function()
+    local n = vim.api.nvim_get_hl(0, { name = 'Normal', link = false })
+    return { fg = n.fg, ctermfg = n.ctermfg, italic = true }
+  end,
+  AgentIdeMode = M.dim,
+  AgentIdeModeHot = { link = 'WarningMsg' },
 }
 
 local function apply()
