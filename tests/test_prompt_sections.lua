@@ -142,6 +142,13 @@ T['Saved prompts: shown after Sessions only when the project has some'] = functi
   eq({ t.nodes[7].type, t.nodes[7].entry.kind, t.nodes[7].project.key }, { 'prompt', 'saved', '/r/alpha' })
 end
 
+T['row keys: a key, a list of keys or false'] = function()
+  config.setup({ keys = { prompts = { edit = { 'e', 'E' }, yank = false, rename = 'r', delete = 'd', to_library = 'L' } } })
+  eq(vim.tbl_map(function(k) return k.lhs end, ps.keys()), { 'e', 'E', 'r', 'd', 'L' })
+  config.setup({ keys = false })
+  eq(ps.keys(), {})
+end
+
 T['300 library entries: re-render under 5 ms collapsed and 20 ms expanded'] = function()
   for i = 1, 300 do
     vim.fn.mkdir(tmp .. '/lib/g' .. (i % 10), 'p')
