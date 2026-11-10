@@ -2,13 +2,14 @@ local config = require('agent-ide.config')
 local session = require('agent-ide.session')
 local index = require('agent-ide.index')
 local live = require('agent-ide.live')
+local process = require('agent-ide.claude.process')
 local fake = dofile(vim.fn.getcwd() .. '/tests/fake.lua')
 local eq = MiniTest.expect.equality
 
 local FIXTURE_ID = '11111111-1111-4111-8111-111111111111'
 local FIXTURE = vim.fn.getcwd() .. '/tests/fixtures/projects/-home-u-git-alpha/' .. FIXTURE_ID .. '.jsonl'
 
-local orig_notify, orig_confirm, orig_live_get, notes, dir
+local orig_notify, orig_confirm, orig_live_get, orig_history, orig_start, notes, dir
 
 local function children()
   vim.fn.system({ 'pgrep', '-P', tostring(vim.fn.getpid()), '-f', 'fake_claude' })
@@ -22,6 +23,7 @@ local T = MiniTest.new_set({ hooks = {
     config.setup({})
     notes = {}
     orig_notify, orig_confirm, orig_live_get = vim.notify, vim.fn.confirm, live.get
+    orig_history, orig_start = index.history, process.start
     vim.notify = function(msg, level) notes[#notes + 1] = { msg = msg, level = level } end
     dir = vim.uv.fs_realpath(vim.fn.tempname()) or vim.fn.tempname()
     vim.fn.mkdir(dir, 'p')
@@ -29,6 +31,7 @@ local T = MiniTest.new_set({ hooks = {
   post_case = function()
     session._reset()
     vim.notify, vim.fn.confirm, live.get = orig_notify, orig_confirm, orig_live_get
+    index.history, process.start = orig_history, orig_start
     vim.uv.os_unsetenv('FAKE_CLAUDE_LOG')
     config.setup({})
     vim.fn.delete(dir, 'rf')
@@ -293,7 +296,7 @@ T['crash mid-answer keeps the partial text, then the next send resumes'] = funct
   eq(s.events, {
     { kind = 'prompt', text = 'go' },
     { kind = 'text', text = 'partial answer' },
-    { kind = 'meta', label = 'error', text = 'Claude exited (code 2)' },
+    { kind = 'meta', label = 'error', text = 'Claude exited (code 2)', live_only = true },
   })
   eq(s.streaming, '')
   eq(s.unread, true)
@@ -328,6 +331,53 @@ T['running elsewhere is refused'] = function()
   eq(s.events, {})
 end
 
+T['ownership follows our process: own stale live entry ok, terminal after park refused'] = function()
+  script(flat(turn('hi', 'yo'), { exit = 0 }))
+  local s = new()
+  s:send('hi')
+  assert(wait(function() return s.state == 'done' and s.proc == nil end))
+  eq(s.owned, false)
+  local pid = s.pid
+  eq(type(pid), 'number')
+  -- the live map still lists our dead process: not "elsewhere"
+  live.get = function() return { [s.id] = { status = 'busy', pid = pid } } end
+  script(turn('again', 'ok'))
+  eq(s:send('again'), true)
+  eq(s.owned, true)
+  assert(wait(function() return #s.events == 4 and s.state == 'done' end))
+  local got
+  s:park(function(ok) got = ok end)
+  assert(wait(function() return got ~= nil end))
+  eq(s.owned, false)
+  -- the user resumed it in a terminal: another pid
+  live.get = function() return { [s.id] = { status = 'busy', pid = 1 } } end
+  eq({ s:send('third') }, { false, 'running elsewhere' })
+end
+
+T['a process that exits right after start fails the turn'] = function()
+  script({ { exit = 3 } })
+  local s = new()
+  eq(s:send('hi'), true)
+  assert(wait(function() return s.state == 'failed' end))
+  eq(s.events, { { kind = 'prompt', text = 'hi' },
+    { kind = 'meta', label = 'error', text = 'Claude exited (code 3)', live_only = true } })
+end
+
+T['a failed prompt write stops the process and fails the turn'] = function()
+  script({ { expect = 'never-sent' } })
+  process.start = function(opts)
+    local p, err = orig_start(opts)
+    if p then p.send = function() return false end end
+    return p, err
+  end
+  local s = new()
+  eq(s:send('hi'), true)
+  assert(wait(function() return s.state == 'failed' end))
+  eq(s.events[1], { kind = 'prompt', text = 'hi' })
+  eq({ s.events[2].kind, s.events[2].label, s.events[2].live_only }, { 'meta', 'error', true })
+  eq(s.proc, nil)
+end
+
 T['echo mismatch warns once per session'] = function()
   script(flat({ expect = 'one' }, init(), replay('ONE'), say('a'), result('a'),
     { expect = 'two' }, init(), replay('TWO'), say('b'), result('b')))
@@ -337,7 +387,8 @@ T['echo mismatch warns once per session'] = function()
   assert(wait(function() return s.state == 'idle' end))
   s:send('two')
   assert(wait(function() return s.state == 'idle' and #s.events == 6 end))
-  local warn = { kind = 'meta', label = 'warning', text = 'Prompt echoed by Claude differs from what was sent' }
+  local warn = { kind = 'meta', label = 'warning', text = 'Prompt echoed by Claude differs from what was sent',
+    live_only = true }
   eq(s.events[2], warn)
   eq(s.events[5], warn)
   local warns = vim.tbl_filter(function(n) return n.level == vim.log.levels.WARN end, notes)
@@ -354,7 +405,7 @@ T['done when not visible, mark_seen makes it idle; error result gives failed'] =
   eq({ s.state, s.unread }, { 'idle', false })
   s:send('q2')
   assert(wait(function() return s.state == 'failed' end))
-  eq(s.events[#s.events], { kind = 'meta', label = 'error', text = 'API down' })
+  eq(s.events[#s.events], { kind = 'meta', label = 'error', text = 'API down', live_only = true })
   s:mark_seen()
   eq(s.state, 'idle')
 end
@@ -381,6 +432,27 @@ T['load of a transcript, then send resumes'] = function()
   eq(s.events[#expected + 1], { kind = 'prompt', text = 'more' })
 end
 
+T['send during a load keeps the history before the live events'] = function()
+  local s = new({ id = FIXTURE_ID, path = FIXTURE })
+  local expected
+  orig_history(FIXTURE, function(evs) expected = evs end)
+  assert(wait(function() return expected ~= nil end))
+  local release
+  index.history = function(p, cb) release = function() orig_history(p, cb) end end
+  local loaded = false
+  s:load(function() loaded = true end)
+  assert(wait(function() return release ~= nil end))
+  script(turn('more', 'ok'))
+  s:send('more')
+  release()
+  assert(wait(function() return loaded and s.state == 'done' end))
+  eq(#s.events, #expected + 2)
+  eq(vim.list_slice(s.events, 1, #expected), expected)
+  eq(s.events[#expected + 1], { kind = 'prompt', text = 'more' })
+  eq(s.events[#expected + 2], { kind = 'text', text = 'ok' })
+  eq(s.turn_start, #expected + 1)
+end
+
 T['load reloads when the file changed and no process is alive'] = function()
   local path = dir .. '/s.jsonl'
   vim.fn.writefile({ '{"type":"user","message":{"role":"user","content":"first"}}' }, path)
@@ -394,6 +466,14 @@ T['load reloads when the file changed and no process is alive'] = function()
   s:load(function() n = n + 1 end)
   assert(wait(function() return n == 2 end))
   eq(kinds(s.events), { 'prompt', 'prompt' })
+  eq(s.turn_start, 3)
+  -- a shorter file: turn_start does not move backwards
+  vim.fn.writefile({ '{"type":"user","message":{"role":"user","content":"only"}}' }, path)
+  vim.uv.fs_utime(path, 1, 1)
+  s:load(function() n = n + 1 end)
+  assert(wait(function() return n == 3 end))
+  eq(s.events, { { kind = 'prompt', text = 'only' } })
+  eq(s.turn_start, 3)
 end
 
 T['park while busy asks; declined keeps it running; accepted parks'] = function()
@@ -411,9 +491,45 @@ T['park while busy asks; declined keeps it running; accepted parks'] = function(
   got = nil
   s:park(function(ok) got = ok end)
   assert(wait(function() return got ~= nil end))
-  eq({ got, asked, s.state, s.owned }, { true, 2, 'parked', true })
+  eq({ got, asked, s.state, s.owned }, { true, 2, 'parked', false })
   eq(s.events[#s.events], { kind = 'text', text = 'working' })
   eq(children(), false)
+end
+
+T['interrupt drops the queue and the error result starts no turn'] = function()
+  local log = script(flat({ expect = 'first' }, init(), replay('first'), block_start(), delta('x'),
+    { expect = 'interrupt' }, say('x'), result(nil, true)))
+  local s = new()
+  local sizes = {}
+  session.on_change(function(_, what) if what == 'meta' then sizes[#sizes + 1] = #s.queue end end)
+  s:send('first')
+  assert(wait(function() return s.streaming == 'x' end))
+  s:send('second')
+  s:send('third')
+  eq(s.queue, { 'second', 'third' })
+  local dropped, sent = s:interrupt()
+  eq({ dropped, sent, s.queue }, { { 'second', 'third' }, true, {} })
+  s:send('late') -- queued while the interrupted turn ends
+  assert(wait(function() return s.state == 'failed' end))
+  vim.wait(200)
+  eq(s.queue, { 'late' })
+  for _, l in ipairs(ins(log)) do eq(l.type == 'user' and l.message.content ~= 'first', false) end
+  eq(vim.tbl_contains(sizes, 1) and vim.tbl_contains(sizes, 2) and vim.tbl_contains(sizes, 0), true)
+end
+
+T['park drops the queue and hands it to the callback; a send while parking is queued'] = function()
+  script(flat({ expect = 'long' }, init(), replay('long'), block_start(), delta('working')))
+  local s = new()
+  s:send('long')
+  assert(wait(function() return s.streaming == 'working' end))
+  s:send('q1')
+  vim.fn.confirm = function() return 1 end
+  local got, dropped
+  s:park(function(ok, d) got, dropped = ok, d end)
+  eq(s.queue, {})
+  eq(s:send('while parking'), true)
+  assert(wait(function() return got ~= nil end))
+  eq({ got, dropped, s.state, s.queue }, { true, { 'q1' }, 'parked', { 'while parking' } })
 end
 
 T['park when idle does not ask'] = function()
@@ -439,20 +555,20 @@ T['set_mode, set_model and interrupt send control requests'] = function()
   s:send('start')
   eq(s:set_mode('plan'), true)
   eq(s:set_model('sonnet'), true)
-  eq(s:interrupt(), true)
+  eq({ s:interrupt() }, { {}, true })
   assert(wait(function() return s.state == 'idle' end))
   local sent = ins(log)
   eq(sent[2], { type = 'control_request', request_id = 'r1', request = { subtype = 'set_permission_mode', mode = 'plan' } })
   eq(sent[3], { type = 'control_request', request_id = 'r2', request = { subtype = 'set_model', model = 'sonnet' } })
   eq(sent[4], { type = 'control_request', request_id = 'r3', request = { subtype = 'interrupt' } })
-  eq(s.events[#s.events - 1], { kind = 'meta', label = 'error', text = "set_model: Model 'sonnet' not found" })
-  eq(s.events[#s.events], { kind = 'meta', label = 'error', text = 'Turn failed' })
+  eq(s.events[#s.events - 1], { kind = 'meta', label = 'error', text = "set_model: Model 'sonnet' not found", live_only = true })
+  eq(s.events[#s.events], { kind = 'meta', label = 'error', text = 'Turn failed', live_only = true })
 end
 
 T['set_mode before a process runs is sent right after start'] = function()
   local log = script(turn('hi', 'yo'))
   local s = new()
-  eq(s:interrupt(), false)
+  eq({ s:interrupt() }, { {}, false })
   eq(s:set_mode('plan'), true)
   s:send('hi')
   assert(wait(function() return s.state == 'done' end))
@@ -467,8 +583,8 @@ T['unknown objects and garbage lines become unknown events'] = function()
   local s = new()
   s:send('hi')
   assert(wait(function() return s.state == 'done' end))
-  eq(s.events[2], { kind = 'unknown', label = 'not JSON', raw = 'not json at all' })
-  eq({ s.events[3].kind, s.events[3].label }, { 'unknown', 'mystery' })
+  eq(s.events[2], { kind = 'unknown', label = 'not JSON', raw = 'not json at all', live_only = true })
+  eq({ s.events[3].kind, s.events[3].label, s.events[3].live_only }, { 'unknown', 'mystery', true })
   eq(vim.json.decode(s.events[3].raw), { type = 'mystery', n = 1 })
 end
 
