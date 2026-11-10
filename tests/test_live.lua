@@ -17,6 +17,7 @@ end
 T['parse says whether the output was a JSON list; [] is valid and means nothing runs'] = function()
   eq({ live.parse('[]') }, { {}, true })
   eq(select(2, live.parse('[{"sessionId":"s","status":"idle"}]')), true)
+  eq({ live.parse(nil) }, { {}, false })
   for _, bad in ipairs({ '', 'Error: not logged in', '{"a":1}', '{"sessions":[]}', '"[]"', 'null', '[] trailing' }) do
     eq({ live.parse(bad) }, { {}, false })
   end

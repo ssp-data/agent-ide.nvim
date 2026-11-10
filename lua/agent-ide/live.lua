@@ -22,8 +22,9 @@ local stale_after -- ms after `refreshed_at` the map stops counting (two poll in
 ---@return table<string, { status: string, pid: integer, cwd: string, name: string|nil }> map
 ---@return boolean readable
 function M.parse(text)
-  local ok, data = pcall(vim.json.decode, text or '', { luanil = { object = true, array = true } })
-  -- `luanil` turns an empty array into an empty table, which vim.islist accepts
+  text = text or ''
+  local ok, data = pcall(vim.json.decode, text, { luanil = { object = true, array = true } })
+  -- an empty object decodes to the same empty table as `[]`: the text itself must open a list
   if not ok or type(data) ~= 'table' or not vim.islist(data) or not vim.trim(text):match('^%[') then return {}, false end
   local out = {}
   for _, e in ipairs(data) do
