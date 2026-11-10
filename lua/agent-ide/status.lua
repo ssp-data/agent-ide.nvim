@@ -128,29 +128,43 @@ function M.lualine()
 end
 
 -- Throttle: run now, then at most once per `ms`; calls during the wait collapse into one trailing run.
+-- `reset()` cancels the wait and drops a queued trailing callback.
 local function throttle(ms, fn)
   local timer, dirty = nil, false
-  local function arm()
-    timer = timer or vim.uv.new_timer()
-    timer:start(ms, 0, vim.schedule_wrap(function()
-      if dirty then dirty = false; fn(); arm() else timer:close(); timer = nil end
-    end))
+  local arm
+  local function fire(t)
+    if timer ~= t then return end -- reset meanwhile
+    t:close()
+    timer = nil
+    if dirty then
+      dirty = false
+      pcall(fn)
+      arm()
+    end
+  end
+  arm = function()
+    local t = vim.uv.new_timer()
+    timer = t
+    t:start(ms, 0, vim.schedule_wrap(function() fire(t) end))
   end
   return setmetatable({}, {
     __call = function()
       if timer then dirty = true; return end
-      fn()
+      pcall(fn)
       arm()
     end,
     __index = { reset = function()
       dirty = false
-      if timer then timer:stop(); timer:close(); timer = nil end
+      local t = timer
+      timer = nil
+      if t then t:stop(); if not t:is_closing() then t:close() end end
     end },
   })
 end
 
 -- Files -------------------------------------------------------------------------------------
 
+local leaving = false -- VimLeavePre ran: nothing may be written any more
 local warned = false
 local function warn(msg)
   if warned then return end
@@ -158,30 +172,38 @@ local function warn(msg)
   vim.schedule(function() vim.notify('agent-ide: cannot write status (' .. tostring(msg) .. ')', vim.log.levels.WARN) end)
 end
 
+-- Test knobs: heartbeat and sweep intervals.
+M._cfg = { heartbeat_ms = 30000, sweep_ms = 60000 }
+
 local function runtime_dir()
   local base = vim.uv.os_getenv('XDG_RUNTIME_DIR')
   if not base or base == '' then base = vim.fn.stdpath('run') end
   return base .. '/agent-ide'
 end
 
----@return string per-instance status file
-function M.file() return runtime_dir() .. '/status-' .. vim.fn.getpid() .. '.json' end
-
----@return string file holding the most recent write of any Neovim
-function M.latest_file() return runtime_dir() .. '/status.json' end
+---@return string status file of this instance
+function M.file() return runtime_dir() .. '/status-' .. vim.uv.os_getpid() .. '.json' end
 
 local made = {}
-local function ensure_dir(dir)
+---Create `dir` (mode 0700); `private`: tighten an existing directory this user owns.
+local function ensure_dir(dir, private)
   if made[dir] then return true end
   local ok = pcall(vim.fn.mkdir, dir, 'p', '0700')
-  if ok and vim.fn.isdirectory(dir) == 1 then made[dir] = true; return true end
-  return false
+  local st = vim.uv.fs_stat(dir)
+  if not ok or not st or st.type ~= 'directory' then return false end
+  if private and st.mode % 512 ~= 448 and st.uid == vim.uv.getuid() then pcall(vim.uv.fs_chmod, dir, 448) end
+  made[dir] = true
+  return true
 end
 
----Write `data` to `path` through a temp file and rename, asynchronously.
-local function write_atomic(path, data, cb)
-  local tmp = path .. '.' .. vim.fn.getpid() .. '.tmp'
-  local function fail(err) warn(err); if cb then cb(false) end end
+---Write `data` to `path` through a temp file and rename, asynchronously. Only luv calls inside:
+---everything it needs comes from the main thread. A write that finishes after leaving is undone.
+local function write_atomic(path, data, tmp, cb)
+  local function fail(err)
+    pcall(vim.uv.fs_unlink, tmp, function() end)
+    warn(err)
+    if cb then cb(false) end
+  end
   vim.uv.fs_open(tmp, 'w', 384, function(err, fd)
     if err then return fail(err) end
     vim.uv.fs_write(fd, data, 0, function(werr)
@@ -189,11 +211,21 @@ local function write_atomic(path, data, cb)
         if werr then return fail(werr) end
         vim.uv.fs_rename(tmp, path, function(rerr)
           if rerr then return fail(rerr) end
+          if leaving then pcall(vim.uv.fs_unlink, path, function() end) end
           if cb then cb(true) end
         end)
       end)
     end)
   end)
+end
+
+---Same, synchronously (used while leaving).
+local function write_sync(path, data, tmp)
+  local fd = vim.uv.fs_open(tmp, 'w', 384)
+  if not fd then return end
+  vim.uv.fs_write(fd, data, 0)
+  vim.uv.fs_close(fd)
+  if not vim.uv.fs_rename(tmp, path) then vim.uv.fs_unlink(tmp) end
 end
 
 ---@return table the status file content
@@ -213,7 +245,7 @@ function M.snapshot()
     end
   end
   return {
-    version = 1, pid = vim.fn.getpid(), updated = M._src.now(), level = l.level, name = l.name,
+    version = 1, pid = vim.uv.os_getpid(), updated = M._src.now(), level = l.level, name = l.name,
     waiting = l.waiting, review = l.review, busy = l.busy,
     sessions = #list > 0 and list or vim.empty_dict(),
   }
@@ -225,15 +257,48 @@ local function encode(snap)
   return json
 end
 
+---Delete `status-<pid>.json` files in `dir` whose pid no longer exists. Asynchronous.
+---@param dir string
+---@param cb? fun(removed: string[])
+local function sweep_dir(dir, cb)
+  local own = vim.uv.os_getpid()
+  local removed = {}
+  vim.uv.fs_scandir(dir, function(err, req)
+    if err or not req then return cb and vim.schedule(function() cb(removed) end) end
+    while true do
+      local name = vim.uv.fs_scandir_next(req)
+      if not name then break end
+      local pid = tonumber(name:match('^status%-(%d+)%.json$'))
+      if pid and pid ~= own then
+        local _, _, code = vim.uv.kill(pid, 0) -- signal 0 only checks existence
+        if code == 'ESRCH' then
+          vim.uv.fs_unlink(dir .. '/' .. name, function() end)
+          removed[#removed + 1] = name
+        end
+      end
+    end
+    if cb then vim.schedule(function() cb(removed) end) end
+  end)
+end
+
+---Remove status files of dead instances.
+---@param cb? fun(removed: string[])
+function M.sweep(cb) sweep_dir(runtime_dir(), cb) end
+
+local last_sweep = 0
 local function write_status()
+  if leaving then return end
   file_writes = file_writes + 1
-  local dir = runtime_dir()
-  if not ensure_dir(dir) then return warn('cannot create ' .. dir) end
+  local dir, path = runtime_dir(), M.file()
+  if not ensure_dir(dir, true) then return warn('cannot create ' .. dir) end
   local ok, json = pcall(function() return encode(M.snapshot()) end)
   if not ok then return warn(json) end
-  write_atomic(M.file(), json, function(done)
-    if done then write_atomic(M.latest_file(), json) end
-  end)
+  write_atomic(path, json, path .. '.' .. vim.uv.os_getpid() .. '.tmp')
+  local now = vim.uv.now()
+  if now - last_sweep >= M._cfg.sweep_ms then
+    last_sweep = now
+    sweep_dir(dir)
+  end
 end
 
 local request_write = throttle(FILE_THROTTLE_MS, write_status)
@@ -242,17 +307,28 @@ local request_write = throttle(FILE_THROTTLE_MS, write_status)
 
 local function quota_file() return vim.fn.stdpath('state') .. '/agent-ide/quota.json' end
 
-local function write_quota()
+---Reset times are epoch seconds (docs/protocol.md); a value in milliseconds is converted.
+local function norm_reset(v)
+  v = tonumber(v)
+  if not v then return nil end
+  return v > 1e11 and v / 1000 or v
+end
+
+local function write_quota(sync)
   q_dirty = false
+  if leaving and not sync then return end
   if not windows then return end
-  local dir = vim.fn.stdpath('state') .. '/agent-ide'
+  local dir, file = vim.fn.stdpath('state') .. '/agent-ide', quota_file()
   if not ensure_dir(dir) then return warn('cannot create ' .. dir) end
-  write_atomic(quota_file(), vim.json.encode({ updated = updated, windows = windows }))
+  local data = vim.json.encode({ updated = updated, windows = windows })
+  local tmp = file .. '.' .. vim.uv.os_getpid() .. '.tmp'
+  if sync then write_sync(file, data, tmp) else write_atomic(file, data, tmp) end
 end
 
 local quota_timer
 local function persist_quota_soon()
   q_dirty = true
+  if leaving then return end
   quota_timer = quota_timer or vim.uv.new_timer()
   quota_timer:start(QUOTA_DEBOUNCE_MS, 0, vim.schedule_wrap(function()
     if quota_timer then quota_timer:close(); quota_timer = nil end
@@ -277,7 +353,7 @@ function M.load_quota(cb)
             local w = {}
             for name, v in pairs(obj.windows) do
               if type(v) == 'table' and type(v.utilization) == 'number' then
-                w[name] = { utilization = v.utilization, resets_at = type(v.resets_at) == 'number' and v.resets_at or nil }
+                w[name] = { utilization = v.utilization, resets_at = norm_reset(v.resets_at) }
               end
             end
             if windows == nil and next(w) then
@@ -294,23 +370,27 @@ end
 
 -- Refresh -----------------------------------------------------------------------------------
 
-local redraw = throttle(REDRAW_THROTTLE_MS, function() pcall(vim.cmd.redrawstatus) end)
+local redraw = throttle(REDRAW_THROTTLE_MS, function() if not leaving then pcall(vim.cmd.redrawstatus) end end)
 
 local function sync_quota()
   local q = session.quota()
   if q == q_seen then return end
   q_seen = q
   if type(q) ~= 'table' then return end
-  windows, updated = vim.deepcopy(q), M._src.now()
+  local w = {}
+  for name, v in pairs(q) do
+    if type(v) == 'table' and type(v.utilization) == 'number' then
+      w[name] = { utilization = v.utilization, resets_at = norm_reset(v.resets_at) }
+    end
+  end
+  windows, updated = w, M._src.now()
   persist_quota_soon()
 end
 
----Recompute; redraw the statusline and rewrite the status file when something changed.
-function M.refresh()
-  if vim.in_fast_event() then return vim.schedule(M.refresh) end
-  pcall(sync_quota)
-  local ok, l = pcall(M.level)
-  if not ok then return end
+local refreshes = 0
+local function do_refresh()
+  sync_quota()
+  local l = M.level()
   local text = M.statusline()
   local file_sig = vim.json.encode({ l, vim.tbl_map(function(s)
     local p = s.pending_permissions and s.pending_permissions[1]
@@ -326,26 +406,50 @@ function M.refresh()
   end
 end
 
-local function on_change() M.refresh() end
-
-local function cleanup()
-  if q_dirty then pcall(write_quota) end
-  pcall(vim.uv.fs_unlink, M.file())
-  local f = io.open(M.latest_file(), 'r')
-  if f then
-    local data = f:read('*a')
-    f:close()
-    local ok, obj = pcall(vim.json.decode, data)
-    if ok and type(obj) == 'table' and obj.pid == vim.fn.getpid() then pcall(vim.uv.fs_unlink, M.latest_file()) end
-  end
+---Recompute; redraw the statusline and rewrite the status file when something changed.
+function M.refresh()
+  if leaving then return end
+  if vim.in_fast_event() then return vim.schedule(M.refresh) end
+  refreshes = refreshes + 1
+  pcall(do_refresh)
 end
 
----Subscribe once (calling again does not double-subscribe), load the persisted quota.
+local function on_change(_, what)
+  if what == 'delta' then return end -- streaming text does not change the status
+  M.refresh()
+end
+
+local heartbeat
+local function cleanup()
+  leaving = true
+  request_write.reset()
+  redraw.reset()
+  for _, t in ipairs({ quota_timer, heartbeat }) do
+    if t and not t:is_closing() then t:stop(); t:close() end
+  end
+  quota_timer, heartbeat = nil, nil
+  if q_dirty then pcall(write_quota, true) end
+  pcall(vim.uv.fs_unlink, M.file())
+end
+
+---Subscribe once (calling again does not double-subscribe), load the persisted quota, sweep
+---status files of dead instances, start the heartbeat.
 function M.setup()
+  leaving = false
   session.off_change(on_change)
   session.on_change(on_change)
   local group = vim.api.nvim_create_augroup('agent-ide.status', { clear = true })
   vim.api.nvim_create_autocmd('VimLeavePre', { group = group, callback = cleanup })
+  -- while the level is above 1 the file is rewritten regularly, so readers can age it out
+  if heartbeat and not heartbeat:is_closing() then heartbeat:stop(); heartbeat:close() end
+  heartbeat = vim.uv.new_timer()
+  heartbeat:start(M._cfg.heartbeat_ms, M._cfg.heartbeat_ms, vim.schedule_wrap(function()
+    if leaving then return end
+    local ok, l = pcall(M.level)
+    if ok and l.level > 1 then request_write() end
+  end))
+  last_sweep = vim.uv.now()
+  M.sweep()
   M.load_quota()
   M.refresh()
 end
@@ -353,12 +457,18 @@ end
 -- Test only.
 function M._cleanup() cleanup() end
 function M._writes() return file_writes end
+function M._refreshes() return refreshes end
 function M._reset()
   windows, updated, q_seen, q_dirty, last_sig, M._file_sig, warned = nil, nil, nil, false, nil, nil, false
-  file_writes = 0
+  file_writes, refreshes, leaving, last_sweep = 0, 0, false, 0
   made = {}
   request_write.reset()
   redraw.reset()
+  for _, t in ipairs({ quota_timer, heartbeat }) do
+    if t and not t:is_closing() then t:stop(); t:close() end
+  end
+  quota_timer, heartbeat = nil, nil
+  M._cfg = { heartbeat_ms = 30000, sweep_ms = 60000 }
 end
 function M._quota() return windows, updated end
 function M._flush_quota() write_quota() end

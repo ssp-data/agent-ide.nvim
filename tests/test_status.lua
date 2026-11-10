@@ -3,7 +3,7 @@ local session = require('agent-ide.session')
 local eq = MiniTest.expect.equality
 
 local NOW = 1000000
-local notes, dir, orig_notify, env_xdg
+local notes, dir, orig_notify, env_xdg, orig_stdpath
 
 local function sess(id, state, extra)
   return vim.tbl_extend('force', { id = id, state = state, cwd = '/home/u/git/' .. id, title = 'T ' .. id,
@@ -30,12 +30,15 @@ local T = MiniTest.new_set({ hooks = {
     vim.fn.mkdir(dir, 'p')
     env_xdg = vim.uv.os_getenv('XDG_RUNTIME_DIR')
     vim.uv.os_setenv('XDG_RUNTIME_DIR', dir .. '/run')
+    orig_stdpath = vim.fn.stdpath
+    vim.fn.stdpath = function(w) if w == 'state' then return dir .. '/state' end return orig_stdpath(w) end
     use({}, {})
   end,
   post_case = function()
     status._reset() -- cancel timers
     vim.wait(80, function() return false end, 10) -- let in-flight async writes finish before the dir goes
     vim.notify = orig_notify
+    vim.fn.stdpath = orig_stdpath
     if env_xdg then vim.uv.os_setenv('XDG_RUNTIME_DIR', env_xdg) else vim.uv.os_unsetenv('XDG_RUNTIME_DIR') end
     status._reset()
     session._reset()
@@ -161,7 +164,6 @@ T['status file content for two sessions'] = function()
   use({ a, b, p }, { other = { status = 'busy' } })
   status.refresh()
   eq(wait_file(status.file()), true)
-  vim.wait(2000, function() return vim.uv.fs_stat(status.latest_file()) ~= nil end, 10)
   local obj = read_json(status.file())
   eq(obj, {
     version = 1, pid = vim.fn.getpid(), updated = NOW, level = 4, name = 'input', waiting = 1, review = 0, busy = 2,
@@ -170,7 +172,6 @@ T['status file content for two sessions'] = function()
       { id = 'b', project = 'b', title = 'T b', state = 'busy', reason = '' },
     },
   })
-  eq(read_json(status.latest_file()), obj)
   eq(status.file(), dir .. '/run/agent-ide/status-' .. vim.fn.getpid() .. '.json')
   eq(vim.uv.fs_stat(dir .. '/run/agent-ide').mode % 512, tonumber('700', 8))
 end
@@ -186,15 +187,131 @@ end
 T['files removed on leave, latest only if ours'] = function()
   use({ sess('a', 'busy') })
   status.refresh()
-  vim.wait(2000, function() return vim.uv.fs_stat(status.latest_file()) ~= nil end, 10)
-  vim.wait(100)
+  wait_file(status.file())
   status._cleanup()
   eq(vim.uv.fs_stat(status.file()), nil)
-  eq(vim.uv.fs_stat(status.latest_file()), nil)
-  -- another instance wrote last: status.json stays
-  vim.fn.writefile({ vim.json.encode({ pid = 1 }) }, status.latest_file())
+end
+
+T['files removed on leave, nothing recreated afterwards'] = function()
+  local ss = { sess('a', 'busy') }
+  use(ss)
+  status.setup()
+  wait_file(status.file())
+  ss[1].title = 'changed' -- a trailing write is pending
+  status.refresh()
   status._cleanup()
-  eq(vim.uv.fs_stat(status.latest_file()) ~= nil, true)
+  status.refresh()
+  session._emit(session.open({ cwd = dir }), 'state')
+  vim.wait(500, function() return false end, 20)
+  eq(vim.uv.fs_stat(status.file()), nil)
+  eq(vim.uv.fs_stat(dir .. '/state/agent-ide/quota.json'), nil)
+end
+
+T['a write in flight when leaving is undone'] = function()
+  use({ sess('a', 'busy') })
+  status.refresh() -- async chain started, not finished
+  status._cleanup()
+  vim.wait(300, function() return false end, 20)
+  eq(vim.uv.fs_stat(status.file()), nil)
+end
+
+T['quota is flushed synchronously on leave'] = function()
+  use({})
+  set_quota({ five_hour = { utilization = 0.5, resets_at = NOW + 10 } })
+  status._cleanup() -- no waiting: the file must exist right after
+  local file = dir .. '/state/agent-ide/quota.json'
+  eq(vim.uv.fs_stat(file) ~= nil, true)
+  eq(vim.json.decode(table.concat(vim.fn.readfile(file), '\n')).windows.five_hour.utilization, 0.5)
+end
+
+T['sweep removes only status files of dead pids'] = function()
+  local d = dir .. '/run/agent-ide'
+  vim.fn.mkdir(d, 'p')
+  local alive = vim.system({ 'sleep', '30' })
+  local dead = vim.system({ 'true' }):wait()
+  local dead_pid = vim.system({ 'sh', '-c', 'echo $$' }):wait().stdout:match('%d+')
+  local function put(name) vim.fn.writefile({ '{}' }, d .. '/' .. name) end
+  put('status-' .. alive.pid .. '.json')
+  put('status-' .. dead_pid .. '.json')
+  put('status-' .. dead_pid .. '.json.bak')
+  put('notes.json')
+  local removed
+  status.sweep(function(r) removed = r end)
+  vim.wait(2000, function() return removed ~= nil end, 10)
+  vim.wait(100, function() return false end, 10)
+  alive:kill(15)
+  eq(removed, { 'status-' .. dead_pid .. '.json' })
+  eq(vim.uv.fs_stat(d .. '/status-' .. alive.pid .. '.json') ~= nil, true)
+  eq(vim.uv.fs_stat(d .. '/status-' .. dead_pid .. '.json'), nil)
+  eq(vim.uv.fs_stat(d .. '/status-' .. dead_pid .. '.json.bak') ~= nil, true)
+  eq(vim.uv.fs_stat(d .. '/notes.json') ~= nil, true)
+  eq(dead.code, 0)
+end
+
+T['heartbeat rewrites while level > 1, not at level 1'] = function()
+  status._cfg.heartbeat_ms = 60
+  local ss = { sess('a', 'busy') }
+  use(ss)
+  status.setup()
+  vim.wait(300, function() return false end, 20)
+  local w = status._writes()
+  vim.wait(700, function() return false end, 20)
+  eq(status._writes() - w >= 2, true)
+  ss[1].state = 'idle'
+  status.refresh()
+  vim.wait(300, function() return false end, 20)
+  w = status._writes()
+  vim.wait(500, function() return false end, 20)
+  eq(status._writes(), w)
+end
+
+T['fallback directory is stdpath run when XDG_RUNTIME_DIR is unset'] = function()
+  vim.uv.os_unsetenv('XDG_RUNTIME_DIR')
+  eq(status.file(), vim.fn.stdpath('run') .. '/agent-ide/status-' .. vim.fn.getpid() .. '.json')
+  use({ sess('a', 'busy') })
+  status.refresh()
+  eq(wait_file(status.file()), true)
+  status._cleanup()
+end
+
+T['an existing runtime dir with loose mode is tightened to 0700'] = function()
+  vim.fn.mkdir(dir .. '/run/agent-ide', 'p', '0755')
+  vim.uv.fs_chmod(dir .. '/run/agent-ide', tonumber('755', 8))
+  use({ sess('a', 'busy') })
+  status.refresh()
+  wait_file(status.file())
+  eq(vim.uv.fs_stat(dir .. '/run/agent-ide').mode % 512, tonumber('700', 8))
+end
+
+T['a failed rename leaves no tmp file'] = function()
+  local d = dir .. '/run/agent-ide'
+  vim.fn.mkdir(d .. '/status-' .. vim.fn.getpid() .. '.json', 'p') -- a directory in the way
+  use({ sess('a', 'busy') })
+  status.refresh()
+  vim.wait(300, function() return false end, 20)
+  eq(vim.fn.glob(d .. '/*.tmp'), '')
+  eq(#vim.tbl_filter(function(n) return n.level == vim.log.levels.WARN end, notes), 1)
+end
+
+T['quota reset time in milliseconds is converted'] = function()
+  use({})
+  local now = 1.78e9
+  status._src.now = function() return now end
+  set_quota({ five_hour = { utilization = 0.1, resets_at = (now + 100) * 1000 } })
+  eq(status.statusline(), 'agents ok · 5h ▰▰▰▰▰ 90%%')
+  set_quota({ five_hour = { utilization = 0.1, resets_at = (now - 100) * 1000 } })
+  eq(status.statusline(), 'agents ok · 5h ?')
+end
+
+T['refresh errors never reach the dispatcher; deltas are ignored'] = function()
+  local s = session.open({ cwd = dir })
+  status.setup()
+  local n = status._refreshes()
+  session._emit(s, 'delta')
+  eq(status._refreshes(), n)
+  status._src.sessions = function() error('boom') end
+  eq(pcall(session._emit, s, 'state'), true)
+  eq(#notes, 0) -- the dispatcher saw no listener error
 end
 
 T['50 rapid changes: at most one write per 200 ms, final state written'] = function()
@@ -235,16 +352,13 @@ T['unwritable runtime dir: one warning, no error'] = function()
 end
 
 T['setup twice subscribes once'] = function()
+  local s = session.open({ cwd = dir })
   use({})
   status.setup()
   status.setup()
-  vim.wait(300, function() return false end, 20)
-  local before = status._writes()
-  use({ sess('a', 'busy') })
-  session._emit({}, 'state') -- stand-in notification
-  vim.wait(500, function() return false end, 20)
-  eq(status._writes() - before <= 2, true)
-  eq(status.level().level, 2)
+  local n = status._refreshes()
+  session._emit(s, 'state')
+  eq(status._refreshes() - n, 1)
 end
 
 T['highlight groups and lualine component'] = function()
