@@ -38,7 +38,7 @@ end
 local function prompt_bufs()
   local out = {}
   for _, b in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_loaded(b) and vim.startswith(vim.api.nvim_buf_get_name(b), 'agent-ide://prompt/') then out[#out + 1] = b end
+    if vim.api.nvim_buf_is_loaded(b) and vim.b[b].agent_ide_kind == 'prompt' then out[#out + 1] = b end
   end
   return out
 end

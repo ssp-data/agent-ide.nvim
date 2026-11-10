@@ -1,18 +1,22 @@
 -- What the drawer shows about sessions, apart from its window: the state of a session, its
--- state word (what a waiting one waits for, why one failed, where it runs), and new sessions
--- no scan has listed yet.
+-- state word (what a waiting one waits for, why one failed, where it runs), new sessions
+-- no scan has listed yet, and which sessions go into a project's `Hidden (n)` group.
 local live = require('agent-ide.live')
 local session = require('agent-ide.session')
 
 local M = {}
 
--- Sessions started from "+ New session" that no scan has listed yet: id -> { key, activity }
+-- Sessions started from "+ New session" that no scan has listed yet: id -> { key, activity, n }
 local unsaved = {}
+local unsaved_n = 0 -- order of `add_unsaved` calls (activity has whole seconds only)
 
 ---Remember a session started from "+ New session" in project `key` until a scan lists it.
 ---@param id string
 ---@param key string project key
-function M.add_unsaved(id, key) unsaved[id] = { key = key, activity = os.time() } end
+function M.add_unsaved(id, key)
+  unsaved_n = unsaved_n + 1
+  unsaved[id] = { key = key, activity = os.time(), n = unsaved_n }
+end
 
 ---State shown for a session: its Session's state when this Neovim has one that is not
 ---parked, else the live state (another Claude, e.g. in a tmux pane).
@@ -125,6 +129,95 @@ function M.with_unsaved(projects)
     end
   end
   return out
+end
+
+---Projects in scope (see scope.lua): all of them without `sp`; else the one project keyed
+---`sp.key`, or, when no session of it is listed yet (a fresh repository), an empty one made from
+---`sp`, so "+ New session" is there.
+---@param projects table[]
+---@param sp? { key: string, name?: string, root?: string, is_git?: boolean } the scoped project
+---@return table[]
+function M.in_scope(projects, sp)
+  if not sp then return projects end
+  for _, p in ipairs(projects) do
+    if p.key == sp.key then return { p } end
+  end
+  return { { key = sp.key, name = sp.name or sp.key:match('([^/]*)$'), root = sp.root, is_git = sp.is_git == true,
+    missing = vim.uv.fs_stat(sp.key) == nil, activity = 0, sessions = {} } }
+end
+
+-- States in which a session of another project is counted on the drawer's last line.
+local NEEDS = { waiting = true, done = true, failed = true }
+
+---Sessions outside the scoped project that need the user: those alive in this Neovim (waiting,
+---done unread, failed) and those waiting for input in another Claude (the current live map).
+---@param matches fun(s: table): boolean in scope
+---@return integer
+function M.others_needing(matches)
+  local n, mine = 0, {}
+  for _, s in ipairs(session.all()) do
+    mine[s.id] = s.state ~= 'parked' or nil
+    if NEEDS[s.state] and not matches(s) then n = n + 1 end
+  end
+  for id, e in pairs(require('agent-ide.live').fresh()) do
+    if not mine[id] and e.status == 'waiting' and not matches(e) then n = n + 1 end
+  end
+  return n
+end
+
+---The newest session started from "+ New session" in project `key` that has sent nothing yet
+---(no prompt, no process): pressing the row again shows it, with its draft. Nil when none.
+---@param key string project key
+---@return table|nil Session
+function M.unsent_new(key)
+  local best, best_n
+  for id, u in pairs(unsaved) do
+    local s = session.get(id)
+    if u.key == key and s and not s.sent_before and #s.events == 0 and not s:_alive()
+      and (not best_n or u.n > best_n) then
+      best, best_n = s, u.n
+    end
+  end
+  return best
+end
+
+-- States in which a hidden session counts as visible: hiding never swallows an ask or a result.
+local ATTENTION = { waiting = true, busy = true, done = true, failed = true }
+
+---Projects with their hidden sessions (`is_hidden`) moved from `sessions` to `hidden`, unless
+---they need attention (waiting, busy, done, failed: then they stay among the visible ones).
+---A project's activity and order follow its visible sessions; one with only hidden sessions
+---shows the age of the newest of them and sorts after every project with a visible one.
+---@param projects table[]
+---@param is_hidden fun(id: string): boolean
+---@param state_of fun(id: string): string
+---@return table[]
+function M.with_hidden(projects, is_hidden, state_of)
+  local out, touched = {}, false
+  for i, p in ipairs(projects) do
+    local shown, hidden = {}, {}
+    for _, s in ipairs(p.sessions) do
+      if is_hidden(s.id) and not ATTENTION[state_of(s.id)] then hidden[#hidden + 1] = s else shown[#shown + 1] = s end
+    end
+    if #hidden == 0 then
+      out[i] = { p = p, n = i, activity = p.activity }
+    else
+      touched = true
+      local newest, all = 0, 0
+      for _, s in ipairs(shown) do newest = math.max(newest, s.activity or 0) end
+      for _, s in ipairs(hidden) do all = math.max(all, s.activity or 0) end
+      local only = #shown == 0
+      out[i] = { n = i, only = only, activity = only and all or newest,
+        p = setmetatable({ sessions = shown, hidden = hidden, activity = only and all or newest }, { __index = p }) }
+    end
+  end
+  if not touched then return projects end
+  table.sort(out, function(a, b)
+    if (a.only or false) ~= (b.only or false) then return not a.only end
+    if a.activity ~= b.activity then return a.activity > b.activity end
+    return a.n < b.n
+  end)
+  return vim.tbl_map(function(o) return o.p end, out)
 end
 
 return M

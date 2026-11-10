@@ -108,7 +108,9 @@ local function take_back(s)
   run(require('agent-ide.config').get().live.cmd, function(res)
     if not away[s.id] then return end
     if res.code ~= 0 then return notify('cannot ask Claude which sessions run; not taken back', vim.log.levels.WARN) end
-    if live.parse(res.stdout)[s.id] then
+    local map, readable = live.parse(res.stdout)
+    if not readable then return notify('cannot read which sessions run; not taken back', vim.log.levels.WARN) end
+    if map[s.id] then
       return notify('native Claude still runs this session; quit it there first', vim.log.levels.WARN)
     end
     finish(s)

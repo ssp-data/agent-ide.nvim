@@ -31,6 +31,29 @@ for _, backend in ipairs(lib.backends()) do
   end
 end
 
+-- Project scope (scope.lua) with 60 projects on disk: the warm open stays in budget and a
+-- re-render is not slower than in all scope (0.2 ms of slack for timer noise).
+for _, backend in ipairs(lib.backends()) do
+  T['project scope: warm drawer open under 50 ms, render not slower than all (' .. backend .. ')'] = function()
+    local best
+    for _ = 1, RUNS do
+      local child = MiniTest.new_child_neovim()
+      child.restart({ '-u', 'tests/minimal_init.lua' })
+      child.lua('_G.BL = dofile(...)', { vim.fn.getcwd() .. '/tests/budget_lib.lua' })
+      local ok, r = pcall(child.lua, 'local d, b, e = ...; return BL.run_scoped(d, b, e)', { dir, backend, 60 })
+      child.stop()
+      if not ok then error(r, 0) end
+      if not best then best = r else
+        for k, v in pairs(r) do best[k] = math.min(best[k], v) end
+      end
+    end
+    check('project scope warm drawer open', best.warm, 50)
+    if best.project_render > best.all_render + 0.2 then
+      error(string.format('project scope render %.2f ms, all scope %.2f ms', best.project_render, best.all_render), 0)
+    end
+  end
+end
+
 T['1 MB history under 150 ms with helper'] = function()
   if not vim.tbl_contains(lib.backends(), 'helper') then
     return MiniTest.skip('helper not built (make helper)')
@@ -98,7 +121,7 @@ local function open_long_session(dir, id)
   local ok = vim.wait(120000, function()
     local w = require('agent-ide.ui.chat')._windows().transcript
     buf = w and vim.api.nvim_win_get_buf(w)
-    return buf ~= nil and vim.api.nvim_buf_get_name(buf) == 'agent-ide://chat/' .. id
+    return buf ~= nil and vim.b[buf].agent_ide_kind == 'chat' and vim.b[buf].agent_ide_session == id
       and vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] ~= 'Loading…'
   end, 1)
   local elapsed = (vim.uv.hrtime() - t0) / 1e6

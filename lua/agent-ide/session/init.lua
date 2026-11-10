@@ -5,6 +5,7 @@ local object = require('agent-ide.session.object')
 local M = {}
 
 local by_id, order = {}, {}
+local forgotten = {} -- id -> Session dropped by `forget` (reused when the id is opened again)
 local listeners, broken = {}, {} -- broken: listeners that raised (reported once)
 local last_quota
 
@@ -39,10 +40,6 @@ function M._emit(s, what)
   end
 end
 
----Folder -> the command list Claude last reported for a session there (this Neovim only); a
----new session that has not had a turn yet offers it in the `/` menu.
-M._commands_seen = {}
-
 ---Internal: store the latest quota windows.
 function M._set_quota(windows) last_quota = windows end
 
@@ -55,10 +52,32 @@ function M.open(opts)
     s.title = s.title or opts.title
     return s
   end
-  s = object.new(opts, opts.id or uuid())
+  s = opts.id and forgotten[opts.id]
+  if s then
+    -- a deleted session restored from the trash: the same object (a chat may still refer to
+    -- it), its history read again
+    forgotten[opts.id] = nil
+    local fresh = object.new(opts, opts.id)
+    for k in pairs(s) do s[k] = nil end
+    for k, v in pairs(fresh) do s[k] = v end
+  else
+    s = object.new(opts, opts.id or uuid())
+  end
   by_id[s.id] = s
   order[#order + 1] = s
   return s
+end
+
+---Drop session `id`, which has no process here (its files were deleted).
+---@param id string
+function M.forget(id)
+  local s = by_id[id]
+  if not s or s:_alive() then return end
+  by_id[id] = nil
+  for i, x in ipairs(order) do
+    if x == s then table.remove(order, i); break end
+  end
+  forgotten[id] = s
 end
 
 ---@param id string
@@ -88,9 +107,9 @@ function M._reset()
   for _, s in ipairs(order) do
     if s.proc then s.proc:stop(nil, true) end
   end
-  by_id, order, listeners, broken = {}, {}, {}, {}
+  by_id, order, listeners, broken, forgotten = {}, {}, {}, {}, {}
   last_quota = nil
-  M._commands_seen = {}
+  require('agent-ide.session.commands')._reset()
   object._reset_ids()
 end
 

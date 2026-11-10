@@ -172,11 +172,9 @@ local function get_view(s)
   local v = views[s.id]
   if v and valid(v.buf) then return v end
   if v and api.nvim_buf_is_valid(v.buf) then pcall(api.nvim_buf_delete, v.buf, { force = true }) end
-  local name = 'agent-ide://raw/' .. s.id
-  local old = vim.fn.bufnr(name)
-  if old ~= -1 then pcall(api.nvim_buf_delete, old, { force = true }) end
   local buf = api.nvim_create_buf(false, true)
-  api.nvim_buf_set_name(buf, name)
+  vim.b[buf].agent_ide_kind, vim.b[buf].agent_ide_session = 'raw', s.id
+  require('agent-ide.ui.bufname').track(buf, s, ' · raw', function() return require('agent-ide.ui.chat').project_of(s) end)
   vim.bo[buf].bufhidden, vim.bo[buf].undolevels, vim.bo[buf].modifiable = 'hide', -1, false
   v = { buf = buf, mode = 'live', gen = 0, dropped = 0, n = 0 }
   views[s.id] = v

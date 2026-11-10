@@ -35,20 +35,22 @@ local file_writes = 0 -- test counter
 
 ---@param sessions? table[]
 ---@param live_map? table
+---@param matches? fun(x: table): boolean only sessions (and live entries) it accepts count
 ---@return { level: integer, name: string, waiting: integer, review: integer, busy: integer }
-function M.level(sessions, live_map)
+function M.level(sessions, live_map, matches)
   sessions = sessions or M._src.sessions()
   live_map = live_map or M._src.live()
   local waiting, review, busy = 0, 0, 0
   local owned = {}
   for _, s in ipairs(sessions) do
     if s.owned then owned[s.id] = true end
-    if s.state == 'waiting' then waiting = waiting + 1
+    if matches and not matches(s) then -- out of scope
+    elseif s.state == 'waiting' then waiting = waiting + 1
     elseif s.state == 'done' or s.state == 'failed' then review = review + 1
     elseif s.state == 'busy' then busy = busy + 1 end
   end
   for id, e in pairs(live_map) do
-    if not owned[id] then
+    if not owned[id] and (not matches or matches(e)) then
       if e.status == 'waiting' then waiting = waiting + 1
       elseif e.status == 'busy' then busy = busy + 1 end
     end
@@ -222,8 +224,11 @@ local function quota_text()
   return ' · ' .. table.concat(parts, ' · ') .. age_text(age)
 end
 
+-- What the footer counts: the sessions in scope (scope.lua). The status file counts them all.
+local function shown_level() return M.level(nil, nil, require('agent-ide.scope').matches) end
+
 local function compute_text()
-  local l = M.level()
+  local l = shown_level()
   local text
   if l.level == 1 then text = 'agents ok'
   elseif l.level == 2 then text = ('agents running (%d)'):format(l.busy)
@@ -244,7 +249,7 @@ end
 
 ---@return string highlight group
 function M.statusline_hl()
-  local ok, l = pcall(M.level)
+  local ok, l = pcall(shown_level)
   return 'AgentIdeLevel' .. (ok and l.level or 1)
 end
 

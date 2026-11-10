@@ -37,7 +37,7 @@ function M.transcript()
 end
 
 local function is_prompt_win(w)
-  return vim.startswith(api.nvim_buf_get_name(api.nvim_win_get_buf(w)), 'agent-ide://prompt/')
+  return vim.b[api.nvim_win_get_buf(w)].agent_ide_kind == 'prompt'
 end
 
 ---Show prompt buffer `pbuf` in the prompt window of `twin`'s tab, created (height 8) below

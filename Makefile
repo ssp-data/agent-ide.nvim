@@ -1,4 +1,4 @@
-.PHONY: deps test helper test-helper bench
+.PHONY: deps test helper test-helper bench release-notes release publish
 
 deps:
 	@test -d deps/mini.nvim || git clone --depth 1 https://github.com/echasnovski/mini.nvim deps/mini.nvim
@@ -28,3 +28,17 @@ bench: deps
 .PHONY: test-omarchy
 test-omarchy:
 	node --test omarchy/io.github.sspaeti.agent-ide/test/*.test.js
+
+install-omarchy:
+	cp -r omarchy/io.github.sspaeti.agent-ide ~/.config/omarchy/plugins/
+
+# The changelog section that a release would carry (VERSION=x.y.z prints a released one).
+release-notes:
+	@scripts/release-notes.sh $(if $(VERSION),$(VERSION),Unreleased)
+
+# Local only: changelog section, helper version, commit and annotated tag. `make publish` pushes.
+release:
+	@scripts/release.sh "$(VERSION)"
+
+publish:
+	@scripts/publish.sh "$(VERSION)"

@@ -210,7 +210,7 @@ T["the drawer's own keys win a clash with a row key, also in the help"] = functi
   start({ prompts = { edit = 'R', yank = 's' } })
   on_row('Invoice text')
   child.type_keys('R')
-  eq(child.lua_get('vim.api.nvim_buf_get_name(0)'), 'agent-ide://drawer')
+  eq(child.lua_get('vim.api.nvim_buf_get_name(0)'), 'agents://drawer')
   child.type_keys('?')
   local text = table.concat(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), '\n')
   eq(text:find('prompt row: edit', 1, true), nil)

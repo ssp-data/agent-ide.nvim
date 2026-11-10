@@ -17,29 +17,53 @@ local function closes_fence(line, char, len)
   return run ~= nil and #run >= len
 end
 
+---One line through the fence rule. `fence` is the block open before `line` ({ char, len }) or
+---nil; returns the block open after it and whether `line` is plain text (no fence line, not
+---inside a block).
+local function fence_step(fence, line)
+  if fence then
+    if closes_fence(line, fence[1], fence[2]) then return nil, false end
+    return fence, false
+  end
+  local c, n = open_fence(line)
+  if c then return { c, n }, false end
+  return nil, true
+end
+
+---True when the last of `lines` (the buffer's lines up to the cursor's) is inside a fenced
+---code block or is a fence line, by the rule `text_to_send` uses.
+---@param lines string[]
+---@return boolean
+function M.in_fence(lines)
+  local fence, plain = nil, true
+  for _, line in ipairs(lines) do fence, plain = fence_step(fence, line) end
+  return not plain
+end
+
+---The mention Claude Code reads for `path`: `@<path>`, `@"<path>"` when it holds whitespace
+---(Claude Code ends an unquoted mention at whitespace; the quoted one attaches the file).
+---@param path string
+---@return string
+function M.mention(path)
+  return path:find('%s') and ('@"' .. path .. '"') or ('@' .. path)
+end
+
 ---The text a prompt buffer sends: lines joined with '\n', trailing blank lines removed. A
----`[attach] <path>` line outside a fenced code block becomes `@<path>` (`@"<path>"` when the
----path holds whitespace); nothing else changes.
+---`[attach] <path>` line outside a fenced code block becomes `M.mention(path)` on the same line;
+---nothing else changes (inline `@path` text is sent as typed).
 ---@param lines string[]
 ---@return string
 function M.text_to_send(lines)
   local last = #lines
   while last > 0 and not lines[last]:find('%S') do last = last - 1 end
-  local out, fence_char, fence_len = {}, nil, 0
+  local out, fence, plain = {}, nil, true
   for i = 1, last do
     local line = lines[i]
-    if fence_char then
-      if closes_fence(line, fence_char, fence_len) then fence_char = nil end
-    else
-      local c, n = open_fence(line)
-      if c then
-        fence_char, fence_len = c, n
-      else
-        local path = line:match('^%[attach%]%s+(.+)$')
-        path = path and path:gsub('%s+$', '')
-        -- Claude Code ends an unquoted mention at whitespace; a quoted one attaches the file
-        if path and path ~= '' then line = path:find('%s') and ('@"' .. path .. '"') or ('@' .. path) end
-      end
+    fence, plain = fence_step(fence, line)
+    if plain then
+      local path = line:match('^%[attach%]%s+(.+)$')
+      path = path and path:gsub('%s+$', '')
+      if path and path ~= '' then line = M.mention(path) end
     end
     out[i] = line
   end
@@ -153,17 +177,36 @@ local function score(name, query)
   return first, pos - first
 end
 
+---Claude's command list for session `s`: its own, else the last one seen for its project, else
+---the most recent one of any project (session/commands.lua); nil when none is known.
+local function claude_commands(s)
+  local own = s and s.slash_commands
+  if own and #own > 0 then return own end
+  return require('agent-ide.session.commands').fallback(s and s.cwd)
+end
+
+-- Names of the commands and skills the Prompts node found (cached per scan result).
+local discovered = { entries = nil, names = {} }
+local function discovered_names()
+  local entries = require('agent-ide.prompts.cache').global()
+  if entries ~= discovered.entries then
+    local names = {}
+    for _, e in ipairs(entries or {}) do
+      if (e.kind == 'command' or e.kind == 'skill') and type(e.name) == 'string' then names[#names + 1] = e.name end
+    end
+    discovered = { entries = entries, names = names }
+  end
+  return discovered.names
+end
+
 ---Menu entries for `base` (`/` and what follows): the plugin's own commands first, then
----Claude's (the session's, else the last list seen for its folder in this Neovim).
+---Claude's (see `claude_commands`) merged with the commands and skills found on disk.
 ---@param s table|nil Session
 ---@param base string
 ---@return table[] complete-items
 function M.matches(s, base)
   local query = (base or ''):gsub('^/', '')
-  local commands = s and s.slash_commands
-  if (not commands or #commands == 0) and s and s.cwd then
-    commands = require('agent-ide.session')._commands_seen[s.cwd]
-  end
+  local commands = claude_commands(s)
   local found, seen = {}, {}
   local function add(name, kind, info, rank)
     if seen[name] then return end
@@ -178,6 +221,7 @@ function M.matches(s, base)
   for _, c in ipairs(commands or {}) do
     if type(c) == 'string' then add(c, '', nil, 1) end
   end
+  for _, name in ipairs(discovered_names()) do add(name, '', nil, 1) end
   table.sort(found, function(a, b)
     if a.sc ~= b.sc then return a.sc < b.sc end
     if a.span ~= b.span then return a.span < b.span end
@@ -196,9 +240,7 @@ function M.complete(findstart, base)
   if findstart == 1 then return line:match(SLASH) and 0 or -2 end
   local st = bufs[api.nvim_get_current_buf()]
   local s = st and st.s
-  local known = s and ((s.slash_commands and #s.slash_commands > 0)
-    or (s.cwd and require('agent-ide.session')._commands_seen[s.cwd]))
-  if not known and not hinted then
+  if not claude_commands(s) and not hinted then
     hinted = true
     vim.notify(HINT, vim.log.levels.INFO)
   end
@@ -206,14 +248,9 @@ function M.complete(findstart, base)
 end
 
 -- 'completeopt' while the `/` menu is open: nothing inserted or selected before a choice.
-local fuzzy_ok
+-- `fuzzy` came with Neovim 0.11; decided by version, so no option is written to find out.
 local function menu_completeopt()
-  if fuzzy_ok == nil then
-    local old = vim.o.completeopt
-    fuzzy_ok = pcall(function() vim.o.completeopt = 'menuone,fuzzy' end)
-    vim.o.completeopt = old
-  end
-  return 'menuone,noinsert,noselect' .. (fuzzy_ok and ',fuzzy' or '')
+  return 'menuone,noinsert,noselect' .. (vim.fn.has('nvim-0.11') == 1 and ',fuzzy' or '')
 end
 
 ---Set the menu's 'completeopt' on prompt `buf` (put back when the menu is done) and close the
@@ -368,8 +405,32 @@ end
 
 local pick_ns = api.nvim_create_namespace('agent-ide.prompt.pick')
 
----Pick a file and add an `[attach] <path>` line above the line of the cursor. `typed`: an `@`
----was typed to get here, so cancelling leaves a literal `@` where it would have been.
+---Insert mode again in `win` with the cursor before byte `col` of `row`, when `win` is the
+---current window (else once more on the next tick: a picker may give the focus back after it
+---answered). Never takes the focus.
+local function resume_insert(win, buf, row, col)
+  local function go()
+    if not api.nvim_win_is_valid(win) or api.nvim_win_get_buf(win) ~= buf then return true end
+    pcall(api.nvim_win_set_cursor, win, { row, col })
+    if api.nvim_get_current_win() ~= win then return false end
+    if api.nvim_get_mode().mode:sub(1, 1) ~= 'i' then
+      -- normal mode cannot stand past the last byte: append there instead
+      local len = #(api.nvim_buf_get_lines(buf, row - 1, row, false)[1] or '')
+      vim.cmd(col >= len and col > 0 and 'startinsert!' or 'startinsert')
+    end
+    return true
+  end
+  if not go() then vim.schedule(go) end
+end
+
+---Pick a file and put a reference to it where the cursor was. `typed`: an `@` was typed in
+---insert mode to get here: on a line that was empty an `[attach] <path>` line takes the
+---line's place (the empty line moves below it), elsewhere `M.mention(path)` and a space are
+---inserted inline; cancelling leaves the literal `@`. Not typed (normal mode): an `[attach]`
+---line above the cursor's line, cancelling changes nothing. The spot is an extmark, so text
+---typed meanwhile (the list loads asynchronously, the picker may answer late) does not move
+---it. When the user carried on elsewhere, their cursor and mode stay; otherwise the cursor
+---goes after the reference and insert mode resumes.
 ---@param buf integer prompt buffer
 ---@param typed boolean
 function M.pick(buf, typed)
@@ -379,7 +440,9 @@ function M.pick(buf, typed)
   st.picking = token
   local win = api.nvim_get_current_win()
   local row, col = unpack(api.nvim_win_get_cursor(win))
-  -- follows edits made while the file list is being read
+  local line0 = api.nvim_buf_get_lines(buf, row - 1, row, false)[1] or ''
+  local as_line = not typed or line0 == ''
+  -- left gravity: text typed at the spot while waiting goes after the reference
   local mark = api.nvim_buf_set_extmark(buf, pick_ns, row - 1, col, { right_gravity = false })
   local dead = false
   local timer = vim.defer_fn(function()
@@ -388,20 +451,45 @@ function M.pick(buf, typed)
     if api.nvim_buf_is_valid(buf) then pcall(api.nvim_buf_del_extmark, buf, pick_ns, mark) end
   end, M.PICK_TIMEOUT_MS)
 
+  -- `fn(r, c, cur, here, line)`: the spot (0-based), the window's cursor (or false), whether the
+  -- user is still there (on the spot's line, which is unchanged) and the spot's line
   local function place(fn)
     if st.picking == token then st.picking = nil end
     if not api.nvim_buf_is_valid(buf) then return end
     local pos = api.nvim_buf_get_extmark_by_id(buf, pick_ns, mark, {})
     api.nvim_buf_del_extmark(buf, pick_ns, mark)
     if #pos == 0 then return end
+    local r = pos[1]
+    local line = api.nvim_buf_get_lines(buf, r, r + 1, false)[1] or ''
+    local c = math.min(pos[2], #line)
     local cur = api.nvim_win_is_valid(win) and api.nvim_win_get_buf(win) == buf and api.nvim_win_get_cursor(win)
-    fn(pos[1], pos[2], cur)
+    fn(r, c, cur, typed and cur and cur[1] == r + 1 and line == line0, line)
+  end
+  -- text `ins` went in at (r, c) on one line: the user's cursor keeps its text
+  local function shift(cur, r, c, ins)
+    if cur and cur[1] == r + 1 and cur[2] >= c then api.nvim_win_set_cursor(win, { cur[1], cur[2] + #ins }) end
   end
   local function cancel()
-    place(function(r, c, cur)
+    place(function(r, c, cur, here)
       if not typed then return end
       api.nvim_buf_set_text(buf, r, c, r, c, { '@' })
-      if cur and cur[1] == r + 1 and cur[2] >= c then api.nvim_win_set_cursor(win, { cur[1], cur[2] + 1 }) end
+      if here then return resume_insert(win, buf, r + 1, c + 1) end
+      shift(cur, r, c, '@')
+    end)
+  end
+  local function choose(path)
+    place(function(r, c, cur, here, line)
+      if as_line then
+        api.nvim_buf_set_lines(buf, r, r, false, { '[attach] ' .. path })
+        if here then return resume_insert(win, buf, r + 2, 0) end
+        if cur and cur[1] >= r + 1 then api.nvim_win_set_cursor(win, { cur[1] + 1, cur[2] }) end
+        return
+      end
+      local ref = M.mention(path)
+      local ins = line:sub(c + 1, c + 1):match('^%s$') and ref or (ref .. ' ')
+      api.nvim_buf_set_text(buf, r, c, r, c, { ins })
+      if here then return resume_insert(win, buf, r + 1, c + #ref + 1) end
+      shift(cur, r, c, ins)
     end)
   end
 
@@ -418,10 +506,7 @@ function M.pick(buf, typed)
     local prompt = truncated and ('Attach file (first %d files)'):format(#files) or 'Attach file'
     vim.ui.select(files, { prompt = prompt }, function(choice)
       if not choice then return cancel() end
-      place(function(r, _, cur)
-        api.nvim_buf_set_lines(buf, r, r, false, { '[attach] ' .. choice })
-        if cur and cur[1] >= r + 1 then api.nvim_win_set_cursor(win, { cur[1] + 1, cur[2] }) end
-      end)
+      choose(choice)
     end)
   end)
 end
@@ -440,10 +525,11 @@ end
 local function edge_key(buf, dir, key, insert)
   return function()
     local st = bufs[buf]
-    if not st or not can_step(st, dir) then return key end
+    if not st then return key end
+    -- the cheap checks first: most presses are not on the edge line
     local row = api.nvim_win_get_cursor(0)[1]
     local at_edge = (dir < 0 and row == 1) or (dir > 0 and row == api.nvim_buf_line_count(buf))
-    if not at_edge or (insert and menu_visible()) then return key end
+    if not at_edge or (insert and menu_visible()) or not can_step(st, dir) then return key end
     return ('<Cmd>lua require("agent-ide.ui.prompt").step(%d, %d)<CR>'):format(buf, dir)
   end
 end
@@ -466,14 +552,19 @@ function M.setup_buf(buf, s)
   local list = require('agent-ide.util.keys').list
 
   if opts.auto_slash ~= false then
-    map('i', '/', function()
-      local empty_line = api.nvim_get_current_line() == ''
-      if empty_line and bufs[buf] and not menu_visible() then
+    -- what the menu needs is ready before the first `/`: the project key and the found commands
+    if s and s.cwd then require('agent-ide.session.commands').key_of(s.cwd) end
+    require('agent-ide.prompts.cache').global()
+    -- Not an <expr> mapping, for the reason given at `@` below: in a burst of input (`x/`, a
+    -- macro, `.`) the line would still look empty.
+    local open_keys = api.nvim_replace_termcodes('/<C-x><C-u>', true, false, true)
+    vim.keymap.set('i', '/', function()
+      if api.nvim_get_current_line() == '' and bufs[buf] and not menu_visible() then
         open_menu(buf)
-        return '/<C-x><C-u>'
+        return api.nvim_feedkeys(open_keys, 'in', false)
       end
-      return '/'
-    end, 'command menu')
+      api.nvim_feedkeys('/', 'in', false)
+    end, { buffer = buf, nowait = true, silent = true, desc = 'Agent-IDE: command menu' })
     api.nvim_create_autocmd('CompleteDone', { buffer = buf, callback = function()
       on_complete_done(buf)
       close_menu(buf)
@@ -482,15 +573,20 @@ function M.setup_buf(buf, s)
   end
 
   if opts.at_picker ~= false then
-    map('i', '@', function()
-      local col = api.nvim_win_get_cursor(0)[2]
+    -- At line start or after whitespace (so `name@host` types normally), never in a code fence.
+    -- Not an <expr> mapping: that one is evaluated while characters typed just before (in the
+    -- same burst of input) are not in the line yet; a plain `@` goes back to the front of the
+    -- typeahead, so it lands before the keys that follow.
+    vim.keymap.set('i', '@', function()
+      local row, col = unpack(api.nvim_win_get_cursor(0))
       local before = api.nvim_get_current_line():sub(col, col)
       local st = bufs[buf]
-      if st and not st.picking and (col == 0 or before:match('%s')) then
-        return ('<Cmd>lua require("agent-ide.ui.prompt").pick(%d, true)<CR>'):format(buf)
+      if st and not st.picking and (col == 0 or before:match('%s'))
+        and not M.in_fence(api.nvim_buf_get_lines(buf, 0, row, false)) then
+        return M.pick(buf, true)
       end
-      return '@'
-    end, 'attach file')
+      api.nvim_feedkeys('@', 'in', false)
+    end, { buffer = buf, nowait = true, silent = true, desc = 'Agent-IDE: attach file' })
   end
   for _, lhs in ipairs(list(keys.attach)) do
     map('n', lhs, function()
@@ -505,14 +601,17 @@ function M.setup_buf(buf, s)
       map('n', lhs, edge_key(buf, dir, lhs, false), desc)
       map('i', lhs, edge_key(buf, dir, lhs, true), desc)
     end
+    -- the arrows step too, on the first (last) line, under the same conditions
     if #l > 0 then
       local arrow = dir < 0 and '<Up>' or '<Down>'
       map('n', arrow, edge_key(buf, dir, arrow, false), desc)
+      map('i', arrow, edge_key(buf, dir, arrow, true), desc)
     end
   end
 end
 
----Create the prompt buffer of session `s`: `agent-ide://prompt/<id>`, `acwrite`, markdown.
+---Create the prompt buffer of session `s`: `agents://<project>/<title> · prompt` (ui/bufname.lua),
+---`acwrite`, markdown.
 ---The buffer is never 'modified': a draft never blocks `:q`, `:qa`, `ZZ` or `:wq`, and hiding
 ---the window keeps it. Saving (`:w`, `ZZ`, `:x`) is prompts/save.lua.
 ---@param s table Session
@@ -522,7 +621,8 @@ function M.create(s)
   vim.bo[buf].buftype = 'acwrite'
   vim.bo[buf].bufhidden = 'hide'
   vim.bo[buf].swapfile = false
-  api.nvim_buf_set_name(buf, 'agent-ide://prompt/' .. s.id)
+  vim.b[buf].agent_ide_kind, vim.b[buf].agent_ide_session = 'prompt', s.id
+  require('agent-ide.ui.bufname').track(buf, s, ' · prompt', function() return require('agent-ide.ui.chat').project_of(s) end)
   vim.bo[buf].filetype = 'markdown'
   api.nvim_create_autocmd({ 'BufWriteCmd', 'TextChanged', 'TextChangedI', 'TextChangedP', 'InsertLeave' }, {
     buffer = buf, callback = function(ev) vim.bo[ev.buf].modified = false end })

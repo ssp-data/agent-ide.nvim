@@ -127,7 +127,7 @@ T['? opens the shortcut help, q closes it, / is not mapped; in the help ? search
   wait_for(function() return child.lua_get('vim.api.nvim_win_get_config(0).relative') ~= '' end, 'help float 3')
   child.type_keys('<Esc>')
   wait_for(function() return child.lua_get('vim.api.nvim_get_current_win()') == drawer_win end, 'help closed by Esc')
-  eq(child.lua_get('#vim.tbl_filter(function(w) return vim.api.nvim_win_get_config(w).relative ~= "" end, vim.api.nvim_list_wins())'), 0)
+  eq(child.lua_get('#vim.tbl_filter(function(w) local c = vim.api.nvim_win_get_config(w); return c.relative ~= "" and c.focusable end, vim.api.nvim_list_wins())'), 0)
 end
 
 T['/ searches inside the help: the cursor lands on the word, n / N step, the float stays'] = function()
@@ -155,7 +155,7 @@ end
 T['help.open twice does not stack floats'] = function()
   start()
   child.lua([[local h = require('agent-ide.ui.help'); h.open('t', { { key = 'a', desc = 'b' } }); h.open('t', { { key = 'a', desc = 'b' } })]])
-  eq(child.lua_get('#vim.tbl_filter(function(w) return vim.api.nvim_win_get_config(w).relative ~= "" end, vim.api.nvim_list_wins())'), 1)
+  eq(child.lua_get('#vim.tbl_filter(function(w) local c = vim.api.nvim_win_get_config(w); return c.relative ~= "" and c.focusable end, vim.api.nvim_list_wins())'), 1)
 end
 
 T['drawer on the left when configured'] = function()
@@ -259,7 +259,7 @@ T['enter on project expands; enter on session opens its history in the chat view
   drawer_cursor_to('Alpha basics')
   child.type_keys('<CR>')
   wait_for(function() return has_line(buf_lines(), '## You', true) ~= nil end, 'history loaded')
-  eq(in_transcript('vim.api.nvim_buf_get_name(0)'), 'agent-ide://chat/' .. ALPHA_ID)
+  eq(in_transcript('(vim.b[0].agent_ide_kind or "") .. "/" .. (vim.b[0].agent_ide_session or "")'), 'chat/' .. ALPHA_ID)
   local lines = buf_lines()
   local bash = has_line(lines, '▸ Bash:', true)
   eq(bash ~= nil, true)
@@ -268,7 +268,7 @@ T['enter on project expands; enter on session opens its history in the chat view
   eq(in_transcript('vim.bo.filetype'), 'markdown')
   eq(in_transcript('vim.fn.line(".") == vim.fn.line("$")'), true)
   -- running in another Claude (live: waiting): the history shows, the winbar says so
-  eq(in_transcript('vim.wo.winbar'), 'alpha · Alpha basics · model ? · mode:? · waiting')
+  eq(in_transcript('vim.wo.winbar'), '%#AgentIdeWaiting#W%* %#AgentIdeWaiting#input%* · %#AgentIdeProject#alpha%* · Alpha basics')
 end
 
 T['history of a session with unknown records shows an unknown fold'] = function()

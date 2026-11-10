@@ -4,7 +4,7 @@ local M = {}
 local function defaults()
   return {
     projects_dir = vim.fn.expand('~/.claude/projects'),
-    drawer = { width = 44, side = 'right' },
+    drawer = { width = 44, side = 'right', legend = true }, -- legend: the state marks at the bottom (gL)
     live = { interval_ms = 5000, cmd = { 'claude', 'agents', '--json' } },
     helper = { enabled = true, path = nil }, -- nil: <plugin root>/helper/target/release/agent-ide-helper
     -- modes: what <S-Tab> cycles through (plugin names; `manual` is Claude's `default`);
@@ -13,6 +13,10 @@ local function defaults()
       modes = { 'manual', 'acceptEdits', 'plan', 'auto' }, default_mode = nil,
       models = { 'fable', 'opus', 'sonnet', 'haiku' } },
     tcd = true,
+    -- 'all' (every project) or 'project' (the git repository of Neovim's working directory):
+    -- what the drawer, search, <leader>an and the footer show at start; `:Agents all|project`
+    -- and `gs` in the drawer switch it
+    scope = 'all',
     -- false disables a mapping
     keys = {
       toggle = '<leader>aa',
@@ -21,7 +25,10 @@ local function defaults()
       prompt_history = '<leader>aP', -- global: every prompt, newest first
       -- the search picker's query line; each a key, a list of keys, or false (close: normal mode)
       search_picker = { next = { '<C-n>', '<Down>' }, prev = { '<C-p>', '<Up>' }, open = '<CR>', copy = '<C-y>',
-        reuse = '<C-e>', scope = '<Tab>', kinds = '<C-t>', close = { '<Esc>', 'q' } },
+        reuse = '<C-e>', scope = '<Tab>', kinds = '<C-t>', close = { '<Esc>', 'q' },
+        -- the preview's next / previous occurrence of the query (]n / [n in normal mode only,
+        -- <M-n> / <M-p> also in insert mode); after <CR>, the same step through the transcript
+        next_match = { ']n', '<M-n>' }, prev_match = { '[n', '<M-p>' } },
       -- chat view, buffer-local in the transcript and the prompt
       chat = { send = '<C-CR>', send_alt = '<leader><CR>', interrupt = '<C-c>', prompt = '<leader>ap', help = 'g?',
         history_prev = '<C-p>', history_next = '<C-n>', attach = '<leader>af',
@@ -40,7 +47,12 @@ local function defaults()
         refresh = { 'R', '<leader>gR' }, lazygit = 'glg' },
       -- drawer, on prompt rows (elsewhere these keys keep their normal meaning)
       prompts = { edit = 'e', rename = 'r', delete = 'd', yank = 'y', to_library = 'L' },
+      -- commit graph view, buffer-local; each a key, a list of keys, or false
+      graph = { open = '<CR>', next_commit = ']]', prev_commit = '[[', all = 'a', refresh = 'R', more = 'L', yank = 'y',
+        lazygit = 'glg', close = 'q', help = 'g?' },
     },
+    -- graph_limit: commits the commit graph loads at first (and L loads more of)
+    git = { graph_limit = 300 },
     -- Prompts: Claude's commands and skills (read only), the library of templates and per-project
     -- saved prompts. nil dirs: stdpath('data') .. '/agent-ide/library' and '/agent-ide/prompts'
     prompts = { library_dir = nil, saved_dir = nil, command_dirs = { '~/.claude/commands' },
@@ -49,6 +61,9 @@ local function defaults()
     -- { "limits": [ { "label", "percent" (fraction used), "resetsAt" } ], "updatedAt" }; when it is
     -- readable and fresh (30 min) the footer shows those limits instead of its own
     quota = { file = nil },
+    -- deleted sessions (`D` in the drawer) stay in stdpath('data')/agent-ide/trash until
+    -- `:AgentsTrash empty`; keep_days (nil: keep) purges older ones at setup
+    trash = { keep_days = nil },
     -- prompt buffer: `/` opens the command menu, `@` opens the file picker
     chat = { auto_slash = true, at_picker = true },
     -- 'nerd' (needs a Nerd Font in the terminal) or 'plain'; `icons` overrides single entries

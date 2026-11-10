@@ -130,7 +130,7 @@ T['picker: live results, highlights, moving, preview, close keys (Lua fallback)'
   eq(state() ~= vim.NIL, true, 'Esc in insert mode only leaves insert mode')
   child.type_keys('q')
   eq(state(), vim.NIL)
-  eq(child.lua_get('#vim.tbl_filter(function(w) return vim.api.nvim_win_get_config(w).relative ~= "" end, vim.api.nvim_list_wins())'), 0)
+  eq(child.lua_get('#vim.tbl_filter(function(w) local c = vim.api.nvim_win_get_config(w); return c.relative ~= "" and c.focusable end, vim.api.nvim_list_wins())'), 0)
 end
 
 T['picker with the helper: fuzzy, answers, kinds cycle, Enter opens the chat on the hit line'] = function()
@@ -149,7 +149,7 @@ T['picker with the helper: fuzzy, answers, kinds cycle, Enter opens the chat on 
   eq(state().hits[1].snippet, 'Fixed the umlaut handling.')
   child.type_keys('<CR>')
   wait_for(function()
-    return child.lua_get('vim.api.nvim_buf_get_name(0)'):find('agent-ide://chat/a1', 1, true) ~= nil
+    return vim.startswith(child.lua_get('(vim.b[0].agent_ide_kind or "") .. "/" .. (vim.b[0].agent_ide_session or "")'), 'chat/a1')
       and child.lua_get('vim.api.nvim_get_current_line()') == 'Fixed the umlaut handling.'
   end, 'chat on the answer line')
   eq(state(), vim.NIL)
@@ -398,6 +398,255 @@ T['prompt history: repeated prompts are one row with a count; how many of how ma
   eq(vim.iter(marks):any(function(t) return t:find('×3', 1, true) ~= nil end), true)
   local footer = child.lua_get('vim.api.nvim_win_get_config(...).footer[1][1]', { state().wins.list })
   eq(footer:find('newest 500 of 527', 1, true) ~= nil, true)
+end
+
+-- Matches in the preview and in the opened transcript -----------------------------------------
+
+-- A session whose title holds one query word and whose prompt holds both, the second far below
+-- the first; one whose title holds every word of its query and its text none.
+local FILLER = 40
+local function write_mailer()
+  local body = { 'configure the Mailer for the team' }
+  for i = 1, FILLER do body[#body + 1] = 'filler line ' .. i .. ' without the words' end
+  body[#body + 1] = 'then add a signature block at the end'
+  body[#body + 1] = 'and test the signature twice'
+  S.write(projects, '-w-mailer', 'm1', { S.title('Mailer settings'), S.user(table.concat(body, '\n'), 10, '/w/mailer'),
+    S.answer('Done: the mailer has a signature now.', 11) })
+  S.write(projects, '-w-gamma', 'g1', { S.title('Gamma refactor plan'), S.user('something unrelated entirely', 12, '/w/gamma') })
+end
+
+local function marks()
+  local s = state()
+  return s ~= vim.NIL and s.marks ~= vim.NIL and s.marks or nil
+end
+
+-- Text of every match extmark of `group` in the preview: { line, text }.
+local function preview_marked(group)
+  return child.lua_get([[(function(buf, group)
+    local out = {}
+    for _, m in ipairs(vim.api.nvim_buf_get_extmarks(buf, -1, 0, -1, { details = true })) do
+      if m[4].hl_group == group then
+        local line = vim.api.nvim_buf_get_lines(buf, m[2], m[2] + 1, false)[1]
+        out[#out + 1] = { m[2] + 1, line:sub(m[3] + 1, m[4].end_col) }
+      end
+    end
+    table.sort(out, function(a, b) return a[1] < b[1] end)
+    return out
+  end)(...)]], { state().bufs.preview, group })
+end
+
+local function preview_footer()
+  local f = child.lua_get('vim.api.nvim_win_get_config(...).footer', { state().wins.preview })
+  return table.concat(vim.tbl_map(function(c) return c[1] end, f))
+end
+
+-- The cursor of the preview: line, its text, column, and the lines on screen.
+local function preview_cursor()
+  return child.lua_get([[vim.api.nvim_win_call(..., function()
+    local l = vim.fn.line('.')
+    return { line = l, text = vim.fn.getline(l), col = vim.fn.col('.') - 1, top = vim.fn.line('w0'), bot = vim.fn.line('w$') }
+  end)]], { state().wins.preview })
+end
+
+-- The preview's marks once they are those of the selected hit for the query shown.
+local function wait_marks()
+  wait_for(function()
+    local s = state()
+    local m, h = marks(), s.hits[s.sel]
+    return m ~= nil and h ~= nil and m.query == s.query and m.session == h.session
+  end, 'preview marks')
+  return marks()
+end
+
+local function hl_count() return #child.lua_get('require("agent-ide.ui.search_hl")._state()') end
+
+for _, backend in ipairs({ 'lua', 'helper' }) do
+  T['preview (' .. backend .. '): a word only in the title, one in the body: the body word on screen, every word marked, ]n / [n step'] = function()
+    if backend == 'helper' then need_helper() end
+    write_mailer()
+    start(backend)
+    open_picker('require("agent-ide").search({ kinds = { "prompt" } })')
+    type_query('mailer signature')
+    wait_for(function() local h = state().hits[1]; return h ~= nil and h.session == 'm1' end, 'the prompt hit')
+    local m = wait_marks()
+    -- the prompt: Mailer, signature twice; the answer: mailer, signature. The first signature
+    -- is current, on screen
+    eq(#m.occ, 5)
+    eq(m.cur, 2)
+    local cur = preview_cursor()
+    eq(cur.text, 'then add a signature block at the end')
+    eq(cur.text:sub(cur.col + 1, cur.col + 9), 'signature')
+    eq(cur.line >= cur.top and cur.line <= cur.bot, true)
+    eq(vim.tbl_map(function(x) return x[2] end, preview_marked('AgentIdeSearchMatch')),
+      { 'Mailer', 'signature', 'signature', 'mailer', 'signature' })
+    eq(vim.tbl_map(function(x) return x[2] end, preview_marked('AgentIdeSearchMatchCurrent')), { 'signature' })
+    eq(preview_footer():find('match 2/5', 1, true) ~= nil, true)
+    eq(preview_footer():find(']n/[n match', 1, true) ~= nil, true)
+    -- <M-n> in insert mode, ]n / [n in normal mode; wrapping
+    eq(child.lua_get('vim.api.nvim_get_mode().mode'), 'i')
+    child.type_keys('<M-n>')
+    eq(marks().cur, 3)
+    eq(preview_footer():find('match 3/5', 1, true) ~= nil, true)
+    child.type_keys('<Esc>')
+    child.type_keys(']n', ']n', ']n')
+    eq(marks().cur, 1)
+    eq(preview_footer():find('match 1/5', 1, true) ~= nil, true)
+    cur = preview_cursor()
+    eq(cur.text, 'configure the Mailer for the team')
+    eq(cur.line >= cur.top and cur.line <= cur.bot, true)
+    child.type_keys('[n')
+    eq(marks().cur, 5)
+    eq(preview_cursor().text, 'Done: the mailer has a signature now.')
+    child.type_keys('<M-p>')
+    eq(marks().cur, 4)
+    -- ] and [ are typed text in insert mode
+    child.type_keys('A', ' ]n')
+    eq(child.lua_get('vim.api.nvim_buf_get_lines(...,0,1,false)[1]', { state().bufs.input }), 'mailer signature ]n')
+  end
+
+  T['preview (' .. backend .. '): every word only in the title or project: the top, said in the footer'] = function()
+    if backend == 'helper' then need_helper() end
+    write_mailer()
+    start(backend)
+    open_picker()
+    type_query('gamma refactor')
+    wait_for(function() local h = state().hits[1]; return h ~= nil and h.session == 'g1' end, 'the title hit')
+    local m = wait_marks()
+    eq(#m.occ, 0)
+    eq(m.top, true)
+    eq(preview_footer():find('matched in title/project', 1, true) ~= nil, true)
+    eq(preview_cursor().line, 1)
+  end
+
+  T['preview (' .. backend .. '): umlauts and case fold as the search does'] = function()
+    if backend == 'helper' then need_helper() end
+    start(backend)
+    open_picker()
+    type_query('über')
+    wait_for(function() local h = state().hits[1]; return h ~= nil and h.kind == 'prompt' end, 'the prompt hit')
+    wait_marks()
+    eq(vim.tbl_map(function(x) return x[2] end, preview_marked('AgentIdeSearchMatch')), { 'Über' })
+    eq(preview_marked('AgentIdeSearchMatchCurrent')[1][2], 'Über')
+  end
+
+  T['open (' .. backend .. '): the cursor on the first match in the event, ]n steps through the transcript, <Esc> clears'] = function()
+    if backend == 'helper' then need_helper() end
+    write_mailer()
+    start(backend)
+    open_picker('require("agent-ide").search({ kinds = { "prompt" } })')
+    type_query('mailer signature')
+    wait_for(function() local h = state().hits[1]; return h ~= nil and h.session == 'm1' end, 'the prompt hit')
+    wait_marks()
+    child.lua('vim.fn.setreg("/", "untouched")')
+    child.type_keys('<CR>')
+    wait_for(function() return child.lua_get('vim.api.nvim_get_current_line()') == 'then add a signature block at the end' end,
+      'chat on the signature line')
+    eq(child.lua_get('vim.fn.col(".")'), #'then add a ' + 1)
+    local win = child.lua_get('vim.api.nvim_get_current_win()')
+    local groups = function()
+      return child.lua_get('vim.tbl_map(function(m) return m.group end, vim.fn.getmatches(...))', { win })
+    end
+    eq(vim.tbl_contains(groups(), 'AgentIdeSearchMatch'), true)
+    eq(vim.tbl_contains(groups(), 'AgentIdeSearchMatchCurrent'), true)
+    child.type_keys(']n')
+    eq(child.lua_get('vim.api.nvim_get_current_line()'), 'and test the signature twice')
+    child.type_keys(']n') -- the answer
+    eq(child.lua_get('vim.api.nvim_get_current_line()'), 'Done: the mailer has a signature now.')
+    eq(child.lua_get('vim.fn.col(".")'), #'Done: the ' + 1)
+    child.type_keys('[n', '[n')
+    eq(child.lua_get('vim.api.nvim_get_current_line()'), 'then add a signature block at the end')
+    -- the search register and 'hlsearch' are the user's
+    eq(child.lua_get('vim.fn.getreg("/")'), 'untouched')
+    eq(child.lua_get('vim.o.hlsearch'), true)
+    child.type_keys('<Esc>')
+    eq(groups(), {})
+    eq(hl_count(), 0)
+    eq(child.lua_get('vim.fn.maparg("]n", "n")'), '')
+    eq(child.lua_get('vim.fn.maparg("<Esc>", "n")'), '')
+  end
+
+  T['open (' .. backend .. '): the highlights go with the window; the next search clears them'] = function()
+    if backend == 'helper' then need_helper() end
+    write_mailer()
+    start(backend)
+    open_picker('require("agent-ide").search({ kinds = { "prompt" } })')
+    type_query('mailer signature')
+    wait_for(function() local h = state().hits[1]; return h ~= nil and h.session == 'm1' end, 'the prompt hit')
+    child.type_keys('<CR>')
+    wait_for(function() return hl_count() == 1 end, 'highlights')
+    local win = child.lua_get('vim.api.nvim_get_current_win()')
+    local buf = child.lua_get('vim.api.nvim_get_current_buf()')
+    -- the transcript in a second window: no highlights there
+    child.lua('vim.cmd("split")')
+    eq(child.lua_get('#vim.fn.getmatches()'), 0)
+    child.lua('vim.api.nvim_win_close(..., true)', { win })
+    eq(hl_count(), 0)
+    eq(child.lua_get('vim.api.nvim_buf_call(..., function() return vim.fn.maparg("]n", "n") end)', { buf }), '')
+    -- open again, then a new search clears them
+    open_picker('require("agent-ide").search({ kinds = { "prompt" } })')
+    type_query('mailer signature')
+    wait_for(function() local h = state().hits[1]; return h ~= nil and h.session == 'm1' end, 'the prompt hit again')
+    child.type_keys('<CR>')
+    wait_for(function() return hl_count() == 1 end, 'highlights again')
+    open_picker()
+    eq(hl_count(), 0)
+  end
+end
+
+T['preview with the helper: a fuzzy word marks what the search matched'] = function()
+  need_helper()
+  start('helper')
+  open_picker()
+  type_query('umlatu')
+  wait_for(function() local h = state().hits[1]; return h ~= nil and h.match == 'fuzzy' end, 'fuzzy hit')
+  local m = wait_marks()
+  eq(#m.occ > 0, true)
+  local marked = preview_marked('AgentIdeSearchMatchCurrent')
+  eq(#marked, 1)
+  eq(marked[1][2]:lower():find('uml', 1, true) ~= nil, true)
+  local cur = preview_cursor()
+  eq(cur.line >= cur.top and cur.line <= cur.bot, true)
+end
+
+T['search_hl: fuzzy without a span marks the longest part of the word; budget: 2000 lines under 5 ms'] = function()
+  child.restart({ '-u', 'tests/minimal_init.lua' })
+  local terms = child.lua_get([[vim.tbl_map(function(t) return t.raw end,
+    require('agent-ide.ui.search_hl').terms('signatrue', { match = 'fuzzy', title = 'x', project = 'y', snippet = 'z', positions = {} },
+      { 'a signature here' }))]])
+  eq(terms, { 'signatrue', 'signat' })
+  local r = child.lua_get([[(function()
+    local hl = require('agent-ide.ui.search_hl')
+    local view = require('agent-ide.ui.search_view')
+    -- prose with umlauts; the query's words in about one line of five
+    local words = { 'release', 'notes', 'window', 'buffer', 'the', 'and', 'über', 'fold', 'Übersicht', 'render', 'query',
+      'result', 'with', 'for', 'when', 'Brücke', 'test', 'cargo', 'build', 'Neovim', 'plugin', 'should', 'because' }
+    local lines = {}
+    for i = 1, 2000 do
+      local l = {}
+      for k = 1, 14 do l[k] = words[(i * 7 + k * 3) % #words + 1] end
+      if i % 7 == 0 then l[5] = 'parser' end
+      if i % 13 == 0 then l[9] = 'Größe' end
+      lines[i] = table.concat(l, ' ')
+    end
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    local hit = { title = 'Release work', project = 'proj', match = 'prefix', snippet = 'x', positions = {} }
+    local best, n = math.huge, 0
+    for _ = 1, 7 do
+      vim.api.nvim_buf_clear_namespace(buf, -1, 0, -1)
+      local t0 = vim.uv.hrtime()
+      local terms = hl.terms('parser größe', hit, lines)
+      local occ = hl.occurrences(lines, terms)
+      hl.pick(occ, 1000)
+      view.mark(buf, occ)
+      best = math.min(best, (vim.uv.hrtime() - t0) / 1e6)
+      n = #occ
+    end
+    return { ms = best, n = n }
+  end)()]])
+  MiniTest.add_note(('2000-line preview highlighted: %.2f ms, %d occurrences (budget 5 ms)'):format(r.ms, r.n))
+  eq(r.n, 285 + 153)
+  if r.ms >= 5 then error(('highlighting took %.2f ms, budget < 5 ms'):format(r.ms), 0) end
 end
 
 return T

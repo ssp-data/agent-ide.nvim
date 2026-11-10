@@ -9,20 +9,22 @@ local M = {}
 local function chat() return require('agent-ide.ui.chat') end
 
 ---Sessions that need the user, in order: waiting (oldest ask first), then failed, then done.
----Sessions waiting in another Claude come after this Neovim's waiting ones.
+---Sessions waiting in another Claude come after this Neovim's waiting ones. Only sessions in
+---scope (see scope.lua) count.
 ---@return { s: table|nil, id: string, elsewhere: boolean }[]
 function M.needing()
   local live = require('agent-ide.live').fresh()
+  local matches = require('agent-ide.scope').matches
   local out, mine = {}, {}
   local rank = { waiting = 1, failed = 3, done = 4 }
   for i, s in ipairs(session.all()) do
     mine[s.id] = s.state ~= 'parked' or nil
     local r = rank[s.state]
-    if r then out[#out + 1] = { s = s, id = s.id, elsewhere = false, r = r, t = permission.oldest_ask(s), i = i } end
+    if r and matches(s) then out[#out + 1] = { s = s, id = s.id, elsewhere = false, r = r, t = permission.oldest_ask(s), i = i } end
   end
   local n = #out
   for id, e in pairs(live) do
-    if not mine[id] and e.status == 'waiting' then
+    if not mine[id] and e.status == 'waiting' and matches(e) then
       n = n + 1
       out[#out + 1] = { id = id, elsewhere = true, r = 2, t = 0, i = n, pid = e.pid }
     end
@@ -40,7 +42,12 @@ end
 ---the select for its oldest ask; a session waiting in another Claude is jumped to in tmux.
 function M.next_waiting()
   local list = M.needing()
-  if #list == 0 then return vim.notify('Agent-IDE: nothing needs you', vim.log.levels.INFO) end
+  if #list == 0 then
+    local scope = require('agent-ide.scope')
+    local others = scope.project() and require('agent-ide.ui.drawer_model').others_needing(scope.matches) or 0
+    local msg = others > 0 and ('nothing in this project; %d in other projects (gs)'):format(others) or 'nothing needs you'
+    return vim.notify('Agent-IDE: ' .. msg, vim.log.levels.INFO)
+  end
   local pick = list[1]
   local cur = chat().current()
   if cur and pick.s == cur and permission.in_chat(cur) and list[2] then pick = list[2] end

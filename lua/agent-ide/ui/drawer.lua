@@ -1,11 +1,14 @@
 -- The Agents tab: a drawer window listing projects and sessions beside a main window.
 local api = vim.api
 local config = require('agent-ide.config')
+local hidden = require('agent-ide.hidden')
 local index = require('agent-ide.index')
 local live = require('agent-ide.live')
 local project = require('agent-ide.project')
+local scope = require('agent-ide.scope')
 local session = require('agent-ide.session')
 local tmux = require('agent-ide.tmux')
+local legend = require('agent-ide.ui.drawer_legend')
 local model = require('agent-ide.ui.drawer_model')
 local sections = require('agent-ide.ui.sections')
 local tree = require('agent-ide.ui.tree')
@@ -15,7 +18,8 @@ local M = {}
 local ns = api.nvim_create_namespace('agent-ide.drawer')
 local augroup = api.nvim_create_augroup('agent-ide.drawer', { clear = true })
 
-local S = { tab = nil, win = nil, buf = nil, projects = {}, nodes = {}, expanded = {} }
+local S = { tab = nil, win = nil, buf = nil, projects = {}, nodes = {}, expanded = {},
+  kind = nil, expanded_by = {} } -- kind: the scope `expanded` belongs to; expanded_by: the other scope's
 local debounce -- uv timer for index.on_change
 local shown = false -- the drawer window is on screen: live polling and the change timer run
 
@@ -37,6 +41,8 @@ local function node_key(node)
   if node.type == 'section' then return 's:' .. node.key end
   if node.type == 'session' then return 'x:' .. node.session.id end
   if node.type == 'new' then return 'n:' .. node.project.key end
+  if node.type == 'hidden' then return 'h:' .. node.key end
+  if node.type == 'scope' or node.type == 'others' then return node.type end
 end
 
 ---State shown for a session (see `drawer_model.state_of`).
@@ -51,17 +57,47 @@ local function text_width(cfg)
   return api.nvim_win_get_width(S.win) - (info and info.textoff or 0)
 end
 
+-- Each scope keeps its own open folds: flipping back restores what was open.
+local function sync_scope()
+  local k = scope.get()
+  if S.kind == k then return end
+  if S.kind then S.expanded_by[S.kind] = S.expanded end
+  S.kind, S.expanded = k, S.expanded_by[k] or {}
+end
+
+---Projects as the drawer shows them: those in scope, unsaved new sessions added, hidden ones grouped.
+local function shown_projects()
+  local projects = model.with_unsaved(model.in_scope(S.projects, scope.project()))
+  if not hidden.any() then return projects end
+  return model.with_hidden(projects, hidden.is, model.state_of)
+end
+
+local function build()
+  local cfg = config.get()
+  sync_scope()
+  local projects = shown_projects()
+  local scoped
+  if scope.project() then
+    local p = projects[1]
+    local head = p.is_git and p.root and require('agent-ide.git_cache').head(p.root)
+    scoped = { others = model.others_needing(scope.matches), branch = head and head.branch or nil }
+  end
+  return tree.build(projects, model.state_of, S.expanded, os.time(), cfg.icons, cfg.projects_dir,
+    model.note_of, sections.collect,
+    { top = sections.collect_top, width = text_width(cfg), scope = scoped })
+end
+
 ---Re-render the drawer buffer; keeps the drawer cursor on the same node (or on `focus`).
----@param focus? string node key to place the cursor on
+---`focus == false`: keep the cursor on the same screen line instead (a row went away).
+---@param focus? string|string[]|false node key to place the cursor on (a list: the first shown)
 local function render(focus)
   sync()
   if not S.buf then return end
-  local cfg = config.get()
-  local t = tree.build(model.with_unsaved(S.projects), model.state_of, S.expanded, os.time(), cfg.icons, cfg.projects_dir,
-    model.note_of, sections.collect,
-    { top = sections.collect_top, width = text_width(cfg) })
+  local t = build()
   local row = S.win and api.nvim_win_get_cursor(S.win)[1]
-  focus = focus or (row and node_key(S.nodes[row]))
+  local view = focus == false and S.win and api.nvim_win_call(S.win, vim.fn.winsaveview)
+  if focus == false then focus = nil else focus = focus or (row and node_key(S.nodes[row])) end
+  if type(focus) == 'string' then focus = { focus } end
   vim.bo[S.buf].modifiable = true
   api.nvim_buf_set_lines(S.buf, 0, -1, false, t.lines)
   vim.bo[S.buf].modifiable = false
@@ -70,18 +106,28 @@ local function render(focus)
   for _, h in ipairs(t.hl) do
     api.nvim_buf_set_extmark(S.buf, ns, h.line - 1, h.col_start, { end_col = h.col_end, hl_group = h.group })
   end
-  if S.win and focus then
+  if view then
+    view.lnum = math.min(view.lnum, #t.lines)
+    api.nvim_win_call(S.win, function() vim.fn.winrestview(view) end)
+  elseif S.win and focus then
+    local at = {}
     for i, node in ipairs(S.nodes) do
-      if node_key(node) == focus then
-        if i ~= row then api.nvim_win_set_cursor(S.win, { i, 0 }) end
+      local k = node_key(node)
+      if k and not at[k] then at[k] = i end
+    end
+    for _, k in ipairs(focus) do
+      if at[k] then
+        if at[k] ~= row then api.nvim_win_set_cursor(S.win, { at[k], 0 }) end
         break
       end
     end
   end
+  legend.update()
 end
 
 local function rescan()
   index.scan(function(sessions)
+    hidden.refresh() -- another Neovim may have hidden or shown sessions
     S.projects = project.group(sessions)
     render()
   end)
@@ -173,6 +219,13 @@ local function toggle_node(node)
   elseif node.type == 'section' then
     toggle_key(node.key, true)
     render('s:' .. node.key)
+  elseif node.type == 'hidden' then
+    toggle_key(node.key, false)
+    render('h:' .. node.key)
+  elseif node.type == 'session' and node.hidden then
+    local key = node.project.key .. '/hidden'
+    toggle_key(key, false)
+    render('h:' .. key)
   elseif node.type == 'session' then
     local key = node.project.key .. '/sessions'
     toggle_key(key, true)
@@ -197,9 +250,15 @@ function actions.open()
     local dir = p.root or p.key
     -- only an absolute key is a folder: a project without cwd is keyed by a bare directory name
     if dir:sub(1, 1) ~= '/' or vim.fn.isdirectory(dir) ~= 1 then return notify('project folder not found: ' .. dir) end
-    local s = session.open({ cwd = dir })
-    model.add_unsaved(s.id, p.key)
+    -- an unsent new session of the project comes back with its draft; a count: a separate one
+    local s = vim.v.count == 0 and model.unsent_new(p.key) or nil
+    if not s then
+      s = session.open({ cwd = dir })
+      model.add_unsaved(s.id, p.key)
+    end
     require('agent-ide.ui.chat').open(s, p)
+  elseif node.type == 'scope' or node.type == 'others' then
+    M.set_scope('all')
   elseif node.open then
     local ok, err = pcall(node.open, node)
     if not ok then vim.notify('Agent-IDE: ' .. tostring(err), vim.log.levels.ERROR) end
@@ -237,14 +296,147 @@ function actions.park()
   require('agent-ide.ui.chat').park(s)
 end
 
+-- `H`: hide the session (into its project's Hidden group) or, on a hidden one, show it again.
+-- The cursor stays on its screen line, now on the next row. Other rows: nothing.
+function actions.hide()
+  local node = current_node()
+  if not node or node.type ~= 'session' then return end
+  local id = node.session.id
+  local hide = not hidden.is(id)
+  if not hidden.set(id, hide) then return end
+  render(false)
+  -- a session that needs attention stays among the visible rows (drawer_model.with_hidden)
+  local after = hide and current_node()
+  if after and after.type == 'session' and after.session.id == id then notify('hidden; listed here while it needs you') end
+end
+
+-- `D`: delete the session (into the plugin's trash, after checks and a confirm; ui/delete.lua).
+-- Its row goes away at once; the cursor stays on its screen line. Other rows: nothing.
+function actions.delete()
+  local node = current_node()
+  if not node or node.type ~= 'session' then return end
+  require('agent-ide.ui.delete').run(node, function()
+    local id = node.session.id
+    for _, p in ipairs(S.projects) do
+      p.sessions = vim.tbl_filter(function(x) return x.id ~= id end, p.sessions)
+    end
+    S.projects = vim.tbl_filter(function(p) return #p.sessions > 0 end, S.projects)
+    render(false)
+    rescan()
+  end)
+end
+
+-- Collapse and expand all ----------------------------------------------------------------------
+
+-- Keys of the row under the cursor and of the rows it sits in (by indent), nearest first.
+local function cursor_and_ancestors()
+  sync()
+  if not S.win or not S.buf then return {} end
+  local row = api.nvim_win_get_cursor(S.win)[1]
+  local lines = api.nvim_buf_get_lines(S.buf, 0, row, false)
+  local out = {}
+  local depth = math.huge
+  for i = row, 1, -1 do
+    local d = #(lines[i] or ''):match('^ *')
+    if d < depth or i == row then
+      depth = d
+      local k = node_key(S.nodes[i])
+      if k then out[#out + 1] = k end
+      if d == 0 then break end
+    end
+  end
+  return out
+end
+
+-- The fold a node toggles, and whether it starts open; nil for rows without one. A commit's own
+-- file list is left out (one git run per commit).
+local function fold_of(node)
+  if node.type == 'project' then return node.project.key, false end
+  if node.type == 'section' then return node.key, true end
+  if node.type == 'hidden' then return node.key, false end
+  if node.fold and node.type ~= 'git_commit' then return node.fold.key, node.fold.default == true end
+end
+
+local function is_open(key, default)
+  local v = S.expanded[key]
+  if v == nil then return default end
+  return v
+end
+
+local expanded_all -- S.expanded as the last `zR` left it
+
+-- `zM`: every project, section and group closed; a project opened again shows its sessions.
+function actions.collapse_all()
+  local keys = cursor_and_ancestors()
+  for _, node in ipairs(S.nodes) do
+    local key = fold_of(node)
+    if key then S.expanded[key] = false end
+  end
+  -- in project scope there is no project row to close: its Sessions close too
+  local scoped = scope.project() ~= nil
+  for key, v in pairs(S.expanded) do
+    if key:sub(-#'/sessions') == '/sessions' and not scoped then S.expanded[key] = nil elseif v then S.expanded[key] = false end
+  end
+  for _, p in ipairs(S.projects) do S.expanded[p.key] = false end
+  expanded_all = nil
+  render(keys)
+end
+
+-- `zR`: every project open with its Sessions; Changes, Commits, Saved prompts, Hidden and the
+-- Prompts node stay as they are (opening them loads git or prompts everywhere at once). Again
+-- with nothing changed in between: everything opens.
+function actions.expand_all()
+  local keys = cursor_and_ancestors()
+  local again = expanded_all ~= nil and vim.deep_equal(expanded_all, S.expanded)
+  for _, p in ipairs(shown_projects()) do
+    S.expanded[p.key] = true
+    if S.expanded[p.key .. '/sessions'] == false then S.expanded[p.key .. '/sessions'] = nil end
+  end
+  if again then
+    for _ = 1, 8 do -- one level per pass
+      local changed = false
+      for _, node in ipairs(build().nodes) do
+        local key, default = fold_of(node)
+        if key and not is_open(key, default) then
+          S.expanded[key] = true
+          changed = true
+        end
+      end
+      if not changed then break end
+    end
+  end
+  render(keys)
+  expanded_all = vim.deepcopy(S.expanded)
+end
+
 function actions.close() M.close() end
+
+-- `gs`: project scope <-> all. From all, the row's project (any row under a project), else the
+-- project of the working directory.
+function actions.scope()
+  if scope.get() == 'project' then return M.set_scope('all') end
+  local node = current_node()
+  M.set_scope('project', node and node.project)
+end
+
+function actions.legend() legend.toggle() end
+
+-- `X`: close the Claude running the session in a tmux pane (ui/tmux_close.lua). Other rows: nothing.
+function actions.close_tmux()
+  local node = current_node()
+  if node and node.type == 'session' then require('agent-ide.ui.tmux_close').close_row(node) end
+end
 
 -- The drawer's own keys (lhs, action name); a provider row key with the same lhs is neither
 -- mapped nor listed. `?` (actions.help) lists them all.
 local KEYS = {
   { '<CR>', 'open' }, { 'o', 'open' }, { 'za', 'fold' }, { 'R', 'refresh' }, { 'gp', 'jump' },
-  { 'x', 'park' }, { 'glg', 'lazygit' }, { 'q', 'close' }, { 's', 'search' }, { '?', 'help' },
+  { 'x', 'park' }, { 'H', 'hide' }, { 'D', 'delete' }, { 'zM', 'collapse_all' }, { 'zR', 'expand_all' }, { 'glg', 'lazygit' }, { 'q', 'close' }, { 's', 'search' }, { '?', 'help' },
   { 'g?', 'help' },
+  { 'gG', 'graph' }, -- commit graph of the row's repository (ui/graph.lua)
+  { 'gs', 'scope' }, -- project scope <-> all (scope.lua)
+  { 'gL', 'legend' }, -- legend of the state marks (ui/drawer_legend.lua)
+  { 'X', 'close_tmux' }, -- close a Claude in a tmux pane (ui/tmux_close.lua)
 }
 local OWN = {}
 for _, k in ipairs(KEYS) do OWN[vim.keycode(k[1])] = true end
@@ -290,20 +482,36 @@ function actions.lazygit()
   require('agent-ide.ui.lazygit').open(root)
 end
 
+function actions.graph()
+  local graph = require('agent-ide.ui.graph')
+  local root, p = graph.node_root(current_node())
+  if not root then return notify('not a git project') end
+  graph.open({ root = root, project = p })
+end
+
 function actions.help()
   local rows = {
     { key = '<CR> / o', desc = 'open session, start a new one, use a prompt, or toggle' },
     { key = 'za', desc = 'toggle fold' },
+    { key = 'zM', desc = 'collapse all' },
+    { key = 'zR', desc = 'expand all projects and their sessions (again: everything)' },
     { key = 'R', desc = 'refresh' },
     { key = 'gp', desc = 'jump to tmux pane' },
     { key = 's', desc = 'search this project (<Tab> in the picker: all sessions)' },
     { key = 'x', desc = 'park the session: stop its Claude process here' },
+    { key = 'H', desc = 'hide the session into Hidden (n); on a hidden one: show it again' },
+    { key = 'D', desc = 'delete an inactive session: move it to the trash (:AgentsTrash)' },
     { key = 'glg', desc = 'lazygit for the project (or the row\'s worktree)' },
     { key = 'q', desc = 'close drawer' },
     { key = '? / g?', desc = 'this help' },
     { key = '/', desc = 'search (built-in)' },
+    { key = 'gG', desc = 'commit graph of the project (or the row\'s worktree)' },
+    { key = 'gs', desc = 'scope: only this project / all projects' },
+    { key = 'gL', desc = 'show or hide the legend of the state marks' },
+    { key = 'X', desc = 'close the Claude running it in a tmux pane (Ctrl-C twice there; asks first)' },
   }
   for _, k in ipairs(provider_keys()) do rows[#rows + 1] = { key = k.lhs, desc = k.desc } end
+  vim.list_extend(rows, require('agent-ide.ui.drawer_session_keys').help_rows(OWN))
   require('agent-ide.ui.help').open('Agent-IDE drawer', rows)
 end
 
@@ -311,7 +519,7 @@ local function ensure_buf()
   sync()
   if S.buf then return S.buf end
   local buf = api.nvim_create_buf(false, true)
-  api.nvim_buf_set_name(buf, 'agent-ide://drawer')
+  require('agent-ide.ui.bufname').set(buf, 'agents://drawer')
   vim.bo[buf].bufhidden = 'hide'
   vim.bo[buf].filetype = 'agent-ide'
   vim.bo[buf].modifiable = false
@@ -319,6 +527,7 @@ local function ensure_buf()
   -- provider row keys (the drawer's own keys below win a clash)
   for _, k in ipairs(provider_keys()) do map(k.lhs, function() actions.row_key(k.lhs) end) end
   for _, k in ipairs(KEYS) do map(k[1], actions[k[2]]) end
+  require('agent-ide.ui.drawer_session_keys').map(buf, OWN, current_node) -- the chat's keys on session rows
   api.nvim_create_autocmd('BufEnter', { buffer = buf, callback = function() sections.focus() end })
   S.buf = buf
   return buf
@@ -338,6 +547,7 @@ local function open_drawer()
 end
 
 local function teardown()
+  legend.close()
   set_shown(false)
   index.on_change(nil)
   if debounce then debounce:stop() end
@@ -349,6 +559,16 @@ end
 local function create_tab()
   vim.cmd('tabnew')
   S.tab = api.nvim_get_current_tabpage()
+  -- the empty buffer `:tabnew` made would stay behind as a listed [No Name] once a chat
+  -- replaces it: a scratch placeholder, wiped when it leaves its window
+  local placeholder = api.nvim_get_current_buf()
+  if api.nvim_buf_get_name(placeholder) == '' and not vim.bo[placeholder].modified then
+    vim.bo[placeholder].buflisted = false
+    vim.bo[placeholder].buftype = 'nofile'
+    vim.bo[placeholder].bufhidden = 'wipe'
+    vim.bo[placeholder].swapfile = false
+    require('agent-ide.ui.bufname').set(placeholder, 'agents://empty')
+  end
   api.nvim_clear_autocmds({ group = augroup })
   api.nvim_create_autocmd('TabClosed', { group = augroup, callback = function()
     if S.tab and not api.nvim_tabpage_is_valid(S.tab) then
@@ -388,6 +608,7 @@ function M.main_win()
   local side = cfg.drawer.side == 'left' and 'right' or 'left'
   local scratch = api.nvim_create_buf(false, true)
   vim.bo[scratch].bufhidden = 'wipe'
+  require('agent-ide.ui.bufname').set(scratch, 'agents://empty')
   local w = api.nvim_win_call(S.win, function()
     return api.nvim_open_win(scratch, false, { split = side, win = -1 })
   end)
@@ -404,6 +625,7 @@ function M.close()
   if api.nvim_get_current_win() == win and main then api.nvim_set_current_win(main) end
   api.nvim_win_close(win, false)
   S.win = nil
+  legend.close()
   set_shown(false)
 end
 
@@ -419,6 +641,30 @@ function M.toggle()
     open_drawer()
   end
 end
+
+---Switch the scope (see scope.lua) and re-render: the cursor stays on its node when that is
+---still shown (else on the project's nearest row); focus does not move.
+---@param kind 'all'|'project'
+---@param anchor? table the project to scope to (nil: the working directory's)
+function M.set_scope(kind, anchor)
+  sync()
+  local cur = S.win and node_key(S.nodes[api.nvim_win_get_cursor(S.win)[1]])
+  local before = scope.project()
+  scope.set(kind, anchor)
+  local after = scope.project()
+  local focus = { cur or 'scope' }
+  if after then
+    focus[#focus + 1] = 'n:' .. after.key
+    focus[#focus + 1] = 'scope'
+  elseif before then
+    focus[#focus + 1] = 'p:' .. before.key
+  end
+  render(focus)
+  require('agent-ide.status').refresh()
+end
+
+---Scan the sessions again (e.g. after one was restored from the trash).
+function M.rescan() if S.tab then rescan() end end
 
 ---Re-render the drawer (e.g. after a session changed state); keeps focus and other cursors.
 function M.refresh() render() end

@@ -409,6 +409,20 @@ T['echo mismatch warns once per session'] = function()
   eq(#warns, 1)
 end
 
+T['a prompt with inline and line attachments echoes back without a warning'] = function()
+  local text = require('agent-ide.ui.prompt').text_to_send({ 'Intro, see @a.lua for it.', '', '[attach] my notes.md',
+    'and @"dir ü/b 1.md" here', '```', '[attach] kept', '```' })
+  eq(text, 'Intro, see @a.lua for it.\n\n@"my notes.md"\nand @"dir ü/b 1.md" here\n```\n[attach] kept\n```')
+  script(flat({ expect = 'Intro' }, init(), replay(text), say('a'), result('a')))
+  local s = new()
+  s.visible = true
+  s:send(text)
+  assert(wait(function() return s.state == 'idle' end))
+  eq(kinds(s.events), { 'prompt', 'text' })
+  eq(s.events[1].text, text)
+  eq(vim.tbl_filter(function(n) return n.level == vim.log.levels.WARN end, notes), {})
+end
+
 T['done when not visible, mark_seen makes it idle; error result gives failed'] = function()
   script(flat(turn('q1', 'a1'), { expect = 'q2' }, init(), replay('q2'), say('API down'), result('API down', true)))
   local s = new()

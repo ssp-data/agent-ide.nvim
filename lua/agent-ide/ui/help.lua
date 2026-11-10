@@ -13,19 +13,27 @@ local function close(w)
 end
 
 ---@param title string
----@param rows {key: string, desc: string}[]
+---@param rows {key: string, desc: string}[] a row `{ heading = text }` is a sub-heading (after a blank line)
 function M.open(title, rows)
   close()
   local width = 0
-  for _, r in ipairs(rows) do width = math.max(width, vim.fn.strdisplaywidth(r.key)) end
+  for _, r in ipairs(rows) do
+    if not r.heading then width = math.max(width, vim.fn.strdisplaywidth(r.key)) end
+  end
   local lines = {}
   for _, r in ipairs(rows) do
-    lines[#lines + 1] = r.key .. string.rep(' ', width - vim.fn.strdisplaywidth(r.key)) .. '  ' .. r.desc
+    if r.heading then
+      if #lines > 0 then lines[#lines + 1] = '' end
+      lines[#lines + 1] = r.heading
+    else
+      lines[#lines + 1] = r.key .. string.rep(' ', width - vim.fn.strdisplaywidth(r.key)) .. '  ' .. r.desc
+    end
   end
   local w = vim.fn.strdisplaywidth(title) + 2
   for _, l in ipairs(lines) do w = math.max(w, vim.fn.strdisplaywidth(l)) end
 
   local buf = api.nvim_create_buf(false, true)
+  require('agent-ide.ui.bufname').set(buf, 'agents://help')
   api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.bo[buf].modifiable = false
   vim.bo[buf].bufhidden = 'wipe'

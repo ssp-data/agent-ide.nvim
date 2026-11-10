@@ -155,7 +155,7 @@ function M.run_open(dir, backend, expected)
   local ok = vim.wait(120000, function()
     local w = require('agent-ide.ui.chat')._windows().transcript
     local buf = w and vim.api.nvim_win_get_buf(w)
-    return buf ~= nil and vim.api.nvim_buf_get_name(buf) == 'agent-ide://chat/' .. best.id
+    return buf ~= nil and vim.b[buf].agent_ide_kind == 'chat' and vim.b[buf].agent_ide_session == best.id
       and vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] ~= 'Loading…'
   end, 1)
   r.history = ms(t0)
@@ -173,6 +173,39 @@ function M.run_block(dir, backend, expected)
   require('agent-ide').toggle()
   wait_projects(expected, 'cold block')
   return stop()
+end
+
+---Fresh child: project scope on one of the projects. A re-render of the drawer in each scope
+---(best of 20) and a warm reopen in project scope.
+---@return { all_render: number, project_render: number, warm: number }
+function M.run_scoped(dir, backend, expected)
+  setup(dir, backend)
+  local drawer = require('agent-ide.ui.drawer')
+  require('agent-ide').toggle()
+  wait_projects(expected, 'all scope')
+  local function render_ms()
+    local best = math.huge
+    for _ = 1, 20 do
+      local t0 = vim.uv.hrtime()
+      drawer.refresh()
+      best = math.min(best, ms(t0))
+    end
+    return best
+  end
+  local r = { all_render = render_ms() }
+  drawer.set_scope('project', { key = '/home/u/synthetic/proj01', name = 'proj01' })
+  local function scoped()
+    local s = drawer.state()
+    return s.buf ~= nil and vim.api.nvim_buf_get_lines(s.buf, 0, -1, false)[1]:find('^proj01') ~= nil
+  end
+  if not scoped() then error('drawer not in project scope') end
+  r.project_render = render_ms()
+  require('agent-ide').toggle() -- close the drawer
+  local t0 = vim.uv.hrtime()
+  require('agent-ide').toggle()
+  if not vim.wait(120000, scoped, 1) then error('timed out waiting for the project scope') end
+  r.warm = ms(t0)
+  return r
 end
 
 ---Number of project rows the drawer should show for `dir` (Lua scan, run in a child).

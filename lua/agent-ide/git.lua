@@ -278,6 +278,45 @@ function M.show(root, rev, path, cb)
   M.run(root, { 'cat-file', 'blob', rev .. ':' .. path }, function(code, out) cb(code == 0 and out or nil) end)
 end
 
+local GRAPH_FORMAT = '--format=%x1e%H%x1f%h%x1f%D%x1f%at%x1f%an%x1f%P%x1f%s'
+
+---The commit graph: `git log --graph --date-order` over every branch, tag and remote (the stash
+---and notes left out) or HEAD only, newest `limit` commits. `cb(res)` with `res.rows` and
+---`res.more` (see git_parse.graph), `res.empty` when there is no commit yet, or `res.error` (the
+---first line of git's message).
+---@param root string
+---@param opts { all: boolean, limit: integer }
+---@param cb fun(res: { rows: table[]|nil, more: boolean|nil, empty: boolean|nil, error: string|nil })
+function M.graph(root, opts, cb)
+  local args = { 'log', '--graph', '--date-order', '--no-color', '--no-show-signature', '--decorate=full', GRAPH_FORMAT,
+    '--max-count=' .. (opts.limit + 1) }
+  vim.list_extend(args, opts.all and { '--exclude=refs/stash', '--exclude=refs/notes/*', '--all' } or { 'HEAD' })
+  vim.list_extend(args, { '--' })
+  M.run(root, args, function(code, out, err)
+    if code == 0 then
+      local rows, more = parse.graph(out, opts.limit)
+      if #rows == 0 then return cb({ empty = true }) end
+      return cb({ rows = rows, more = more })
+    end
+    local msg = parse.line(err) ~= '' and parse.line(err) or ('git log failed (' .. code .. ')')
+    -- an unborn branch (whatever the language of git's message): a repository without HEAD
+    all(root, { { 'rev-parse', '--git-dir' }, { 'rev-parse', '-q', '--verify', 'HEAD' } }, function(r)
+      if r[1].code == 0 and r[2].code ~= 0 then return cb({ empty = true }) end
+      cb({ error = msg })
+    end)
+  end)
+end
+
+---Whether `dir` is inside a git work tree: `cb(top)` with its top level, nil when not.
+---@param dir string
+---@param cb fun(top: string|nil)
+function M.toplevel(dir, cb)
+  M.run(dir, { 'rev-parse', '--show-toplevel' }, function(code, out)
+    local top = code == 0 and parse.line(out) or ''
+    cb(top ~= '' and top or nil)
+  end)
+end
+
 ---Current branch name, or the short hash of a detached HEAD.
 ---@param root string
 ---@param cb fun(branch: string|nil)

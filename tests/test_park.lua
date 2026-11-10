@@ -96,7 +96,12 @@ end
 local function transcript()
   return child.lua_get('vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().transcript), 0, -1, false)')
 end
-local function winbar() return child.lua_get('vim.wo[require("agent-ide.ui.chat")._windows().transcript].winbar') end
+-- The transcript's winbar as text: highlight groups dropped, the right-align gap `%=` as two
+-- spaces, `%%` as `%`.
+local function winbar()
+  local bar = child.lua_get('vim.wo[require("agent-ide.ui.chat")._windows().transcript].winbar')
+  return (bar:gsub('%%#[^#]*#', ''):gsub('%%%*', ''):gsub('%%=', '  '):gsub('%%%%', '%%'))
+end
 local function sess()
   return child.lua_get('(function(id) local s = require("agent-ide.session").get(id); return { state = s.state, owned = s.owned, queue = #s.queue } end)(...)', { FIXTURE_ID })
 end
@@ -141,7 +146,7 @@ T['<leader>ax parks: process stopped, transcript stays, parked shown; the next s
   wait_for(function() return sess().state == 'parked' end, 'parked')
   eq(sess().owned, false)
   eq(transcript(), before)
-  wait_for(function() return winbar():find('· parked', 1, true) ~= nil end, 'winbar parked')
+  wait_for(function() return vim.startswith(winbar(), '. parked · ') ~= nil end, 'winbar parked')
   wait_for(function() return has_line(drawer_lines(), '. Alpha basics') ~= nil end, 'drawer parked')
   -- until the next poll the live list may still show the process we stopped: still parked
   eq(child.lua_get([[(function(id)

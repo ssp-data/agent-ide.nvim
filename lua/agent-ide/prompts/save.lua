@@ -240,10 +240,11 @@ function M.attach(buf)
     local ok, err = pcall(M.save, ev.buf, true, true)
     if not ok then failed(err) end
   end })
-  -- `:file name` / `:saveas name` would make it a file buffer: the name is put back
-  local name = api.nvim_buf_get_name(buf)
+  -- `:file name` / `:saveas name` would make it a file buffer: the name is put back (the one the
+  -- plugin gave it, ui/bufname.lua, which follows the session's title)
   api.nvim_create_autocmd('BufFilePost', { buffer = buf, callback = function(ev)
-    if api.nvim_buf_get_name(ev.buf) == name then return end
+    local name = vim.b[ev.buf].agent_ide_name or ''
+    if name == '' or api.nvim_buf_get_name(ev.buf) == name then return end
     -- the old name went to a new alternate buffer; drop it so the name is free again
     local other = vim.fn.bufnr('^' .. vim.fn.escape(name, '\\/.*$^~[]') .. '$')
     if other > 0 and other ~= ev.buf then pcall(api.nvim_buf_delete, other, { force = true }) end

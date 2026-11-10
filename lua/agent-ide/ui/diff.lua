@@ -139,13 +139,14 @@ local function apply(left_raw, right_raw, keep_cursor)
   diffoff(D.left)
   diffoff(D.right)
   local l_rev = D.mode == 'commit' and (D.commit.short .. '^') or (D.base and D.base.rev and D.base.rev:sub(1, 7) or 'empty')
-  local lbuf = scratch.get(l_rev, f.old_path or f.path, note and { note } or left_lines or {})
+  local proj = { name = D.project and D.project.name or vim.fs.basename(D.root), root = D.root }
+  local lbuf = scratch.get(l_rev, f.old_path or f.path, note and { note } or left_lines or {}, proj)
   local rbuf, real
   if type(right) == 'number' and not note then
     rbuf, real = right, right
   else
     local r_rev = D.mode == 'commit' and D.commit.short or 'worktree'
-    rbuf = scratch.get(r_rev, f.path, note and { note } or (type(right) == 'table' and right) or {})
+    rbuf = scratch.get(r_rev, f.path, note and { note } or (type(right) == 'table' and right) or {}, proj)
   end
   if D.real and D.real ~= real then release_real(D, true) end
   local prev_bar = api.nvim_get_option_value('winbar', { scope = 'local', win = D.right })

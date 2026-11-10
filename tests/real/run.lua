@@ -621,7 +621,7 @@ end)
 check(13, 'raw view (gr) holds the sent prompt line byte-exact', function()
   child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.chat")._windows().transcript)')
   child.type_keys('gr')
-  wait_for(function() return get('vim.api.nvim_buf_get_name(0)'):find('agent-ide://raw/', 1, true) ~= nil end, 'raw view')
+  wait_for(function() return get('vim.b.agent_ide_kind') == 'raw' end, 'raw view')
   local sent = get([[(function()
     for _, e in ipairs(R.s().raw) do
       if e.dir == 'out' and e.line:find('"type":"user"', 1, true) then return e.line end

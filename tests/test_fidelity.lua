@@ -107,7 +107,7 @@ end
 local function send(text) child.lua('assert(_G.S:send(...))', { text }) end
 local function state() return child.lua_get('_G.S.state') end
 local function cur_lines() return child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)') end
-local function cur_name() return child.lua_get('vim.api.nvim_buf_get_name(0)') end
+local function cur_name() return child.lua_get('(vim.b[0].agent_ide_kind or "") .. "/" .. (vim.b[0].agent_ide_session or "")') end
 local function cur_row() return child.lua_get('vim.api.nvim_win_get_cursor(0)[1]') end
 local function transcript()
   return child.lua_get('vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().transcript), 0, -1, false)')
@@ -140,7 +140,7 @@ T['raw view lists every line sent and received, in order, byte-exact'] = functio
   wait_for(function() return state() == 'idle' end, 'turn end')
   local transcript_win = child.lua_get('vim.api.nvim_get_current_win()')
   child.type_keys('gr')
-  eq(cur_name():sub(-#('agent-ide://raw/' .. id)), 'agent-ide://raw/' .. id)
+  eq(cur_name(), 'raw/' .. id)
   local sent = fake_ins()
   eq(#sent, 1)
   eq(cur_lines(), { '>> ' .. sent[1], '<< ' .. INIT, '<< ' .. SAY, '<< ' .. RESULT })
@@ -150,13 +150,13 @@ T['raw view lists every line sent and received, in order, byte-exact'] = functio
   -- q returns to the chat transcript, in the same window
   child.type_keys('q')
   eq(child.lua_get('vim.api.nvim_get_current_win()'), transcript_win)
-  eq(cur_name():sub(-#('agent-ide://chat/' .. id)), 'agent-ide://chat/' .. id)
+  eq(cur_name(), 'chat/' .. id)
   eq(has_line(transcript(), 'Hi there ü') ~= nil, true)
   -- gr again from the raw view returns too
   child.type_keys('gr')
   eq(child.lua_get('vim.bo.buftype'), 'nofile')
   child.type_keys('gr')
-  eq(cur_name():sub(-#('agent-ide://chat/' .. id)), 'agent-ide://chat/' .. id)
+  eq(cur_name(), 'chat/' .. id)
 end
 
 T['raw view updates while open; the cursor follows only from the last line'] = function()
@@ -248,7 +248,7 @@ T['unknown objects and garbage lines are folds in the transcript and << lines in
   -- gR on the second unknown fold lands on its raw line
   child.lua('vim.api.nvim_win_set_cursor(0, { ..., 0 })', { second })
   child.type_keys('gR')
-  eq(cur_name():find('agent-ide://raw/', 1, true) ~= nil, true)
+  eq(vim.startswith(cur_name(), 'raw/'), true)
   eq(cur_row(), m2)
   child.type_keys('q')
   -- on the first one
@@ -259,7 +259,7 @@ T['unknown objects and garbage lines are folds in the transcript and << lines in
   -- on a line that is not an unknown fold: the raw view opens, at its end
   child.lua('vim.api.nvim_win_set_cursor(0, { 1, 0 })')
   child.type_keys('gR')
-  eq(cur_name():find('agent-ide://raw/', 1, true) ~= nil, true)
+  eq(vim.startswith(cur_name(), 'raw/'), true)
   eq(cur_row(), #cur_lines())
 end
 

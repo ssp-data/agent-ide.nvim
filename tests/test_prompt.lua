@@ -17,6 +17,8 @@ local T = MiniTest.new_set({ hooks = {
     vim.fn.writefile({ 'a' }, repo .. '/a.lua')
     vim.fn.writefile({ 'b' }, repo .. '/sub/b.lua')
     vim.fn.writefile({ 'n' }, repo .. '/node_modules/x/n.js')
+    -- command lists another case left in the runner's temporary state folder
+    vim.fn.delete(vim.fn.stdpath('state') .. '/agent-ide/commands.json')
   end,
   post_case = function()
     child.stop()
@@ -40,7 +42,8 @@ local function start(opts)
     _G.notes = {}
     vim.notify = function(msg) table.insert(_G.notes, msg) end
     opts = vim.tbl_deep_extend('force', { projects_dir = repo .. '/none', helper = { enabled = false },
-      live = { interval_ms = 50, cmd = { 'echo', '[]' } }, claude = { cmd = { 'false' } } }, opts)
+      live = { interval_ms = 50, cmd = { 'echo', '[]' } }, claude = { cmd = { 'false' } },
+      prompts = { command_dirs = {}, skill_dirs = {}, project_dirs = false } }, opts)
     require('agent-ide').setup(opts)
     require('agent-ide').toggle()
     local s = require('agent-ide.session').open({ cwd = repo })
@@ -131,9 +134,175 @@ T['no commands yet: the plugin entries, a one-time hint; a new session offers th
   eq(child.lua_get('_G.notes'), { 'Agent-IDE: commands are known after the first answer in a session' })
   -- a session in the same folder reported its commands: offered here too
   child.type_keys('<Esc>')
-  child.lua([[require('agent-ide.session')._commands_seen[require('agent-ide.session').all()[1].cwd] = { 'compact' }]])
+  child.lua([[require('agent-ide.session.commands').record(require('agent-ide.session').all()[1].cwd, { 'compact' })]])
   child.type_keys('S', '/')
   eq(child.lua_get(WORDS, { '/' }), { '/copy', '/model', '/compact' })
+end
+
+-- The `/` menu before a session's first turn (session/commands.lua) -------------------------------
+
+local function state_file() return child.lua_get("vim.fn.stdpath('state') .. '/agent-ide/commands.json'") end
+
+-- Write commands.json in the child: `lists` maps a folder to { at, commands }.
+local function write_lists(lists)
+  child.lua([[
+    local c = require('agent-ide.session.commands')
+    local projects = {}
+    for cwd, e in pairs(...) do projects[c.key_of(cwd)] = e end
+    require('agent-ide.util.jsonfile').write(vim.fn.stdpath('state') .. '/agent-ide/commands.json', { version = 1, projects = projects })
+  ]], { lists })
+end
+
+local function read_json(path)
+  local f = io.open(path, 'rb')
+  if not f then return nil end
+  local t = f:read('a')
+  f:close()
+  local ok, v = pcall(vim.json.decode, t)
+  return ok and v or nil
+end
+
+local function menu_of(cwd)
+  return child.lua_get([[vim.tbl_map(function(i) return i.word end,
+    require('agent-ide.ui.prompt').matches(require('agent-ide.session').open({ cwd = ... }), '/'))]], { cwd })
+end
+
+local function wait_words(want)
+  wait_for(function() return vim.deep_equal(child.lua_get(WORDS, { '/' }), want) end,
+    'menu ' .. table.concat(want, ' '))
+end
+
+T['menu before the first turn: the persisted list of the project, else the newest of any project'] = function()
+  local other, third = tmp .. '/other', tmp .. '/third'
+  vim.fn.mkdir(other, 'p')
+  vim.fn.mkdir(third, 'p')
+  vim.fn.delete(vim.fn.stdpath('state') .. '/agent-ide/commands.json')
+  start()
+  write_lists({ [repo] = { at = 100, commands = { 'compact', 'context' } }, [other] = { at = 200, commands = { 'review' } } })
+  start() -- read at setup, after a restart
+  child.type_keys('i')
+  wait_words({ '/copy', '/model', '/compact', '/context' })
+  eq(child.lua_get('_G.notes'), {})
+  -- no list for this project: the most recent one of any project
+  eq(menu_of(third), { '/copy', '/model', '/review' })
+  -- the session's own list replaces the fallback
+  child.lua("require('agent-ide.session').all()[1].slash_commands = { 'memory' }")
+  eq(child.lua_get(WORDS, { '/' }), { '/copy', '/model', '/memory' })
+end
+
+T['menu: commands and skills found on disk join, de-duplicated; plugin entries first'] = function()
+  vim.fn.delete(vim.fn.stdpath('state') .. '/agent-ide/commands.json')
+  local cmds, skills = tmp .. '/cmds', tmp .. '/skills'
+  vim.fn.mkdir(cmds .. '/git', 'p')
+  vim.fn.mkdir(skills .. '/deploy', 'p')
+  vim.fn.writefile({ '# Review' }, cmds .. '/review.md')
+  vim.fn.writefile({ 'commit it' }, cmds .. '/git/commit.md')
+  vim.fn.writefile({ '---', 'name: deploy', 'description: ship it', '---', 'x' }, skills .. '/deploy/SKILL.md')
+  start({ prompts = { command_dirs = { cmds }, skill_dirs = { skills } } })
+  child.type_keys('i')
+  -- no list from Claude anywhere: the plugin's entries and what was found
+  wait_words({ '/copy', '/model', '/deploy', '/git:commit', '/review' })
+  local items = child.lua_get("require('agent-ide.ui.prompt').complete(0, '/').words")
+  eq(items[3].kind, '')
+  -- Claude's list and the found ones: each name once
+  child.lua("require('agent-ide.session').all()[1].slash_commands = { 'review', 'compact' }")
+  eq(child.lua_get(WORDS, { '/' }), { '/copy', '/model', '/compact', '/deploy', '/git:commit', '/review' })
+end
+
+T['commands.json: written on a changed list only, 0600 in 0700, at most 50 projects, a corrupt file is ignored'] = function()
+  vim.fn.delete(vim.fn.stdpath('state') .. '/agent-ide/commands.json')
+  start()
+  local file = state_file()
+  -- through Claude's init event
+  child.lua([[
+    local s = require('agent-ide.session').all()[1]
+    require('agent-ide.session.actions').handle(s, { type = 'init', model = 'm', mode = 'default', slash_commands = { 'compact', 'context' } })
+  ]])
+  wait_for(function() return vim.uv.fs_stat(file) ~= nil end, 'file written')
+  local key = child.lua_get("require('agent-ide.session.commands').key_of(...)", { repo })
+  eq(#key, 16)
+  eq(key:find('/', 1, true), nil) -- not a path
+  eq(read_json(file).projects[key].commands, { 'compact', 'context' })
+  eq(vim.uv.fs_stat(file).mode % 512, 384)
+  eq(vim.uv.fs_stat(vim.fs.dirname(file)).mode % 512, 448)
+  local st = vim.uv.fs_stat(file)
+  -- the same list again: not rewritten
+  child.lua([[
+    local s = require('agent-ide.session').all()[1]
+    require('agent-ide.session.actions').handle(s, { type = 'init', model = 'm', mode = 'default', slash_commands = { 'compact', 'context' } })
+  ]])
+  child.lua('vim.wait(50)')
+  local st2 = vim.uv.fs_stat(file)
+  eq({ st2.ino, st2.mtime.sec, st2.mtime.nsec }, { st.ino, st.mtime.sec, st.mtime.nsec })
+
+  -- 50 projects: a new one drops the oldest
+  local lists = {}
+  for i = 1, 50 do lists[tmp .. '/p' .. i] = { at = 1000 + i, commands = { 'c' .. i } } end
+  write_lists(lists)
+  child.lua("require('agent-ide.session.commands')._reset(); require('agent-ide.session.commands').load(function() _G.loaded = true end)")
+  wait_for(function() return child.lua_get('_G.loaded == true') end, 'loaded')
+  child.lua("require('agent-ide.session.commands').record(..., { 'newest' })", { tmp .. '/p51' })
+  wait_for(function()
+    local t = read_json(file)
+    return t and t.projects[child.lua_get("require('agent-ide.session.commands').key_of(...)", { tmp .. '/p51' })] ~= nil
+  end, 'newest written')
+  local t = read_json(file)
+  eq(vim.tbl_count(t.projects), 50)
+  eq(t.projects[child.lua_get("require('agent-ide.session.commands').key_of(...)", { tmp .. '/p1' })], nil)
+  eq(t.projects[child.lua_get("require('agent-ide.session.commands').key_of(...)", { tmp .. '/p2' })].commands, { 'c2' })
+
+  -- corrupt: nothing known, no error, replaced on the next list
+  local f = io.open(file, 'w')
+  f:write('{"version":1,"projects":')
+  f:close()
+  start()
+  child.type_keys('i')
+  child.lua('vim.wait(100)')
+  eq(child.lua_get(WORDS, { '/' }), { '/copy', '/model' })
+  child.lua("require('agent-ide.session.commands').record(..., { 'compact' })", { repo })
+  wait_for(function() local x = read_json(file); return x ~= nil and x.version == 1 end, 'rewritten')
+end
+
+T['menu entries for 1000 commands build within 5 ms'] = function()
+  start()
+  child.lua([[
+    local list = {}
+    for i = 1, 1000 do list[i] = ('command-%04d'):format(i) end
+    require('agent-ide.session').all()[1].slash_commands = list
+  ]])
+  child.type_keys('i')
+  local ms = child.lua_get([[(function()
+    local P, s = require('agent-ide.ui.prompt'), require('agent-ide.session').all()[1]
+    P.matches(s, '/') -- warm
+    collectgarbage('collect')
+    local best = math.huge
+    for _ = 1, 5 do
+      local t0 = vim.uv.hrtime()
+      P.matches(s, '/')
+      P.matches(s, '/cmd5')
+      best = math.min(best, (vim.uv.hrtime() - t0) / 1e6 / 2)
+    end
+    return best
+  end)()]])
+  eq(ms < 5, true)
+end
+
+T['the / menu leaves the global completeopt alone, also with a local value'] = function()
+  start()
+  child.lua("vim.go.completeopt = 'menu,preview'")
+  child.lua("require('agent-ide.session').all()[1].slash_commands = { 'compact' }")
+  child.lua("_G.sets = 0; vim.api.nvim_create_autocmd('OptionSet', { pattern = 'completeopt', callback = function() if vim.v.option_type == 'global' then _G.sets = _G.sets + 1 end end })")
+  child.type_keys('i', '/')
+  eq(child.lua_get('vim.fn.pumvisible()'), 1)
+  child.type_keys('<Esc>')
+  eq(child.lua_get('vim.go.completeopt'), 'menu,preview')
+  child.lua("vim.bo.completeopt = 'menuone'")
+  child.type_keys('cc', '/')
+  eq(child.lua_get('vim.fn.pumvisible()'), 1)
+  child.type_keys('<Esc>')
+  eq(child.lua_get('vim.go.completeopt'), 'menu,preview')
+  eq(child.lua_get('vim.bo.completeopt'), 'menuone')
+  eq(child.lua_get('_G.sets'), 0)
 end
 
 T['/copy and /model: chosen from the menu or sent alone, the plugin acts and nothing is sent'] = function()
@@ -218,6 +387,49 @@ T['typing / opens the menu with nothing inserted; typing narrows it; completeopt
   eq(child.lua_get('vim.fn.pumvisible()'), 0)
 end
 
+T['/ in a burst of input (fast typing, a macro, `.`): literal after text, the menu only on an empty line'] = function()
+  start()
+  child.lua("require('agent-ide.session').all()[1].slash_commands = { 'compact', 'context', 'memory' }")
+  local function line() return child.lua_get('vim.api.nvim_get_current_line()') end
+  local function pum() return child.lua_get('vim.fn.pumvisible()') end
+  -- one burst each: the characters before `/` are in the line when `/` is judged, so the menu
+  -- is not prepared at all (no local completeopt, a completion plugin's menu left alone)
+  child.lua("_G.closed = 0; package.loaded.cmp = { visible = function() return false end, close = function() _G.closed = _G.closed + 1 end }")
+  local function untouched() return { child.lua_get('vim.bo.completeopt'), child.lua_get('_G.closed') } end
+  child.type_keys('i')
+  child.type_keys('x/')
+  eq({ line(), pum() }, { 'x/', 0 })
+  eq(untouched(), { '', 0 })
+  child.type_keys('<Esc>', 'cc')
+  child.type_keys('path/to')
+  eq({ line(), pum() }, { 'path/to', 0 })
+  eq(untouched(), { '', 0 })
+  child.lua('package.loaded.cmp = nil')
+  -- `/` alone on an empty line, also at the end of a burst
+  child.type_keys('<Esc>', 'cc')
+  child.type_keys('/')
+  eq({ line(), pum() }, { '/', 1 })
+  eq(child.lua_get('vim.fn.complete_info({ "selected" }).selected'), -1)
+  child.type_keys('<Esc>', 'cc')
+  child.type_keys('/co')
+  wait_for(function() return pum() == 1 end, 'menu after a burst')
+  eq(line(), '/co')
+  -- a macro: recorded and replayed, `a/b` stays literal
+  child.type_keys('<Esc>', 'cc', '<Esc>')
+  child.type_keys('qq', 'ia/b', '<Esc>', 'q')
+  eq(line(), 'a/b')
+  child.type_keys('o', '<Esc>', '@q')
+  eq(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), { 'a/b', 'a/b' })
+  eq(pum(), 0)
+  -- `.` repeats the insert as typed
+  child.lua('vim.api.nvim_buf_set_lines(0, 0, -1, false, { "" })')
+  child.type_keys('ia/b', '<Esc>')
+  child.lua('vim.api.nvim_buf_set_lines(0, 0, -1, false, { "a/b", "" }); vim.api.nvim_win_set_cursor(0, { 2, 0 })')
+  child.type_keys('.')
+  eq(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)')[2], 'a/b')
+  eq(pum(), 0)
+end
+
 -- history ---------------------------------------------------------------------------------------
 
 local function history_events()
@@ -252,6 +464,27 @@ T['history steps back and forward, keeps the draft'] = function()
   eq(lines_of('prompt'), { 'draft' })
 end
 
+T['history holds the session\'s own prompts only, in project scope and in all'] = function()
+  start()
+  set_events({ { kind = 'prompt', text = 'mine' } })
+  -- another session of another project, with prompts of its own
+  child.lua([[
+    local o = require('agent-ide.session').open({ cwd = '/elsewhere/other' })
+    o.events = { { kind = 'prompt', text = 'theirs' } }
+    o.queue = { 'their queue' }
+  ]])
+  for _, k in ipairs({ 'project', 'all' }) do
+    child.lua('require("agent-ide.scope").set(...)', { k })
+    child.type_keys('<Esc>')
+    child.lua('vim.api.nvim_buf_set_lines(0, 0, -1, false, { "" })')
+    child.type_keys('<C-p>')
+    eq(lines_of('prompt'), { 'mine' })
+    child.type_keys('<C-p>')
+    eq(lines_of('prompt'), { 'mine' })
+    child.type_keys('<C-n>')
+  end
+end
+
 T['history in insert mode only when the menu is closed and at the first/last line'] = function()
   start()
   -- keyword completion looks in this buffer only (not in every buffer of the child)
@@ -274,6 +507,67 @@ T['history in insert mode only when the menu is closed and at the first/last lin
   wait_for(function() return pum() == 0 end, 'no menu after the step')
   child.type_keys('<C-n>')
   wait_for(function() return vim.deep_equal(lines_of('prompt'), { 'a', 'b' }) end, 'history step forward')
+end
+
+T['insert-mode arrows step the history on the first/last line only, keep the draft, yield to a menu'] = function()
+  start()
+  -- keyword completion looks in this buffer only (not in every buffer of the child)
+  child.lua("vim.o.complete = '.'")
+  set_events({ { kind = 'prompt', text = 'one' }, { kind = 'prompt', text = 'two\nlines' } })
+  local function mode() return child.lua_get('vim.api.nvim_get_mode().mode') end
+  local function pum() return child.lua_get('vim.fn.pumvisible()') end
+  local function cur() return child.lua_get('vim.api.nvim_win_get_cursor(0)') end
+  child.type_keys('i', 'draft a', '<CR>', 'draft b', '<CR>', 'draft c')
+  wait_for(function() return mode() == 'i' and pum() == 0 end, 'insert mode, no menu')
+  -- not on the first line: the cursor moves
+  child.type_keys('<Up>')
+  eq(cur(), { 2, 7 })
+  eq(lines_of('prompt'), { 'draft a', 'draft b', 'draft c' })
+  child.type_keys('<Up>')
+  eq(cur(), { 1, 7 })
+  -- first line: older prompt, still in insert mode
+  child.type_keys('<Up>')
+  wait_for(function() return vim.deep_equal(lines_of('prompt'), { 'two', 'lines' }) end, 'step back')
+  eq(mode(), 'i')
+  eq(cur(), { 1, 3 })
+  child.type_keys('<Up>')
+  wait_for(function() return vim.deep_equal(lines_of('prompt'), { 'one' }) end, 'step back again')
+  child.type_keys('<Up>') -- oldest: native, nothing changes
+  eq(lines_of('prompt'), { 'one' })
+  -- last line: newer prompt, the cursor on its last line
+  child.type_keys('<Down>')
+  wait_for(function() return vim.deep_equal(lines_of('prompt'), { 'two', 'lines' }) end, 'step forward')
+  eq(cur(), { 2, 5 })
+  -- past the newest: the draft comes back, the cursor on its last line
+  child.type_keys('<Down>')
+  wait_for(function() return vim.deep_equal(lines_of('prompt'), { 'draft a', 'draft b', 'draft c' }) end, 'draft back')
+  eq(cur(), { 3, 7 })
+  eq(mode(), 'i')
+  -- on the last line of the draft with nothing newer: native (no change)
+  child.type_keys('<Down>')
+  eq(lines_of('prompt'), { 'draft a', 'draft b', 'draft c' })
+
+  -- a completion menu is open on the first line: <Up> moves in the menu, no history step
+  child.type_keys('<Esc>')
+  wait_for(function() return mode() == 'n' end, 'normal mode')
+  child.lua("vim.o.completeopt = 'menuone'") -- a menu for the one match
+  child.type_keys('gg', 'A', ' dr')
+  wait_for(function() return mode() == 'i' and pum() == 0 end, 'insert mode on the first line')
+  child.type_keys('<C-n>') -- native on the first line (no newer entry): keyword completion
+  wait_for(function() return pum() == 1 end, 'keyword menu')
+  child.type_keys('<Up>')
+  eq(pum(), 1)
+  eq(child.lua_get('vim.api.nvim_buf_line_count(0)'), 3)
+  eq(child.lua_get('vim.api.nvim_buf_get_lines(0, 1, -1, false)'), { 'draft b', 'draft c' })
+  child.type_keys('<C-e>')
+  wait_for(function() return pum() == 0 end, 'menu closed')
+  -- a plugin's menu: the arrow goes through as well
+  child.lua("package.loaded.cmp = { visible = function() return true end }")
+  child.type_keys('<Up>')
+  eq(lines_of('prompt'), { 'draft a dr', 'draft b', 'draft c' })
+  child.lua("package.loaded.cmp = nil")
+  child.type_keys('<Up>')
+  wait_for(function() return vim.deep_equal(lines_of('prompt'), { 'two', 'lines' }) end, 'step back after the menu')
 end
 
 T['insert-mode history keys keep their native action when no step is possible or a plugin menu is open'] = function()
@@ -323,17 +617,300 @@ local function stub_select(choice_index)
   ]], { choice_index or vim.NIL })
 end
 
-T['@ after whitespace inserts an [attach] line above and leaves the cursor in place'] = function()
+-- vim.ui.select that picks the item `name` (nil: cancels), at once.
+local function stub_pick(name)
+  child.lua([[
+    local name = ...
+    _G.offered = nil
+    vim.ui.select = function(items, _, on_choice)
+      _G.offered = items
+      on_choice(name ~= vim.NIL and name or nil)
+    end
+  ]], { name or vim.NIL })
+end
+
+-- vim.ui.select that answers later: `_G.answer(name|nil)` chooses on a later tick. With
+-- `normal`, it leaves insert mode first, as a picker in its own window does.
+local function stub_async(normal)
+  child.lua([[
+    local normal = ...
+    _G.offered, _G.answer = nil, nil
+    vim.ui.select = function(items, _, on_choice)
+      _G.offered = items
+      if normal then vim.cmd('stopinsert') end
+      _G.answer = function(name) vim.schedule(function() on_choice(name) end) end
+    end
+  ]], { normal or false })
+end
+
+local function cursor() return child.lua_get('vim.api.nvim_win_get_cursor(0)') end
+local function mode() return child.lua_get('vim.api.nvim_get_mode().mode') end
+local function sent() return child.lua_get('require("agent-ide.ui.prompt").text_to_send(vim.api.nvim_buf_get_lines(0, 0, -1, false))') end
+local function pick_marks()
+  return child.lua_get([[#vim.api.nvim_buf_get_extmarks(0, vim.api.nvim_get_namespaces()['agent-ide.prompt.pick'], 0, -1, {})]])
+end
+
+-- Prompt text `lines`, then insert mode with the cursor before byte `col` (0-based) of `row`.
+local function edit_at(lines, row, col)
+  child.type_keys('<Esc>')
+  child.lua([[
+    local lines, row, col = ...
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, lines)
+    vim.api.nvim_win_set_cursor(0, { row, col })
+  ]], { lines, row, col })
+  -- normal mode cannot stand past the last byte: append there instead
+  child.type_keys((col > 0 and col >= #lines[row]) and 'A' or 'i')
+end
+
+local function article()
+  local l = {}
+  for i = 1, 30 do l[i] = ('Line %d of a long article, with a few words.'):format(i) end
+  l[17] = 'Here we look at the parser and its tests.'
+  l[10], l[20] = '', ''
+  return l
+end
+
+T['@ mid-sentence inserts the reference inline at that byte, cursor after it in insert mode'] = function()
+  start()
+  stub_pick('a.lua')
+  local text = article()
+  local col = #'Here we look at '
+  edit_at(text, 17, col)
+  child.type_keys('@')
+  local want = vim.deepcopy(text)
+  want[17] = 'Here we look at @a.lua the parser and its tests.'
+  wait_for(function() return vim.deep_equal(lines_of('prompt'), want) end, 'inline reference')
+  eq(cursor(), { 17, col + #'@a.lua ' })
+  eq(mode(), 'i')
+  eq(pick_marks(), 0)
+  child.type_keys('x')
+  want[17] = 'Here we look at @a.lua xthe parser and its tests.'
+  eq(lines_of('prompt'), want)
+  -- sent in place, every other line byte for byte
+  eq(sent(), table.concat(want, '\n'))
+end
+
+T['@ at the end of a line, at column 0 of text, after multi-byte text'] = function()
+  start()
+  stub_pick('sub/b.lua')
+  edit_at({ 'look ' }, 1, 5)
+  child.type_keys('@')
+  wait_for(function() return lines_of('prompt')[1] == 'look @sub/b.lua ' end, 'reference at the end')
+  eq(cursor(), { 1, #'look @sub/b.lua ' })
+  child.type_keys('rest')
+  eq(lines_of('prompt'), { 'look @sub/b.lua rest' })
+
+  -- column 0 of a line with text: inline; a space already after the spot is not doubled
+  edit_at({ 'first', 'tail' }, 2, 0)
+  child.type_keys('@')
+  wait_for(function() return lines_of('prompt')[2] == '@sub/b.lua tail' end, 'reference at column 0')
+  eq(cursor(), { 2, #'@sub/b.lua ' })
+  edit_at({ 'a  b' }, 1, 2)
+  child.type_keys('@')
+  wait_for(function() return lines_of('prompt')[1] == 'a @sub/b.lua b' end, 'no double space')
+  eq(cursor(), { 1, #'a @sub/b.lua ' })
+
+  -- umlauts and an emoji before the cursor: byte columns
+  local before = 'Grüße 🎉 und ä '
+  edit_at({ before .. 'Ende' }, 1, #before)
+  child.type_keys('@')
+  wait_for(function() return lines_of('prompt')[1] == before .. '@sub/b.lua Ende' end, 'after multi-byte text')
+  eq(cursor(), { 1, #before + #'@sub/b.lua ' })
+  child.type_keys('ö')
+  eq(lines_of('prompt'), { before .. '@sub/b.lua öEnde' })
+end
+
+T['@ on an empty line between paragraphs adds an [attach] line there'] = function()
+  start()
+  stub_pick('a.lua')
+  edit_at({ 'para one', '', 'para two' }, 2, 0)
+  child.type_keys('@')
+  wait_for(function() return #lines_of('prompt') == 4 end, 'attach line')
+  eq(lines_of('prompt'), { 'para one', '[attach] a.lua', '', 'para two' })
+  eq(cursor(), { 3, 0 })
+  eq(mode(), 'i')
+  eq(sent(), 'para one\n@a.lua\n\npara two')
+end
+
+T['three attachments keep their places and order when sent'] = function()
+  vim.fn.writefile({ '' }, repo .. '/my notes.md')
+  start()
+  local text = article()
+  edit_at(text, 10, 0) -- the empty line 10
+  stub_pick('sub/b.lua')
+  child.type_keys('@')
+  wait_for(function() return #lines_of('prompt') == 31 end, 'first')
+  child.type_keys('<Esc>')
+  -- line 17 is now 18
+  edit_at(lines_of('prompt'), 18, #'Here we look at ')
+  stub_pick('my notes.md')
+  child.type_keys('@')
+  wait_for(function() return lines_of('prompt')[18]:find('notes') ~= nil end, 'second')
+  child.type_keys('<Esc>')
+  local l3 = lines_of('prompt')[3]
+  edit_at(lines_of('prompt'), 3, #l3)
+  stub_pick('a.lua')
+  child.type_keys(' ', '@')
+  wait_for(function() return lines_of('prompt')[3]:find('a.lua') ~= nil end, 'third')
+  local want = vim.deepcopy(text)
+  table.insert(want, 10, '[attach] sub/b.lua')
+  want[18] = 'Here we look at @"my notes.md" the parser and its tests.'
+  want[3] = text[3] .. ' @a.lua '
+  eq(lines_of('prompt'), want)
+  local out = vim.deepcopy(want)
+  out[10] = '@sub/b.lua'
+  eq(sent(), table.concat(out, '\n'))
+end
+
+T['a late picker answer lands at the original spot after the cursor moved and text was typed'] = function()
+  start()
+  stub_async(false)
+  edit_at({ 'one', 'see the file', 'three' }, 2, 4)
+  child.type_keys('@')
+  wait_for(function() return child.lua_get('_G.answer ~= nil') end, 'picker open')
+  -- meanwhile: typing at the spot, on another line, and a new line above
+  child.type_keys('new ', '<Esc>', 'gg', 'A', ' more', '<Esc>', 'O', 'top')
+  eq(lines_of('prompt'), { 'top', 'one more', 'see new the file', 'three' })
+  child.lua('_G.answer("a.lua")')
+  wait_for(function() return lines_of('prompt')[3] == 'see @a.lua new the file' end, 'reference at the spot')
+  eq(lines_of('prompt'), { 'top', 'one more', 'see @a.lua new the file', 'three' })
+  -- the user is typing elsewhere: cursor and mode stay
+  eq(cursor(), { 1, 3 })
+  eq(mode(), 'i')
+  eq(pick_marks(), 0)
+
+  -- same on an empty line: the [attach] line goes above it, the typed text stays below
+  edit_at({ 'one', '' }, 2, 0)
+  child.type_keys('@')
+  wait_for(function() return child.lua_get('_G.answer ~= nil') end, 'picker open')
+  child.type_keys('typed', '<Esc>', 'gg', 'A', '!')
+  child.lua('_G.answer("a.lua")')
+  wait_for(function() return #lines_of('prompt') == 3 end, 'attach line')
+  eq(lines_of('prompt'), { 'one!', '[attach] a.lua', 'typed' })
+  eq(cursor(), { 1, 4 })
+end
+
+T['a picker that leaves insert mode: the reference lands and insert mode resumes after it'] = function()
+  start()
+  stub_async(true)
+  edit_at({ 'see the file' }, 1, 4)
+  child.type_keys('@')
+  wait_for(function() return child.lua_get('_G.answer ~= nil') and mode() == 'n' end, 'picker in normal mode')
+  child.lua('_G.answer("a.lua")')
+  wait_for(function() return lines_of('prompt')[1] == 'see @a.lua the file' and mode() == 'i' end, 'insert again')
+  eq(cursor(), { 1, #'see @a.lua ' })
+  child.type_keys('x')
+  eq(lines_of('prompt'), { 'see @a.lua xthe file' })
+
+  -- at the end of the line
+  child.type_keys('<Esc>')
+  edit_at({ 'look ' }, 1, 5)
+  child.type_keys('@')
+  wait_for(function() return child.lua_get('_G.answer ~= nil') and mode() == 'n' end, 'picker in normal mode')
+  child.lua('_G.answer("a.lua")')
+  wait_for(function() return lines_of('prompt')[1] == 'look @a.lua ' and mode() == 'i' end, 'insert at the end')
+  child.type_keys('x')
+  eq(lines_of('prompt'), { 'look @a.lua x' })
+
+  -- cancelled: a literal @ at the spot, insert mode right after it
+  child.type_keys('<Esc>')
+  edit_at({ 'see the file' }, 1, 4)
+  child.type_keys('@')
+  wait_for(function() return child.lua_get('_G.answer ~= nil') and mode() == 'n' end, 'picker in normal mode')
+  child.lua('_G.answer(nil)')
+  wait_for(function() return lines_of('prompt')[1] == 'see @the file' and mode() == 'i' end, 'literal @')
+  eq(cursor(), { 1, 5 })
+  eq(pick_marks(), 0)
+  child.type_keys('x')
+  eq(lines_of('prompt'), { 'see @xthe file' })
+end
+
+T['cancel mid-line leaves the text as typed with a literal @; paths with spaces, unicode and %'] = function()
+  vim.fn.mkdir(repo .. '/dir ü', 'p')
+  vim.fn.writefile({ '' }, repo .. '/dir ü/naïve 🎉.md')
+  vim.fn.writefile({ '' }, repo .. '/100%.txt')
+  vim.fn.writefile({ '' }, repo .. '/größe.md')
+  start()
+  stub_pick(nil)
+  edit_at({ 'see the file' }, 1, 4)
+  child.type_keys('@')
+  wait_for(function() return lines_of('prompt')[1] == 'see @the file' end, 'literal @')
+  eq(cursor(), { 1, 5 })
+  eq(mode(), 'i')
+  eq(pick_marks(), 0)
+
+  local function inline(name)
+    stub_pick(name)
+    child.type_keys('<Esc>')
+    edit_at({ 'a ' }, 1, 2)
+    child.type_keys('@')
+    wait_for(function() return lines_of('prompt')[1] ~= 'a ' end, 'reference ' .. name)
+    return lines_of('prompt')[1]
+  end
+  eq(inline('dir ü/naïve 🎉.md'), 'a @"dir ü/naïve 🎉.md" ')
+  eq(inline('100%.txt'), 'a @100%.txt ')
+  eq(inline('größe.md'), 'a @größe.md ')
+  -- as [attach] lines, sent the same way
+  eq(P.text_to_send({ '[attach] dir ü/naïve 🎉.md', '[attach] 100%.txt', '[attach] größe.md' }),
+    '@"dir ü/naïve 🎉.md"\n@100%.txt\n@größe.md')
+end
+
+T['text_to_send converts [attach] lines in place: nothing moved, blank lines kept'] = function()
+  local lines = { 'intro', '', '[attach] a.lua', 'middle @b.lua text', '', '', '```', '[attach] in/fence', '```',
+    'end', '[attach] my file.md', '', '' }
+  eq(P.text_to_send(lines), 'intro\n\n@a.lua\nmiddle @b.lua text\n\n\n```\n[attach] in/fence\n```\nend\n@"my file.md"')
+end
+
+T['in_fence: the send rule, judged from the lines up to the cursor'] = function()
+  eq(P.in_fence({ 'text' }), false)
+  eq(P.in_fence({ '```python', '@decorator' }), true)
+  eq(P.in_fence({ '```', 'x' }), true)
+  eq(P.in_fence({ '```', 'x', '```', 'after' }), false)
+  eq(P.in_fence({ '```' }), true) -- the fence line itself
+  eq(P.in_fence({ '~~~', '```', 'x' }), true) -- a different fence does not close
+  eq(P.in_fence({ '````', '```', 'x' }), true) -- nor a shorter one
+  eq(P.in_fence({ '  ```', 'x' }), false) -- indented: plain text
+  eq(P.in_fence({ '```', '  ```', 'x' }), true)
+end
+
+T['@ inside a fenced code block types @; outside it, and after a closed fence, the picker opens'] = function()
+  start()
+  stub_pick('a.lua')
+  edit_at({ 'Look:', '```python', 'x = 1', '' }, 4, 0)
+  child.type_keys('@', 'dataclass', '<CR>', 'mail me @', '<CR>', '~~~ @')
+  eq(lines_of('prompt'), { 'Look:', '```python', 'x = 1', '@dataclass', 'mail me @', '~~~ @' })
+  eq(child.lua_get('_G.offered'), vim.NIL)
+  -- a closing fence line: still part of the block
+  child.type_keys('<CR>', '```', '<CR>', 'see @')
+  wait_for(function() return lines_of('prompt')[8] == 'see @a.lua ' end, 'picker after the fence')
+  -- tilde fence, open to the end
+  edit_at({ '~~~', 'a ' }, 2, 2)
+  stub_pick('a.lua')
+  child.type_keys('@')
+  eq(lines_of('prompt'), { '~~~', 'a @' })
+  eq(child.lua_get('_G.offered'), vim.NIL)
+  -- name@host types normally, also as one burst of input (a fast typist, a macro, `.`)
+  edit_at({ 'mail ' }, 1, 5)
+  child.type_keys('name', '@', 'host ')
+  child.type_keys('me@x.org a@')
+  eq(lines_of('prompt'), { 'mail name@host me@x.org a@' })
+  eq(child.lua_get('_G.offered'), vim.NIL)
+  -- a burst ending in ` @`: the picker opens at that spot
+  child.type_keys(' see @')
+  wait_for(function() return lines_of('prompt')[1] == 'mail name@host me@x.org a@ see @a.lua ' end, 'burst')
+  -- in a fence, as a burst
+  edit_at({ '```', '' }, 2, 0)
+  child.type_keys('@deco x @y')
+  eq(lines_of('prompt'), { '```', '@deco x @y' })
+end
+
+T['@ after whitespace in a git work tree offers the tracked and untracked files'] = function()
   git_init()
   start()
   stub_select(1)
   child.type_keys('i', 'look ', '@')
-  wait_for(function() return lines_of('prompt')[1] == '[attach] a.lua' end, 'attach line')
-  eq(lines_of('prompt'), { '[attach] a.lua', 'look ' })
-  eq(child.lua_get('vim.api.nvim_win_get_cursor(0)'), { 2, 5 })
+  wait_for(function() return lines_of('prompt')[1] == 'look @a.lua ' end, 'reference')
   eq(child.lua_get('_G.offered'), { 'a.lua', 'node_modules/x/n.js', 'sub/b.lua' })
-  child.type_keys('rest')
-  eq(lines_of('prompt'), { '[attach] a.lua', 'look rest' })
 end
 
 T['@ in the middle of a word inserts normally; cancel inserts a literal @'] = function()
