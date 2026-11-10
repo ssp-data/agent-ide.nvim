@@ -329,6 +329,24 @@ T[':bd on the scratch side, then the right window; an unsaved real file is never
   eq(child.lua_get('vim.bo[vim.fn.bufnr(...)].modified', { repo .. '/a.lua' }), true)
 end
 
+T['late git results after collapsing the project or closing the tab are harmless'] = function()
+  start()
+  child.lua('require("agent-ide").toggle()')
+  press_on('P r  ')
+  press_on('P r  ') -- collapse again before git answers
+  vim.wait(300)
+  press_on('P r  ')
+  press_on('Changes vs main (5)')
+  press_on('M a.lua')
+  child.lua('vim.cmd("tabclose")') -- the diff's git show is still on its way
+  vim.wait(500)
+  eq(child.lua_get('vim.v.errmsg'), '')
+  eq(child.lua_get('_G.notes'), {})
+  eq(view(), vim.NIL)
+  eq(child.lua_get('vim.fn.tabpagenr("$")'), 1)
+  eq(child.lua_get('vim.tbl_contains(vim.tbl_map(function(w) return vim.wo[w].diff end, vim.api.nvim_list_wins()), true)'), false)
+end
+
 T['the same file open in another tab keeps its own window options'] = function()
   start()
   child.lua('vim.cmd("tabnew " .. vim.fn.fnameescape(...)); vim.wo.foldmethod = "indent"; vim.cmd("tabprevious")', { repo .. '/a.lua' })

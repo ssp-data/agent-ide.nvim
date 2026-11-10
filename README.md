@@ -56,8 +56,27 @@ require('agent-ide').setup({
 | `R` | Rescan sessions and refresh running state |
 | `gp` | Jump to the tmux pane of a running session |
 | `q` | Close the drawer |
+| `gl` | Open lazygit for the project's repository |
 
 The history buffer is markdown with folds for tool calls, results and thinking. Anything the viewer does not understand is shown as a fold marked `unknown`, never dropped, and truncated output says how many lines are hidden.
+
+## Git: what an agent changed
+
+Each git project in the drawer has two more sections below its sessions: `Changes vs <base>` (everything on the branch since it left the default branch, uncommitted and untracked files included; on the default branch, uncommitted changes against `HEAD`) and `Commits on branch` (`Recent commits` on the default branch), each commit expanding to its files. The project row shows the branch when it is not the default branch. The lists refresh when a session of the project finishes a turn, on `R`, and when you come back to the drawer after more than 5 s.
+
+`<CR>` on a file opens a side-by-side diff in the main window, built on Neovim's own diff mode. For branch changes the right side is your real, editable file. In the chat, `gd` on an `Edit` or `Write` fold opens the diff of that file.
+
+| Key (diff view) | Action |
+|---|---|
+| `]f` / `[f` | Next / previous changed file |
+| `gb` | Flip this file between the whole branch and one commit (pick which) |
+| `gB` | Back to the whole-branch diff |
+| `]c` / `[c` | Next / previous hunk (Neovim) |
+| `gl` | lazygit for this repository |
+| `q` | Close the diff, back to what was shown before |
+| `?` | Help |
+
+The keys are under `keys.diff` in the configuration. Git is only read (`git --no-optional-locks`, never a command that writes); acting is left to lazygit.
 
 ## How it works
 

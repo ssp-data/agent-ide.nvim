@@ -76,4 +76,29 @@ function M.unmap(buf)
   end
 end
 
+---The user's buffer of `path`, loaded. A swap file of another editor opens it read-only instead
+---of asking; an unchanged loaded buffer is checked against the disk (an agent may have written
+---the file) when 'autoread' allows a silent reload.
+function M.real(path)
+  local buf = vim.fn.bufadd(path)
+  if not api.nvim_buf_is_loaded(buf) then
+    local au = api.nvim_create_autocmd('SwapExists', { once = true, callback = function() vim.v.swapchoice = 'o' end })
+    pcall(vim.fn.bufload, buf)
+    pcall(api.nvim_del_autocmd, au)
+  elseif not vim.bo[buf].modified and vim.o.autoread then
+    pcall(vim.cmd, 'checktime ' .. buf)
+  end
+  vim.bo[buf].buflisted = true
+  return buf
+end
+
+---Lines of file content; true for binary content (a NUL byte), nil for nil.
+function M.lines_of(content)
+  if content == nil then return nil end
+  if content:find('\0', 1, true) then return true end -- binary
+  local lines = vim.split(content, '\n', { plain = true })
+  if lines[#lines] == '' then lines[#lines] = nil end
+  return lines
+end
+
 return M

@@ -171,14 +171,6 @@ local function apply(left_lines, right, keep_cursor)
   switching = false
 end
 
-local function lines_of(content)
-  if content == nil then return nil end
-  if content:find('\0', 1, true) then return true end -- binary
-  local lines = vim.split(content, '\n', { plain = true })
-  if lines[#lines] == '' then lines[#lines] = nil end
-  return lines
-end
-
 ---Load the current file's sides and show them (`keep_cursor` on refresh).
 local function show(keep_cursor)
   D.seq = D.seq + 1
@@ -194,7 +186,7 @@ local function show(keep_cursor)
   local function fetch_left()
     if f.status == 'A' or f.status == '?' then return done() end
     git.show(d.root, left_rev, f.old_path or f.path, function(c)
-      left = lines_of(c)
+      left = scratch.lines_of(c)
       done()
     end)
   end
@@ -202,17 +194,13 @@ local function show(keep_cursor)
   if d.mode == 'commit' then
     if f.status == 'D' then return done() end
     git.show(d.root, d.commit.hash, f.path, function(c)
-      right = lines_of(c)
+      right = scratch.lines_of(c)
       done()
     end)
   elseif f.status == 'D' or f.submodule or vim.fn.filereadable(abs(f.path)) ~= 1 then
     done()
   else
-    local buf = vim.fn.bufadd(abs(f.path))
-    vim.fn.bufload(buf)
-    vim.bo[buf].buflisted = true
-    right = buf
-    if f.binary then right = true end
+    right = f.binary or scratch.real(abs(f.path))
     done()
   end
 end
