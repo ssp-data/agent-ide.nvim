@@ -2,11 +2,27 @@
 use serde_json::json;
 use std::path::{Path, PathBuf};
 
-pub fn tmp(name: &str) -> PathBuf {
+/// A temporary directory, removed when dropped.
+pub struct Tmp(PathBuf);
+
+impl std::ops::Deref for Tmp {
+    type Target = Path;
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for Tmp {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+pub fn tmp(name: &str) -> Tmp {
     let d = std::env::temp_dir().join(format!("agent-ide-search-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
-    d
+    Tmp(d)
 }
 
 fn ts(n: u32) -> String {
