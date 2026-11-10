@@ -1,4 +1,4 @@
-# Agent-IDE.nvim
+# Agent-IDE.nvim (Agents Drawer)
 
 A Neovim plugin that lists your Claude Code sessions in a drawer, grouped by git repository, and opens any session's history as a read-only markdown buffer. Sessions that are running show their state (waiting, busy, idle) next to their name.
 
