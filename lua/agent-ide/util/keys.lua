@@ -14,9 +14,12 @@ end
 ---@param name string
 ---@return string[]
 function M.get(group, name)
-  local keys = require('agent-ide.config').get().keys
-  if type(keys) ~= 'table' then return {} end
-  local g = group and keys[group] or keys
+  local config = require('agent-ide.config')
+  local keys = config.get().keys
+  local g
+  if type(keys) == 'table' then g = group and keys[group] or keys end
+  -- with `keys = false` the drawer keeps its defaults (ui/drawer.lua)
+  if type(g) ~= 'table' and group == 'drawer' then g = config.defaults().keys.drawer end
   return type(g) == 'table' and M.list(g[name]) or {}
 end
 

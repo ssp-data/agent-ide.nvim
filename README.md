@@ -52,7 +52,7 @@ You might ask why not a terminal-based TUI, now that Herdr, Rex, and others are 
 
 ## Status
 
-Parts 1 to 5 of 6 and search are done: the drawer and the history view, chat with Claude Code from Neovim, reusable prompts, git review (what an agent changed, with a diff view), the Omarchy indicator (see `omarchy/io.github.sspaeti.agent-ide/README.md`), and search across all sessions. Other agents (part 6) are planned and not available yet.
+Everything above is built and in daily use: the drawer, chat with Claude Code from Neovim, reusable prompts, git review with the diff view and the commit graph, search across all sessions, and the Omarchy indicator (see `omarchy/io.github.sspaeti.agent-ide/README.md`). Other agents (Codex, Gemini, opencode) are planned and not available yet.
 
 ## Prerequisites
 
@@ -133,8 +133,9 @@ require('agent-ide').setup({
   tcd = true, -- opening a session sets the tab's working directory to its project
   scope = 'all', -- 'project': start with only the repository of Neovim's working directory (see Project scope)
   -- each key option is a key, a list of keys, or false (no mapping); keys = false turns off all of
-  -- these. Fixed, not configurable: q / <Esc> in help floats, q in the raw view, ]c / [c in the
-  -- diff view, and / and @ in the prompt (chat.auto_slash, chat.at_picker)
+  -- these except the drawer's own keys, which then keep their defaults. Fixed, not configurable:
+  -- q / <Esc> in help floats, q in the raw view, ]c / [c in the diff view, and / and @ in the
+  -- prompt (chat.auto_slash, chat.at_picker)
   keys = {
     toggle = '<leader>aa',
     next_waiting = '<leader>an',
@@ -309,17 +310,23 @@ In the chat (transcript and prompt buffer, unless noted):
 
 The history buffer is markdown with folds for tool calls, results and thinking. Anything the viewer does not understand is shown as a fold marked `unknown`, never dropped, and truncated output says how many lines are hidden.
 
+### Help
+
+`?` in the drawer and `g?` in every view open the keys of that view as a palette: a query line over the list. Type to filter it (fuzzy: `legnd` finds the legend key), `<C-n>` / `<C-p>` or the arrows move, `<CR>` closes the help and presses the selected key in the window you came from, so the help doubles as a command palette. `<Esc>` leaves the query line, and `<Esc>` or `q` there closes the help. With an empty query the keys show in their groups.
+
 ## Chat
 
 Open a session from the drawer, or start one with `+ New session` under a project. The transcript fills the main window of the Agents tab and a prompt buffer opens below it. Opening a session shows its history without starting Claude; the first prompt you send starts `claude -p` for it (resuming the session when it has a history), and the process keeps running until you park the session (`<leader>ax`, or `x` in the drawer), hand it to native Claude, or quit Neovim. Parking asks first when Claude is working, puts queued prompts back into the prompt buffer, and keeps the transcript; the next prompt resumes the session. The winbar shows the state as the drawer does (its mark and word in the same colours: `● permission: Bash`, `◐ busy`, `✓ done, unread`, `✗ failed: <reason>`, `◐ tmux 2.1`), the number of queued prompts, the project in bold and the title, and on the right the model in italic (`AgentIdeModel`) and the permission mode as a badge (`[manual]` in `AgentIdeMode`; any other mode, such as `[acceptEdits]`, `[plan]`, `[auto]` or `[bypassPermissions]`, in `AgentIdeModeHot`, linked to `WarningMsg`). It fits its window: the title is cut with `…` first, then the model, the queue count and the badge give way (the project takes what is left), and only last the state word is cut. In a tabline, a bufferline or `:ls` the chat's buffers are named after the session: `agents://<project>/<title>` for the transcript and `… · prompt` for the prompt buffer (`agents://drawer`, `agents://help` and so on for the rest); the names follow the title, never stand for a file and change nothing about `:w` or `ZZ`.
 
 **Prompt buffer.** A normal markdown buffer: write as much as you like and send it with `<C-CR>`. Its text is sent as typed, except that an `[attach] <path>` line outside a fenced code block (a fence starting at column 0) becomes `@<path>` on the same line (`@"<path>"` when the path holds spaces), which makes Claude read the file; nothing is moved or reordered. `@` at the start of a line or after a space, outside a fenced code block, opens a file picker and puts the file where you typed `@`: in a line of text as `@<path>` followed by a space, on an empty line as an `[attach] <path>` line, so references stay in place in a long text. Text you type while the file list loads does not move that spot. Cancelling the picker leaves the `@` you typed. `<leader>af` in normal mode adds an `[attach]` line above the cursor's line. `/` on an empty line opens the command menu: the commands the session listed and the commands and skills the Prompts node finds on disk and, on top, two of the plugin's own, marked `plugin`: `/model` opens the model picker and `/copy` copies the last answer to the unnamed and `+` registers. They act when chosen from the menu or sent as the whole prompt, and are never sent to Claude. Claude sends its command list with each turn, so before a session's first turn the menu is filled from the last list known for its project (else the most recent list of any project), kept across restarts in `commands.json`. `<C-p>` and `<C-n>` step through the prompts of the session, in normal and insert mode, as do `<Up>` on the first line and `<Down>` on the last (elsewhere the arrows move the cursor; while a completion menu is open the keys work the menu). The draft you were writing comes back when you step past the newest prompt.
 
+**Drafts.** What you type in a prompt buffer is also kept on disk, so a prompt closed by accident or a Neovim that dies does not lose it: `stdpath('state')/agent-ide/drafts/<session id>.md` (a small frontmatter with the session id and project folder, then the text as typed), written half a second after a change and when you leave the buffer or Neovim. A successful send, `:q!` (the explicit discard) and deleting the session remove it. When a session's prompt opens again the draft comes back with a notice. `+ New session` takes over the newest draft an earlier Neovim left for an unsent new session of that project, so a draft of a session that never got a prompt is not lost either.
+
 **While Claude works.** Answers stream into the transcript. A prompt sent while a turn runs is queued by the plugin and sent after that turn, in order. `<C-c>` interrupts the turn and puts the queued prompts back into the prompt buffer.
 
 **Permissions, questions and plans.** When Claude asks to use a tool, the ask shows at the end of the transcript and in the drawer, and a picker opens with Allow, Deny and the suggestions Claude made (switch the mode for this session, or always allow a rule; offered only where Claude saves it in this project's local settings, and labelled so). The picker opens only when you are in that session's chat in normal mode. Nothing ever interrupts you: an ask from another session never opens a popup, moves the cursor or takes focus; it shows in the drawer and in the footer, and `<leader>an` takes you there. While you type in the same session's prompt, a one-line hint appears instead; `<leader>ay` opens the picker. Questions Claude asks (multiple choice) are answered the same way, one picker per question; a multi-select question takes one option per round until you pick Done choosing. A plan from plan mode can be approved, approved with edits accepted for the rest of the session, or sent back with Keep planning.
 
-**Mode and model.** `<S-Tab>` cycles the permission mode (manual, acceptEdits, plan, auto) and `<leader>aM` (or `<leader>M`) picks the model. The winbar shows `old→new` until Claude confirms the change; a refused change says why. The picker lists every model your Claude Code offers, with name and description (`Fable 5.2 — … (claude-fable-5-2)`, the current one marked `●`), as Claude reports them when a process starts (no turn, kept in `models.json`; on a fresh install a short-lived Claude is asked first, for at most 1.5 s), and the winbar and the footer name the model the same way (`fable 5.1`).
+**Mode and model.** `<S-Tab>` cycles the permission mode (manual, acceptEdits, plan, auto) and `<leader>aM` (or `<leader>M`) picks the model. Before a session's first prompt the winbar (and the footer) name the model it will start with: the one you picked for it, else `claude.model` when set, else the model last used in this plugin (the last one picked, or reported by a Claude it started; kept in `prefs.json`), else Claude's own default (`default`, or its name when Claude's list is known). New and resumed sessions start with that model. The winbar shows `old→new` until Claude confirms a change; a refused change says why. The picker lists every model your Claude Code offers, with name and description (`Fable 5.2 — … (claude-fable-5-2)`, the current one marked `●`), as Claude reports them when a process starts (no turn, kept in `models.json`; on a fresh install a short-lived Claude is asked first, for at most 1.5 s), and the winbar and the footer name the model the same way (`fable 5.1`).
 
 **Raw view.** `gr` in the transcript shows every line sent to Claude (`>>`) and received (`<<`) for the session, byte for byte; for a session that did not run here it shows the transcript file. Anything the chat cannot render shows as an `unknown` fold, and `gR` on it opens the raw view at its line.
 
@@ -331,7 +338,7 @@ Open a session from the drawer, or start one with `+ New session` under a projec
 
 ## Footer
 
-`require('agent-ide').statusline()` gives a short text for a statusline: the state of all sessions, the model of the chat you are in and the quota used (percent used, with a small bar that fills as you use it):
+`require('agent-ide').statusline()` gives a short text for a statusline: the state of all sessions, the model of the chat you are in (before its first prompt: the one it will start with) and the quota used (percent used, with a small bar that fills as you use it):
 
 | Level | Colour | Text | When |
 |---|---|---|---|
@@ -500,6 +507,8 @@ What it writes, all of it private (new files `0600`, folders it creates `0700`, 
 | Trash (`<YYYYMMDD-HHMMSS>-<id>/` per deleted session) | `stdpath('data')/agent-ide/trash/` | everything `D` moved out of Claude's folder (transcripts, file history, the session's `history.jsonl` lines) and a manifest, until `:AgentsTrash empty` or `trash.keep_days` |
 | `commands.json` | `stdpath('state')/agent-ide/` | Claude's command names last seen per project (at most 50), keyed by a short hash of the project folder, for the `/` menu |
 | `models.json` | `stdpath('state')/agent-ide/` | the models Claude Code last listed (value, name, description, full id), its version and when; nothing about your account |
+| `prefs.json` | `stdpath('state')/agent-ide/` | the model last used (new sessions start with it) and whether the legend is shown |
+| Drafts (`<session id>.md` per prompt buffer) | `stdpath('state')/agent-ide/drafts/` | the text of a prompt buffer as you type it, until it is sent or discarded (see Drafts under [Chat](#chat)) |
 | Saved prompts (per project) | `stdpath('data')/agent-ide/prompts/<project folder>-<short hash>/`, or `prompts.saved_dir` | the prompts you save with `:w` |
 | Library prompts (templates) | `stdpath('data')/agent-ide/library`, or wherever you point `prompts.library_dir` | the prompts you save with `<leader>W`, rename or move |
 
@@ -510,17 +519,6 @@ The Rust helper's metadata cache `index-v3.json` holds the path, title, working 
 The search index is `search-v1.json` in the same folder. It holds the first 4 KiB of every prompt and answer and a one-line summary of every tool call, with the session titles and paths. It is written at most every 30 seconds; changes since the last write are indexed again on the next start (the helper is stopped right after Neovim closes its input, so a final write is not guaranteed). Both files are ignored when a different helper version, other parse rules or another file format wrote them.
 
 Both files are as private as the transcripts they come from: the folder is created (and tightened to) mode 0700, the files are written with mode 0600 through a temporary file that is renamed into place, and temporary files left by a helper that was killed while writing are removed on the next start. You can delete either file at any time; it is rebuilt on the next scan or search.
-
-## Roadmap
-
-1. Drawer and history (done)
-2. Chat and prompt buffer (done)
-3. Prompts (done)
-4. Git review: changes, commits, diff view (done)
-5. Omarchy indicator (done)
-6. Other agents (planned)
-
-Search across all sessions is done as well.
 
 ## Development
 
@@ -535,10 +533,6 @@ make bench DIR=~/.claude/projects   # timings and counts for your own transcript
 ```
 
 All test data is synthetic. `make test-real` is the exception: it talks to the real Claude Code with tiny prompts, prints only pass or fail per check, and removes its temporary repository and the transcript Claude wrote for it.
-
-### If Neovim freezes
-
-Start it with `AGENT_IDE_WATCHDOG=1 nvim` and repeat what froze it. Whenever Lua keeps Neovim busy for more than 5 seconds, a traceback of where it is goes to `stdpath('state')/agent-ide/stuck.log` (usually `~/.local/state/nvim/agent-ide/stuck.log`). The watchdog switches the JIT off, so use it only for this.
 
 ### Releasing
 

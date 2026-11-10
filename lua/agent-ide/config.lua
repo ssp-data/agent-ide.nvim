@@ -1,7 +1,13 @@
 -- User options merged over defaults. Lists (e.g. `live.cmd`) are replaced, not merged.
 local M = {}
 
-local function defaults()
+local defaults
+
+---The defaults (a fresh table).
+---@return table
+function M.defaults() return defaults() end
+
+defaults = function()
   return {
     projects_dir = vim.fn.expand('~/.claude/projects'),
     drawer = { width = 44, side = 'right', legend = true }, -- legend: the state marks at the bottom (gL)

@@ -9,7 +9,7 @@ A Neovim plugin that manages Claude Code sessions from inside Neovim: a drawer w
 - Lua module: `agent-ide`. Command: `:Agents`. Global keys under `<leader>a`.
 - Design document: `docs/superpowers/specs/2026-11-10-agents-ide-design.md` (section 14 lists what changed since approval). Plans per part are in `docs/superpowers/plans/`.
 - Observed Claude Code stream protocol: `docs/protocol.md`.
-- Current state, what is unverified by eye, and open items: `HANDOVER.md`.
+- Open items and decisions taken on the owner's behalf: the end of this file.
 
 ## Layout
 
@@ -17,14 +17,16 @@ A Neovim plugin that manages Claude Code sessions from inside Neovim: a drawer w
 |---|---|
 | `plugin/agent-ide.lua` | user commands |
 | `lua/agent-ide/init.lua`, `config.lua` | setup, defaults, global keys |
+| `lua/agent-ide/prefs.lua` | `prefs.json`: the model last used (what a new session starts with), the legend toggle |
 | `lua/agent-ide/claude/` | starting Claude Code, stream parsing, version guard |
 | `lua/agent-ide/session/` | session object, states, prompt queue, actions |
 | `lua/agent-ide/transcript/` | parsing transcripts into events, rendering events into lines and folds |
 | `lua/agent-ide/index/`, `search/` | talking to the helper, Lua fallbacks |
 | `lua/agent-ide/git*.lua` | read-only, asynchronous git queries, parsing, cache |
 | `lua/agent-ide/prompts/` | prompt library, skills and commands, saved prompts |
-| `lua/agent-ide/ui/` | drawer, chat, prompt, permission, diff, graph, search picker, help, highlights, icons |
-| `lua/agent-ide/ui/drawer_legend.lua`, `drawer_session_keys.lua` | the drawer's legend of state marks (`gL`); the chat's keys on a session row |
+| `lua/agent-ide/ui/` | drawer, chat, prompt, permission, diff, graph, search picker, help palette, highlights, icons |
+| `lua/agent-ide/ui/drafts.lua` | the prompt buffer's text kept in `drafts/<session id>.md`, brought back when the prompt opens |
+| `lua/agent-ide/ui/drawer_legend.lua`, `drawer_session_keys.lua` | the drawer's legend of state marks (`gL`, remembered in `prefs.json`); the chat's keys on a session row |
 | `lua/agent-ide/ui/graph.lua`, `graph_render.lua`, `graph_keys.lua`, `graph_context.lua` | commit graph: window, pure lane layout, keys, which repository |
 | `lua/agent-ide/ui/tmux_close.lua`, `tmux_verify.lua` | closing a Claude in a tmux pane (`X`, `:AgentsCloseIdle`); the checks before any key is typed |
 | `lua/agent-ide/ui/delete.lua`, `lua/agent-ide/trash.lua`, `trash_fs.lua`, `trash_history.lua` | deleting a session (`D`) into the trash, `:AgentsTrash` restore and empty |
@@ -88,6 +90,24 @@ With every user-visible change, in the same commit or pull request:
 - add a line to `CHANGELOG.md` under `## [Unreleased]` (Added / Changed / Fixed / Removed), written for users, not as a commit log;
 - update the README sections it touches (keys tables, configuration block, privacy list of written files);
 - update this file when a rule, a command or the layout changes.
+
+## Open items
+
+Small, known:
+
+- `lua/agent-ide/prompts/store.lua` checks `fs_write` only for non-nil (short writes); `util/jsonfile.lua` has a safe writer to reuse.
+- `lua/agent-ide/trash.lua` (about 450 lines) and `ui/prompt.lua` (about 700) are over the size the conventions ask for.
+- Scratch buffers that `ui/delete.lua` puts into emptied windows are unnamed.
+- A `vim.ui.select` provider that never calls back leaves the `@` picker state set until the buffer is left.
+- "Allow for this session" on a permission is offered only as far as Claude's suggestions were verified.
+- The Changes list refreshes after a turn only for sessions run in this Neovim.
+- No key inside the chat jumps to the tmux pane of a session running elsewhere (`gT` in the drawer does).
+- Delete (`D`): the "history file is open" check exists on Linux only; `todos/` and `debug/` files of a session are not moved.
+- `make test-real` has not been run against the features added after the chat was built (`initialize`, `--resume` with `--model`).
+
+From the design, not built: an idle-timeout setting for parked processes (design section 12); prebuilt helper binaries (section 9.2); other agents through ACP (part 6, `docs/superpowers/plans/2026-11-10-part-6-other-agents.md`), deferred until the owner asks. The owner's feedback rounds are `docs/superpowers/plans/2026-11-10-feedback-round-1.md` and `docs/superpowers/specs/2026-11-10-feedback-round-2-design.md`; the appendix of round 1 lists mock views (permission float, slash float, richer fold headers) that were not built.
+
+Decisions taken on the owner's behalf, recorded as `Ruling:` lines in the build ledger; the ones that shape behaviour: a hidden session that needs attention is shown as normal while that lasts; in project scope the footer counts only that project, the status file for the bar stays global; `<C-c>` on a drawer session row asks first, in the chat it interrupts at once; quota is never read through credentials or the network; over-long lines are cut for display with a counted marker, the raw view keeps everything; templates and saved prompts are loaded and saved byte for byte; permission rules are offered only where Claude suggests them; the scope key is `S` (the owner wrote "Shift-Toggle"); `y` on a session row yanks its last prompt.
 
 ## Releasing
 

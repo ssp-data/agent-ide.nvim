@@ -32,6 +32,13 @@ First public version.
 - **Session keys on a drawer row**: `<leader>aM`, `<S-Tab>`, `<C-c>` (asks first), `<leader>at` and `gr` act on that session as in its chat, without opening it.
 - **Close terminal sessions**: `X` on a row of a Claude running in a tmux pane types Claude's own exit (Ctrl-C twice) into that pane after a confirm and a fresh check that this Claude is the pane's foreground program; `:AgentsCloseIdle` does it for every idle one (in project scope for that project, `:AgentsCloseIdle!` for all).
 - **Buffer names**: the chat's buffers are named after the session (`agents://<project>/<title>`, `… · prompt`), so a tabline, a bufferline and `:ls` show them instead of `[No Name]`; they follow the title.
+- **Help you can filter**: `?` / `g?` open the keys of a view as a palette with a query line; typing narrows the list fuzzily, `<CR>` presses the selected key in the window you came from.
+- **Drafts kept on disk**: the text of a prompt buffer is written to `stdpath('state')/agent-ide/drafts/<session id>.md` as you type and when you leave; it comes back when the session's prompt opens again (also after a crash), and `+ New session` takes over a draft left for an unsent new session of the project. A send, `:q!` and a deleted session remove it.
+- **The model before the first prompt**: the winbar and the footer name the model a session will start with (picked for it, else `claude.model`, else the model last used here, kept in `prefs.json`, else Claude's default); new and resumed sessions start with it.
+- **Commit graph row**: an expanded `Commits` section starts with a dimmed `commit graph` row; `<CR>` opens the graph.
+- `y` on a session row in the drawer yanks the last prompt sent in it.
+- Every drawer key is configurable under `keys.drawer` (a key, a list of keys, or `false`).
+- The legend toggle (`gL`, `<leader>aL`) is remembered across restarts (`prefs.json`).
 
 ### Changed
 
@@ -40,6 +47,8 @@ First public version.
 - `@` puts the file reference where you typed it (mid-line as `@<path>`, on an empty line as an `[attach]` line), types a plain `@` inside a fenced code block, and keeps up with fast typing.
 - `<Up>` on the first line and `<Down>` on the last step through the prompt history in insert mode too.
 - The model picker lists every model Claude Code offers, with names and descriptions (`Fable 5.2 — … (claude-fable-5-2)`), and marks the current one; the winbar and the footer name the model the same way (`fable 5.1`). `claude.models` now defaults to Claude's own list (kept in `models.json`); a list you set is used as given.
+- New default keys in the drawer: `z0` / `z9` collapse and expand all (were `zM` / `zR`); `gT` or `<leader>aT` goes to tmux (jumps to the pane of a session running elsewhere, else continues the session in native Claude in a tmux pane; were `gp` and `<leader>at`); `Z`, `<leader>ff` or `<leader>Z` search the project (was `s`); `sP` parks (was `x`); `D` also deletes a prompt file (was `d`); `G` opens the commit graph (was `gG`); `S` flips the scope (was `gs`); `sL` copies a saved prompt into the library (was `L`); `gL` or `<leader>aL` toggle the legend. In the chat, `<leader>M` also picks the model and `gT` / `<leader>aT` continue in native Claude (`gT` in the transcript only). In the search picker `<C-f>` picks what to search (was `<C-t>`, a common tmux prefix).
+- A prompt row key (edit, rename, delete, yank, to library) acts on its rows even when a drawer key has the same lhs; elsewhere the drawer key acts.
 
 ### Fixed
 

@@ -487,9 +487,12 @@ local ACTIONS = {
   { 'close_tmux', 'close the Claude running it in a tmux pane (Ctrl-C twice there; asks first)' },
 }
 
+-- `keys.drawer`; with `keys = false` (nothing mapped globally) the drawer keeps its defaults,
+-- since it is nothing without them (each key can still be set to false)
 local function drawer_keys()
   local keys = config.get().keys
-  return type(keys) == 'table' and type(keys.drawer) == 'table' and keys.drawer or {}
+  if type(keys) == 'table' and type(keys.drawer) == 'table' then return keys.drawer end
+  return config.defaults().keys.drawer
 end
 
 local OWN = {} -- keycodes of the drawer's own keys, as mapped last
