@@ -23,3 +23,8 @@ vim.api.nvim_create_user_command('AgentsCloseIdle', function(o) require('agent-i
 vim.api.nvim_create_user_command('AgentsTrash', function(o)
   require('agent-ide.ui.delete').command(o.args)
 end, { nargs = '?', complete = function() return { 'empty' } end, desc = 'Agent-IDE: restore or purge deleted sessions' })
+
+-- AGENT_IDE_WATCHDOG=1 nvim: log where Lua is when Neovim freezes (util/watchdog.lua)
+if vim.env.AGENT_IDE_WATCHDOG and vim.env.AGENT_IDE_WATCHDOG ~= '' and vim.env.AGENT_IDE_WATCHDOG ~= '0' then
+  require('agent-ide.util.watchdog').start(tonumber(vim.env.AGENT_IDE_WATCHDOG) or 5)
+end
