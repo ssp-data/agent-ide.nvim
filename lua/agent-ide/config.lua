@@ -45,6 +45,10 @@ local function defaults()
     -- saved prompts. nil dirs: stdpath('data') .. '/agent-ide/library' and '/agent-ide/prompts'
     prompts = { library_dir = nil, saved_dir = nil, command_dirs = { '~/.claude/commands' },
       skill_dirs = { '~/.claude/skills' }, project_dirs = true },
+    -- footer quota: `file` (nil: off) is a JSON file another tool writes,
+    -- { "limits": [ { "label", "percent" (fraction used), "resetsAt" } ], "updatedAt" }; when it is
+    -- readable and fresh (30 min) the footer shows those limits instead of its own
+    quota = { file = nil },
     -- prompt buffer: `/` opens the command menu, `@` opens the file picker
     chat = { auto_slash = true, at_picker = true },
     -- 'nerd' (needs a Nerd Font in the terminal) or 'plain'; `icons` overrides single entries

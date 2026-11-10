@@ -5,7 +5,10 @@ local live = require('agent-ide.live')
 local M = {}
 
 local NAMES = { 'ok', 'running', 'review', 'input' }
-local STALE_SECONDS = 6 * 3600
+local STALE_SECONDS = 3600 -- quota values older than this are shown dimmed with `?`
+local AGE_SHOWN_SECONDS = 600 -- older than this: the footer says how old
+local QUOTA_FILE_READ_SECONDS = 60 -- `quota.file` is read at most this often
+local QUOTA_FILE_MAX_AGE = 30 * 60 -- an older `quota.file` is not used
 local FILE_THROTTLE_MS = 200
 local REDRAW_THROTTLE_MS = 100
 local QUOTA_DEBOUNCE_MS = 1000
@@ -55,39 +58,163 @@ end
 
 -- Statusline --------------------------------------------------------------------------------
 
-local function bar(left)
-  local n = math.floor(left * 5 + 0.5)
-  return ('▰'):rep(n) .. ('▱'):rep(5 - n)
+---Percent used, rounded and clamped to 0..100, of a fraction used (0..1).
+local function percent_used(used) return math.min(100, math.max(0, math.floor(used * 100 + 0.5))) end
+
+---Bar of five cells filling with use; `dim`: the values are too old to trust (lighter cells).
+local function bar(pct, dim)
+  local n = math.floor(pct / 20 + 0.5)
+  return (dim and '▪' or '▰'):rep(n) .. (dim and '▫' or '▱'):rep(5 - n)
 end
 
-local LABELS = { five_hour = '5h', seven_day = 'week' }
+---`5h`, `week`, `week <model>` for `seven_day_<model>`, else the key's words.
+local function label_of(name)
+  if name == 'five_hour' then return '5h' end
+  if name == 'seven_day' then return 'week' end
+  local rest = name:match('^seven_day_(.+)$')
+  if rest then return 'week ' .. rest:gsub('_', ' ') end
+  rest = name:match('^five_hour_(.+)$')
+  if rest then return '5h ' .. rest:gsub('_', ' ') end
+  return (name:gsub('_', ' '))
+end
+
+local function order_of(name)
+  if name == 'five_hour' then return 1 end
+  if name == 'seven_day' then return 2 end
+  if name:find('^seven_day_') then return 3 end
+  return 4
+end
+
+---` · 25m old` once the values are older than 10 minutes.
+local function age_text(age)
+  if not age or age <= AGE_SHOWN_SECONDS then return '' end
+  if age < 3600 then return (' · %dm old'):format(math.floor(age / 60)) end
+  if age < 2 * 86400 then return (' · %dh old'):format(math.floor(age / 3600)) end
+  return (' · %dd old'):format(math.floor(age / 86400))
+end
+
+---One part: `label ▰▰▱▱▱ 40%`, or dimmed with `?` when it cannot be trusted.
+local function part(label, used, stale)
+  local pct = percent_used(used)
+  if stale then return ('%s %s ?'):format(label, bar(pct, true)) end
+  return ('%s %s %d%%%%'):format(label, bar(pct), pct)
+end
+
+-- `quota.file`: limits written by another tool, read at most every 60 s, asynchronously.
+local ext -- { limits = { label, used, resets_at|nil }[], updated = epoch seconds } of the last good read
+local ext_read_at -- M._src.now() of the last read started
+local ext_reading = false
+
+---Epoch seconds of an ISO 8601 time (`2026-11-10T12:00:00.5+01:00`, `…Z`) or of a number
+---(seconds or milliseconds); nil when it is neither.
+function M._parse_time(v)
+  if type(v) == 'number' then return v > 1e11 and v / 1000 or v end
+  if type(v) ~= 'string' then return nil end
+  local y, mo, d, h, mi, s, rest = v:match('^(%d%d%d%d)%-(%d%d)%-(%d%d)[T ](%d%d):(%d%d):(%d%d)(.*)$')
+  if not y then return nil end
+  rest = rest:gsub('^%.%d+', '')
+  local offset = 0
+  if rest ~= '' and rest ~= 'Z' and rest ~= 'z' then
+    local sign, oh, om = rest:match('^([+-])(%d%d):?(%d%d)$')
+    if not sign then return nil end
+    offset = (tonumber(oh) * 3600 + tonumber(om) * 60) * (sign == '-' and -1 or 1)
+  end
+  -- days from 1970-01-01 of a proleptic Gregorian date (no time zone involved)
+  y, mo, d = tonumber(y), tonumber(mo), tonumber(d)
+  if mo <= 2 then y = y - 1 end
+  local era = math.floor(y / 400)
+  local yoe = y - era * 400
+  local doy = math.floor((153 * (mo + (mo > 2 and -3 or 9)) + 2) / 5) + d - 1
+  local doe = yoe * 365 + math.floor(yoe / 4) - math.floor(yoe / 100) + doy
+  local days = era * 146097 + doe - 719468
+  return days * 86400 + tonumber(h) * 3600 + tonumber(mi) * 60 + tonumber(s) - offset
+end
+
+---Limits of a `quota.file` text, nil when malformed. `percent` is the fraction used (0..1, as
+---Omarchy's agents panel writes it); a value above 1 is taken as percent (0..100).
+---@return { limits: table[], updated: number|nil }|nil
+function M._parse_quota_file(text, mtime)
+  local ok, obj = pcall(vim.json.decode, text or '', { luanil = { object = true, array = true } })
+  if not ok or type(obj) ~= 'table' or type(obj.limits) ~= 'table' or not vim.islist(obj.limits) then return nil end
+  local limits = {}
+  for _, l in ipairs(obj.limits) do
+    if type(l) ~= 'table' or type(l.label) ~= 'string' or l.label == '' or type(l.percent) ~= 'number' then return nil end
+    local used = l.percent > 1 and l.percent / 100 or l.percent
+    limits[#limits + 1] = { label = l.label, used = used, resets_at = M._parse_time(l.resetsAt) }
+  end
+  if #limits == 0 then return nil end
+  return { limits = limits, updated = M._parse_time(obj.updatedAt) or mtime }
+end
+
+local function quota_file_path()
+  local q = require('agent-ide.config').get().quota
+  local f = type(q) == 'table' and q.file or nil
+  return type(f) == 'string' and f ~= '' and vim.fn.expand(f) or nil
+end
+
+local function read_quota_file(path, now)
+  if ext_reading or (ext_read_at and now - ext_read_at < QUOTA_FILE_READ_SECONDS) then return end
+  ext_reading, ext_read_at = true, now
+  local function done(v)
+    vim.schedule(function()
+      ext_reading = false
+      local before = vim.json.encode(ext or {})
+      ext = v
+      if vim.json.encode(ext or {}) ~= before then M.refresh() end
+    end)
+  end
+  vim.uv.fs_open(path, 'r', 438, function(err, fd)
+    if err then return done(nil) end
+    vim.uv.fs_fstat(fd, function(_, st)
+      if not st or st.size > 1024 * 1024 then return vim.uv.fs_close(fd, function() done(nil) end) end
+      vim.uv.fs_read(fd, st.size, 0, function(_, data)
+        vim.uv.fs_close(fd, function()
+          vim.schedule(function() done(M._parse_quota_file(data, st.mtime.sec)) end)
+        end)
+      end)
+    end)
+  end)
+end
+
+---The `quota.file` text when it is set, read and fresh (not older than 30 minutes), else nil.
+local function file_quota_text(now)
+  local path = quota_file_path()
+  if not path then return nil end
+  read_quota_file(path, now)
+  if not ext or not ext.updated or now - ext.updated > QUOTA_FILE_MAX_AGE then return nil end
+  local parts = {}
+  for _, l in ipairs(ext.limits) do
+    parts[#parts + 1] = part(l.label, l.used, l.resets_at ~= nil and now > l.resets_at)
+  end
+  return ' · ' .. table.concat(parts, ' · ') .. age_text(now - ext.updated)
+end
 
 local function quota_text()
+  local now = M._src.now()
+  local from_file = file_quota_text(now)
+  if from_file then return from_file end
   if not windows then return '' end
-  local names = {}
+  local names, overage = {}, {}
   for name, w in pairs(windows) do
-    if type(w) == 'table' and type(w.utilization) == 'number' then names[#names + 1] = name end
+    if type(w) == 'table' and type(w.utilization) == 'number' then
+      if name:find('overage', 1, true) then overage[#overage + 1] = name else names[#names + 1] = name end
+    end
   end
+  if #names == 0 then names = overage end -- overage windows only when they are all there is
   table.sort(names, function(a, b)
-    local oa, ob = a == 'five_hour' and 1 or a == 'seven_day' and 2 or 3, b == 'five_hour' and 1 or b == 'seven_day' and 2 or 3
+    local oa, ob = order_of(a), order_of(b)
     if oa ~= ob then return oa < ob end
     return a < b
   end)
-  local now = M._src.now()
+  local age = updated and now - updated
+  local old = age and age > STALE_SECONDS
   local parts = {}
   for _, name in ipairs(names) do
     local w = windows[name]
-    local label = LABELS[name] or name
-    local stale = (updated and now - updated > STALE_SECONDS) or (type(w.resets_at) == 'number' and now > w.resets_at)
-    if stale then
-      parts[#parts + 1] = label .. ' ?'
-    else
-      local left = math.min(1, math.max(0, 1 - w.utilization))
-      parts[#parts + 1] = ('%s %s %d%%%%'):format(label, bar(left), math.floor(left * 100 + 0.5))
-    end
+    parts[#parts + 1] = part(label_of(name), w.utilization, old or (type(w.resets_at) == 'number' and now > w.resets_at))
   end
   if #parts == 0 then return '' end
-  return ' · ' .. table.concat(parts, ' · ')
+  return ' · ' .. table.concat(parts, ' · ') .. age_text(age)
 end
 
 local function compute_text()
@@ -460,6 +587,7 @@ function M._writes() return file_writes end
 function M._refreshes() return refreshes end
 function M._reset()
   windows, updated, q_seen, q_dirty, last_sig, M._file_sig, warned = nil, nil, nil, false, nil, nil, false
+  ext, ext_read_at, ext_reading = nil, nil, false
   file_writes, refreshes, leaving, last_sweep = 0, 0, false, 0
   made = {}
   request_write.reset()
