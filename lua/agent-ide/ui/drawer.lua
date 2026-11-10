@@ -45,6 +45,13 @@ M.state_of = model.state_of
 
 local function set_opt(win, name, value) api.nvim_set_option_value(name, value, { scope = 'local', win = win }) end
 
+-- Text columns of the drawer window (without a fold or sign column the user's options may add).
+local function text_width(cfg)
+  if not S.win then return cfg.drawer.width end
+  local info = vim.fn.getwininfo(S.win)[1]
+  return api.nvim_win_get_width(S.win) - (info and info.textoff or 0)
+end
+
 ---Re-render the drawer buffer; keeps the drawer cursor on the same node (or on `focus`).
 ---@param focus? string node key to place the cursor on
 local function render(focus)
@@ -53,7 +60,7 @@ local function render(focus)
   local cfg = config.get()
   local t = tree.build(model.with_unsaved(S.projects), model.state_of, S.expanded, os.time(), cfg.icons, cfg.projects_dir,
     model.note_of, sections.collect,
-    { top = sections.collect_top, width = S.win and api.nvim_win_get_width(S.win) or cfg.drawer.width,
+    { top = sections.collect_top, width = text_width(cfg),
       header = { title = 'Agents', hints = M.hints() } })
   local row = S.win and api.nvim_win_get_cursor(S.win)[1]
   focus = focus or (row and node_key(S.nodes[row]))
@@ -317,8 +324,10 @@ local function open_drawer()
     set_opt(S.win, name, value)
   end
   render()
-  -- the cursor starts below the header line
-  if S.nodes[1] and S.nodes[1].type == 'header' and #S.nodes > 1 then api.nvim_win_set_cursor(S.win, { 2, 0 }) end
+  -- a cursor on the header line (a new window) starts below it
+  if api.nvim_win_get_cursor(S.win)[1] == 1 and S.nodes[1] and S.nodes[1].type == 'header' and #S.nodes > 1 then
+    api.nvim_win_set_cursor(S.win, { 2, 0 })
+  end
   refresh_shown()
 end
 

@@ -198,6 +198,32 @@ T['the right-aligned columns follow a drawer resize'] = function()
   if not has_line(lines, '^> P … +W input %(1%) %S+$') then error(vim.inspect(lines)) end
 end
 
+T['a fold column the user set does not push the right part out of the drawer'] = function()
+  start()
+  child.lua('vim.o.foldcolumn = "2"')
+  child.lua('require("agent-ide").toggle()')
+  wait_drawer_line('W input (1)', true)
+  local n = 0
+  for _, l in ipairs(drawer_lines()) do n = math.max(n, vim.fn.strdisplaywidth(l)) end
+  eq(n, 42)
+end
+
+T['the drawer on the left: the same aligned rows; reopening keeps the cursor row'] = function()
+  start()
+  child.lua('require("agent-ide").setup(vim.tbl_extend("force", require("agent-ide.config").get(), { drawer = { side = "left", width = 30 } }))')
+  child.lua('require("agent-ide").toggle()')
+  wait_drawer_line('W input (1)', true)
+  eq(child.lua_get('vim.fn.win_id2win(require("agent-ide.ui.drawer").state().win)'), 1)
+  for _, l in ipairs(drawer_lines()) do
+    if l:find('^> P ') then eq(vim.fn.strdisplaywidth(l), 30) end
+  end
+  child.lua('local s = require("agent-ide.ui.drawer").state(); vim.api.nvim_set_current_win(s.win); vim.api.nvim_win_set_cursor(s.win, { 4, 0 })')
+  child.lua('require("agent-ide").toggle()') -- close the drawer
+  child.lua('require("agent-ide").toggle()') -- and open it again
+  local row = child.lua_get('vim.api.nvim_win_get_cursor(require("agent-ide.ui.drawer").state().win)[1]')
+  eq(row ~= 1, true) -- never on the header
+end
+
 T['enter on project expands; enter on session opens its history in the chat view'] = function()
   start()
   child.lua('require("agent-ide").toggle()')
