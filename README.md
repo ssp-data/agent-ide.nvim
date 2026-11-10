@@ -127,7 +127,8 @@ require('agent-ide').setup({
     version_check = true,   -- one notice when the installed Claude Code is not the tested version
     modes = { 'manual', 'acceptEdits', 'plan', 'auto' }, -- what <S-Tab> cycles through
     default_mode = nil,     -- where the cycle starts before Claude reports a mode
-    models = { 'fable', 'opus', 'sonnet', 'haiku' },     -- what the model picker offers
+    models = nil,           -- what the model picker offers (nil: every model Claude Code lists; a list
+                            -- of names such as { 'opus', 'sonnet' } offers exactly those)
   },
   tcd = true, -- opening a session sets the tab's working directory to its project
   scope = 'all', -- 'project': start with only the repository of Neovim's working directory (see Project scope)
@@ -310,7 +311,7 @@ Open a session from the drawer, or start one with `+ New session` under a projec
 
 **Permissions, questions and plans.** When Claude asks to use a tool, the ask shows at the end of the transcript and in the drawer, and a picker opens with Allow, Deny and the suggestions Claude made (switch the mode for this session, or always allow a rule; offered only where Claude saves it in this project's local settings, and labelled so). The picker opens only when you are in that session's chat in normal mode. Nothing ever interrupts you: an ask from another session never opens a popup, moves the cursor or takes focus; it shows in the drawer and in the footer, and `<leader>an` takes you there. While you type in the same session's prompt, a one-line hint appears instead; `<leader>ay` opens the picker. Questions Claude asks (multiple choice) are answered the same way, one picker per question; a multi-select question takes one option per round until you pick Done choosing. A plan from plan mode can be approved, approved with edits accepted for the rest of the session, or sent back with Keep planning.
 
-**Mode and model.** `<S-Tab>` cycles the permission mode (manual, acceptEdits, plan, auto) and `<leader>aM` picks the model. The winbar shows `old→new` until Claude confirms the change; a refused change says why.
+**Mode and model.** `<S-Tab>` cycles the permission mode (manual, acceptEdits, plan, auto) and `<leader>aM` picks the model. The winbar shows `old→new` until Claude confirms the change; a refused change says why. The picker lists every model your Claude Code offers, with name and description (`Fable 5.2 — … (claude-fable-5-2)`, the current one marked `●`), as Claude reports them when a process starts (no turn, kept in `models.json`; on a fresh install a short-lived Claude is asked first, for at most 1.5 s), and the winbar and the footer name the model the same way (`fable 5.1`).
 
 **Raw view.** `gr` in the transcript shows every line sent to Claude (`>>`) and received (`<<`) for the session, byte for byte; for a session that did not run here it shows the transcript file. Anything the chat cannot render shows as an `unknown` fold, and `gR` on it opens the raw view at its line.
 
@@ -490,6 +491,7 @@ What it writes, all of it private (new files `0600`, folders it creates `0700`, 
 | `hidden.json` | `stdpath('data')/agent-ide/` | the ids of the sessions you hid with `H` |
 | Trash (`<YYYYMMDD-HHMMSS>-<id>/` per deleted session) | `stdpath('data')/agent-ide/trash/` | everything `D` moved out of Claude's folder (transcripts, file history, the session's `history.jsonl` lines) and a manifest, until `:AgentsTrash empty` or `trash.keep_days` |
 | `commands.json` | `stdpath('state')/agent-ide/` | Claude's command names last seen per project (at most 50), keyed by a short hash of the project folder, for the `/` menu |
+| `models.json` | `stdpath('state')/agent-ide/` | the models Claude Code last listed (value, name, description, full id), its version and when; nothing about your account |
 | Saved prompts (per project) | `stdpath('data')/agent-ide/prompts/<project folder>-<short hash>/`, or `prompts.saved_dir` | the prompts you save with `:w` |
 | Library prompts (templates) | `stdpath('data')/agent-ide/library`, or wherever you point `prompts.library_dir` | the prompts you save with `<leader>W`, rename or move |
 

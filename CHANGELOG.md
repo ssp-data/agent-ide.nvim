@@ -39,6 +39,7 @@ First public version.
 - `+ New session` pressed again while the new session has sent nothing brings it back with its draft instead of starting another (`2<CR>` starts a separate one).
 - `@` puts the file reference where you typed it (mid-line as `@<path>`, on an empty line as an `[attach]` line), types a plain `@` inside a fenced code block, and keeps up with fast typing.
 - `<Up>` on the first line and `<Down>` on the last step through the prompt history in insert mode too.
+- The model picker lists every model Claude Code offers, with names and descriptions (`Fable 5.2 — … (claude-fable-5-2)`), and marks the current one; the winbar and the footer name the model the same way (`fable 5.1`). `claude.models` now defaults to Claude's own list (kept in `models.json`); a list you set is used as given.
 
 ### Fixed
 

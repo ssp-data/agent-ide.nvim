@@ -236,7 +236,8 @@ local function compute_text()
   else text = ('input required (%d)'):format(l.waiting) end
   local ok, cur = pcall(M._src.current)
   if ok and type(cur) == 'table' and type(cur.model) == 'string' and cur.model ~= '' then
-    text = text .. ' · ' .. cur.model:gsub('^claude%-', '')
+    local name = require('agent-ide.ui.mode').model_name(cur, cur.model)
+    text = text .. ' · ' .. (name or cur.model:gsub('^claude%-', ''))
   end
   return text .. quota_text()
 end

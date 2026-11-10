@@ -142,11 +142,12 @@ T['raw view lists every line sent and received, in order, byte-exact'] = functio
   child.type_keys('gr')
   eq(cur_name(), 'raw/' .. id)
   local sent = fake_ins()
-  eq(#sent, 1)
-  eq(cur_lines(), { '>> ' .. sent[1], '<< ' .. INIT, '<< ' .. SAY, '<< ' .. RESULT })
+  eq(#sent, 2) -- the `initialize` request first, then the prompt
+  eq(fake.is_init(sent[1]), true)
+  eq(cur_lines(), { '>> ' .. sent[1], '>> ' .. sent[2], '<< ' .. INIT, '<< ' .. SAY, '<< ' .. RESULT })
   eq(child.lua_get('{ vim.bo.buftype, vim.bo.filetype, vim.bo.modifiable }'), { 'nofile', '', false })
   eq(child.lua_get('vim.api.nvim_get_current_win()'), transcript_win)
-  eq(cur_row(), 4)
+  eq(cur_row(), 5)
   -- q returns to the chat transcript, in the same window
   child.type_keys('q')
   eq(child.lua_get('vim.api.nvim_get_current_win()'), transcript_win)
@@ -164,10 +165,10 @@ T['raw view updates while open; the cursor follows only from the last line'] = f
     { sleep_ms = 600 }, raw('{"type":"mystery","n":"B"}'), { sleep_ms = 300 }, raw(RESULT)))
   open_chat()
   send('Go')
-  wait_for(function() return #fake_ins() == 1 end, 'prompt received')
-  wait_for(function() return child.lua_get('#_G.S.raw') == 2 end, 'init received')
+  wait_for(function() return #fake_ins() == 2 end, 'prompt received')
+  wait_for(function() return child.lua_get('#_G.S.raw') == 3 end, 'init received')
   child.type_keys('gr')
-  eq(#cur_lines(), 2)
+  eq(#cur_lines(), 3)
   wait_for(function() return has_line(cur_lines(), '<< {"type":"mystery","n":"A"}') ~= nil end, 'A appended')
   eq(cur_row(), #cur_lines()) -- was on the last line: follows
   child.type_keys('gg')
@@ -176,7 +177,7 @@ T['raw view updates while open; the cursor follows only from the last line'] = f
   wait_for(function() return state() ~= 'busy' end, 'turn end') -- 'done': the chat is not on screen
   local lines = cur_lines()
   eq(lines[#lines], '<< ' .. RESULT)
-  eq(#lines, 5)
+  eq(#lines, 6)
 end
 
 T['raw view of a capped session says how many lines were dropped'] = function()
@@ -221,7 +222,7 @@ T['a session that starts running while its file is shown switches to the live li
   send('More')
   wait_for(function() return state() ~= 'busy' end, 'turn end')
   local sent = fake_ins()
-  eq(cur_lines(), { '>> ' .. sent[1], '<< ' .. INIT, '<< ' .. SAY, '<< ' .. RESULT })
+  eq(cur_lines(), { '>> ' .. sent[1], '>> ' .. sent[2], '<< ' .. INIT, '<< ' .. SAY, '<< ' .. RESULT })
 end
 
 T['unknown objects and garbage lines are folds in the transcript and << lines in the raw view'] = function()

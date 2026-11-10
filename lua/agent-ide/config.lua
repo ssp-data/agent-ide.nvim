@@ -11,7 +11,8 @@ local function defaults()
     -- default_mode: where the cycle starts before Claude reports a mode (nil: as if manual)
     claude = { cmd = { 'claude' }, strip_api_key = true, model = nil, version_check = true,
       modes = { 'manual', 'acceptEdits', 'plan', 'auto' }, default_mode = nil,
-      models = { 'fable', 'opus', 'sonnet', 'haiku' } },
+      -- nil: the models Claude Code offers; a list of strings: exactly those
+      models = nil },
     tcd = true,
     -- 'all' (every project) or 'project' (the git repository of Neovim's working directory):
     -- what the drawer, search, <leader>an and the footer show at start; `:Agents all|project`

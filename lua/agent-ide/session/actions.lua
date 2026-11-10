@@ -92,14 +92,36 @@ function H.permission(s, a)
   s:_set_state('waiting')
 end
 
+-- Claude's answer to `initialize`: its models (for the picker and the plugin-wide latest list)
+-- and its commands (the `/` menu before the first turn's `init` brings the list).
+local function initialized(s, r)
+  if type(r) ~= 'table' then return end
+  local models = require('agent-ide.claude.models')
+  local list = models.normalize(r.models)
+  if list then
+    s.models = list
+    models.record(list, type(r.claude_code_version) == 'string' and r.claude_code_version or nil)
+  end
+  if type(r.commands) == 'table' and not (type(s.slash_commands) == 'table' and #s.slash_commands > 0) then
+    local names = {}
+    for _, c in ipairs(r.commands) do
+      if type(c) == 'table' and type(c.name) == 'string' and c.name ~= '' then names[#names + 1] = c.name end
+    end
+    if #names > 0 then s.slash_commands = names end
+  end
+  s:_emit('meta')
+end
+
 -- Answers to our own requests; anything else (e.g. Claude echoing our permission
 -- answers) is informational only.
 function H.control_ok(s, a)
   local req = s.requests[a.request_id]
   if not req then return end
   s.requests[a.request_id] = nil
-  if req.subtype == 'set_model' then
-    s.model = req.model
+  if req.subtype == 'initialize' then
+    initialized(s, a.response)
+  elseif req.subtype == 'set_model' then
+    s.model, s.model_chosen = req.model, req.model
     if s.model_requested == req.model then s.model_requested = nil end
     s:_emit('meta')
   elseif req.subtype == 'set_permission_mode' then
@@ -119,6 +141,8 @@ function H.control_error(s, a)
   local req = s.requests[a.request_id]
   if not req then return end
   s.requests[a.request_id] = nil
+  -- a refused `initialize` changes nothing (the picker falls back); the raw view keeps it
+  if req.subtype == 'initialize' then return end
   s:_append(live_meta('error', req.subtype .. ': ' .. tostring(a.error)))
   local setting = SETTING[req.subtype]
   if not setting then return end

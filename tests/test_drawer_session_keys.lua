@@ -137,7 +137,7 @@ local function last_note() local n = notes(); return n[#n] end
 local function requests()
   local out = {}
   for _, l in ipairs(fake.log(log)) do
-    if l['in'] then
+    if l['in'] and not fake.is_init(l['in']) then
       local o = vim.json.decode(l['in'])
       if o.type == 'control_request' then out[#out + 1] = o.request end
     end
