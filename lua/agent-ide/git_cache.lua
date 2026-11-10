@@ -1,0 +1,210 @@
+-- Per-repository cache of git data for the drawer and the diff view. Getters return what is
+-- known (nil while unknown) and start a load when needed. `invalidate` bumps the generation and
+-- reloads what was loaded; the old data stays visible until the new arrives, and results of an
+-- older generation are dropped. Commit files never change for a hash, so they survive.
+local git = require('agent-ide.git')
+
+local M = {}
+
+local CHECK_AFTER = 5 -- seconds between status checks of one repository
+
+local entries = {} -- root -> entry
+local listeners = {}
+
+local function now() return vim.uv.now() / 1000 end
+
+local function entry(root)
+  local e = entries[root]
+  if not e then
+    e = { gen = 0, data = {}, loaded = {}, loading = {}, base_waiters = nil, checked = now() }
+    entries[root] = e
+  end
+  return e
+end
+
+local function emit(root, kind)
+  for _, fn in ipairs(vim.list_slice(listeners)) do
+    local ok, err = pcall(fn, root, kind)
+    if not ok then vim.notify('Agent-IDE: git listener failed: ' .. tostring(err), vim.log.levels.WARN) end
+  end
+end
+
+-- Run `start(done)` once per generation for `kind`; `done(value)` stores and tells listeners.
+local function load(root, kind, start)
+  local e = entry(root)
+  if e.loading[kind] == e.gen then return end
+  e.loading[kind] = e.gen
+  local gen = e.gen
+  start(function(value)
+    if entries[root] ~= e or e.gen ~= gen then return end
+    e.loading[kind] = nil
+    e.data[kind], e.loaded[kind] = value, true
+    emit(root, kind)
+  end, e)
+end
+
+-- The base of the current generation, shared by the changes and commits loads.
+local function with_base(root, e, cb)
+  local gen = e.gen
+  if e.base_gen == gen then return cb(e.data.base) end
+  if e.base_waiters and e.base_waiters.gen == gen then
+    table.insert(e.base_waiters, cb)
+    return
+  end
+  e.base_waiters = { gen = gen, cb }
+  git.base(root, function(b)
+    if entries[root] ~= e or e.gen ~= gen then return end
+    local waiters = e.base_waiters
+    e.base_waiters, e.base_gen = nil, gen
+    e.data.base, e.loaded.base = b, true
+    if b then e.data.head, e.loaded.head = b, true end
+    emit(root, 'base')
+    for _, w in ipairs(waiters) do w(b) end
+  end)
+end
+
+local function snapshot(root, e)
+  local gen = e.gen
+  git.signature(root, function(sig)
+    if entries[root] == e and e.gen == gen then e.sig, e.checked = sig, now() end
+  end, { background = true })
+end
+
+local loaders = {
+  head = function(root)
+    load(root, 'head', function(done) git.head(root, done, { background = true }) end)
+  end,
+  base = function(root)
+    local e = entry(root)
+    with_base(root, e, function() end)
+  end,
+  changes = function(root)
+    load(root, 'changes', function(done, e)
+      with_base(root, e, function(b)
+        git.changes(root, function(files)
+          done(files)
+          snapshot(root, e)
+        end, b)
+      end)
+    end)
+  end,
+  commits = function(root)
+    load(root, 'commits', function(done, e)
+      with_base(root, e, function(b) git.commits(root, done, b) end)
+    end)
+  end,
+}
+
+---@param root string
+---@return table|nil head (branch, detached, default_name, ...), loaded in the background
+function M.head(root)
+  local e = entry(root)
+  if e.data.head == nil and not e.loaded.head then loaders.head(root) end
+  return e.data.head
+end
+
+---@return table|nil base (see git.base)
+function M.base(root)
+  local e = entry(root)
+  if not e.loaded.base then loaders.base(root) end
+  return e.data.base
+end
+
+---@return table[]|nil files, table|nil base
+function M.changes(root)
+  local e = entry(root)
+  if not e.loaded.changes then loaders.changes(root) end
+  return e.data.changes, e.data.base
+end
+
+---@return table[]|nil commits, table|nil base
+function M.commits(root)
+  local e = entry(root)
+  if not e.loaded.commits then loaders.commits(root) end
+  return e.data.commits, e.data.base
+end
+
+---@param root string
+---@param hash string
+---@return table[]|nil files of that commit
+function M.commit_files(root, hash)
+  local kind = 'files:' .. hash
+  local e = entry(root)
+  if not e.loaded[kind] then
+    load(root, kind, function(done) git.commit_files(root, hash, done) end)
+  end
+  return e.data[kind]
+end
+
+---The entry of `root` without starting anything (nil when unknown).
+function M.peek(root) return entries[root] end
+
+---@return string[] roots with an entry
+function M.roots() return vim.tbl_keys(entries) end
+
+---Reload what was loaded for `root`, keeping the old data until the new arrives.
+---@param root string
+function M.invalidate(root)
+  local e = entries[root]
+  if not e then return end
+  e.gen = e.gen + 1
+  e.loading, e.base_waiters, e.base_gen = {}, nil, nil
+  local kinds = {}
+  for kind in pairs(e.loaded) do
+    if not kind:find('^files:') then kinds[#kinds + 1] = kind end
+  end
+  for _, kind in ipairs(kinds) do e.loaded[kind] = nil end
+  for _, kind in ipairs(kinds) do
+    if kind == 'head' and vim.tbl_contains(kinds, 'base') then
+      -- head comes with the base
+    elseif loaders[kind] then
+      loaders[kind](root)
+    end
+  end
+  emit(root, 'invalidate')
+end
+
+---Cheap status-level check: invalidate when HEAD or the working tree status changed since the
+---last load or check. Does nothing within 5 s of the previous one or for unloaded repositories.
+---@param root string
+function M.check(root)
+  local e = entries[root]
+  if not e or not (e.loaded.changes or e.loaded.commits) or now() - e.checked < CHECK_AFTER then return end
+  e.checked = now()
+  local gen, before = e.gen, e.sig
+  git.signature(root, function(sig)
+    if entries[root] ~= e or e.gen ~= gen then return end
+    if sig ~= before then
+      M.invalidate(root)
+    end
+  end, { background = true })
+end
+
+---@param fn fun(root: string, kind: string)
+function M.on_update(fn)
+  M.off_update(fn)
+  listeners[#listeners + 1] = fn
+end
+
+function M.off_update(fn)
+  for i, f in ipairs(listeners) do
+    if f == fn then return table.remove(listeners, i) end
+  end
+end
+
+---Test only: store `value` as loaded data of `kind` (bumps the generation: running loads are dropped).
+function M._set(root, kind, value)
+  local e = entry(root)
+  e.gen = e.gen + 1
+  e.loading, e.base_waiters = {}, nil
+  e.data[kind], e.loaded[kind] = value, true
+  if kind == 'base' then e.base_gen = e.gen end
+  for k in pairs(e.loaded) do
+    if k == 'base' then e.base_gen = e.gen end
+  end
+end
+
+---Test only: forget everything (listeners stay).
+function M._reset() entries = {} end
+
+return M
