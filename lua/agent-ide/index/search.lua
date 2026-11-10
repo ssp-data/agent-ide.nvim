@@ -69,7 +69,9 @@ function M.context(path, event, cb)
   if M.backend() ~= 'helper' then return from_history() end
   helper.request('context', { path = path, event = event }, function(err, result)
     if err then
-      if vim.uv.fs_stat(path) and err ~= 'stopped' and err ~= 'timeout' then return cb(nil, nil) end
+      -- only the helper's own answer that the event is not there means nil; any other error
+      -- (out of date, cannot start, exited, write failed, timeout) reads it through the history
+      if tostring(err):match('^event %d+ is not in the transcript') then return cb(nil, nil) end
       return from_history()
     end
     cb(result.first, result.events or {})

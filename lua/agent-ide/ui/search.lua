@@ -9,11 +9,13 @@ local render = require('agent-ide.transcript.render')
 local locate = require('agent-ide.transcript.locate')
 local view = require('agent-ide.ui.search_view')
 local act = require('agent-ide.ui.search_open')
+local keys = require('agent-ide.ui.search_keys')
 
 local M = {}
 
 M._debounce_ms = 8
 local LIMIT = 200
+local HISTORY_LIMIT = 500 -- the helper's maximum: the prompt history shows this many, newest first
 local CONTEXTS = 20 -- turns kept for the preview
 local PREVIEW_MS = 25
 local KIND_SETS = {
@@ -62,7 +64,7 @@ local function selected() return P and P.hits[P.sel] end
 
 local function show_preview()
   local hit = selected()
-  if not hit then return view.render_preview(P.v, {}, 1, {}, '', '') end
+  if not hit then return view.render_preview(P.v, { lines = {}, folds = {} }, 1, {}, '', keys.hint()) end
   local event = hit.event or 1
   local key = hit.path .. ':' .. event
   P.preview_gen = P.preview_gen + 1
@@ -70,11 +72,13 @@ local function show_preview()
   local function draw(c)
     if P ~= mine or gen ~= P.preview_gen or not view.valid(P.v) then return end
     if not c.first then
-      return view.render_preview(P.v, { '(this event is no longer in the transcript)' }, 1, {}, hit.title, hit.project)
+      return view.render_preview(P.v, { lines = { '(this event is no longer in the transcript)' }, folds = {} }, 1, {},
+        hit.title, keys.hint())
     end
-    local lines = render.render(c.events).lines
+    local out = render.render(c.events)
     local target = hit.event and locate.line_in_turn(c.events, hit.event - c.first + 1) or 1
-    view.render_preview(P.v, lines, target, match.words(P.sent_query or ''), hit.title, hit.project)
+    view.render_preview(P.v, out, target, match.words(P.sent_query or ''), hit.title .. ' · ' .. (hit.project or '?'),
+      keys.hint())
   end
   if P.contexts[key] then return draw(P.contexts[key]) end
   search.context(hit.path, event, function(first, events)
@@ -92,17 +96,38 @@ end
 
 -- Results ------------------------------------------------------------------------------------
 
+local function prompts_only() return vim.deep_equal(KIND_SETS[P.kind_set].kinds, { 'prompt' }) end
+
 local function footer(res)
   local n = #P.hits
   local s = n == 0 and 'no hits' or (P.sel .. '/' .. n)
+  if res and res.total and res.shown and res.total > res.shown then
+    s = s .. (' · newest %d of %d, type to narrow'):format(res.shown, res.total)
+  end
   if res and res.indexing then s = s .. ' · indexing ' .. (res.sessions or 0) .. ' sessions…' end
   return s
+end
+
+-- Prompt history: the same prompt sent several times in a row is one row with a count.
+local function collapse(hits)
+  local out = {}
+  for _, h in ipairs(hits) do
+    local last = out[#out]
+    if last and last.kind == 'prompt' and h.kind == 'prompt' and last.snippet == h.snippet then
+      last.count = (last.count or 1) + 1
+    else
+      out[#out + 1] = h
+    end
+  end
+  return out
 end
 
 local function apply(res, q, t_key)
   -- a refresh of the same query (the index grew) keeps the selection
   local sel = q == P.sent_query and P.sel or 1
+  res.shown = #(res.hits or {})
   P.hits, P.backend, P.sent_query = res.hits or {}, res.backend, q
+  if prompts_only() then P.hits = collapse(P.hits) end
   P.sel = math.max(1, math.min(sel, #P.hits))
   P.last = res
   update_title()
@@ -122,7 +147,8 @@ function run()
   end
   local q, t_key, mine = query(), P.t_key, P
   P.inflight, P.pending, P.t_key = true, false, nil
-  search.search({ query = q, kinds = KIND_SETS[P.kind_set].kinds, scope = scope_param(), limit = LIMIT,
+  local limit = (prompts_only() and not q:find('%S')) and HISTORY_LIMIT or LIMIT
+  search.search({ query = q, kinds = KIND_SETS[P.kind_set].kinds, scope = scope_param(), limit = limit,
     projects = P.maps and P.maps.by_cwd or nil }, function(res)
     if P ~= mine then return end -- closed (or another picker opened) meanwhile
     P.inflight = false
@@ -164,14 +190,20 @@ function M.close()
   if p.prev_win and api.nvim_win_is_valid(p.prev_win) then pcall(api.nvim_set_current_win, p.prev_win) end
 end
 
--- The full text of the hit's event (the index keeps only the first 4 KiB), from its turn.
+local NO_TEXT = 'Agent-IDE: could not read the full text of this hit'
+
+-- The full text of the hit's event (the index keeps only the first 4 KiB), read from its turn
+-- in the transcript; never a snippet in its place: when it cannot be read, a notice instead.
 local function with_text(hit, cb)
-  if hit.kind == 'title' then return cb(hit.title) end
-  if hit.kind == 'tool' then return cb(hit.snippet) end
+  if hit.kind == 'title' or hit.kind == 'project' then return cb(hit.title) end
+  if hit.kind ~= 'prompt' and hit.kind ~= 'answer' then
+    return vim.notify('Agent-IDE: only prompts, answers and titles can be copied', vim.log.levels.INFO)
+  end
   search.context(hit.path, hit.event, function(first, events)
-    local ev = first and events[hit.event - first + 1]
-    local want = hit.kind == 'prompt' and 'prompt' or 'text'
-    cb(ev and ev.kind == want and type(ev.text) == 'string' and ev.text or hit.snippet)
+    local ev = first and events and act.event_index(events, hit, first)
+    ev = ev and events[ev]
+    if not (ev and type(ev.text) == 'string') then return vim.notify(NO_TEXT, vim.log.levels.WARN) end
+    cb(ev.text)
   end)
 end
 
@@ -219,25 +251,16 @@ function actions.kinds()
 end
 
 local function map_keys(buf)
-  local function map(modes, lhs, fn)
-    vim.keymap.set(modes, lhs, function() if P then fn() end end, { buffer = buf, nowait = true, silent = true })
-  end
-  local both = { 'i', 'n' }
-  for _, lhs in ipairs({ '<C-n>', '<Down>' }) do map(both, lhs, function() move(1) end) end
-  for _, lhs in ipairs({ '<C-p>', '<Up>' }) do map(both, lhs, function() move(-1) end) end
-  map('n', 'j', function() move(1) end)
-  map('n', 'k', function() move(-1) end)
-  map(both, '<CR>', actions.open)
-  map(both, '<C-y>', actions.copy)
-  map(both, '<C-r>', actions.reuse)
-  map(both, '<Tab>', actions.scope)
-  map(both, '<C-k>', actions.kinds)
-  map('n', '<Esc>', M.close)
-  map('n', 'q', M.close)
+  local function guard(fn) return function() if P then fn() end end end
+  keys.map(buf, {
+    next = guard(function() move(1) end), prev = guard(function() move(-1) end), open = guard(actions.open),
+    copy = guard(actions.copy), reuse = guard(actions.reuse), scope = guard(actions.scope),
+    kinds = guard(actions.kinds), close = guard(M.close),
+  })
 end
 
 ---Open the picker.
----@param opts? { query?: string, kinds?: string[], scope?: 'all'|'project'|'session', project?: table, title?: string }
+---@param opts? { query?: string, kinds?: string[], scope?: 'all'|'project'|'session', project?: table, title?: string, sel?: integer, kind_set?: integer }
 function M.open(opts)
   opts = opts or {}
   M.close()
@@ -248,7 +271,8 @@ function M.open(opts)
   for i, set in ipairs(KIND_SETS) do
     if opts.kinds and vim.deep_equal(set.kinds, opts.kinds) then kind_set = i end
   end
-  P = { opts = opts, hits = {}, sel = 1, contexts = {}, preview_gen = 0, kind_set = kind_set,
+  P = { opts = opts, hits = {}, sel = opts.sel or 1, sent_query = opts.sel and (opts.query or ''), contexts = {},
+    preview_gen = 0, kind_set = opts.kind_set or kind_set,
     scope = opts.scope or (opts.project and 'project') or 'all', project = opts.project,
     session_id = cur and cur.id, prev_win = api.nvim_get_current_win(),
     timer = vim.uv.new_timer(), preview_timer = vim.uv.new_timer() }
@@ -270,9 +294,11 @@ function M.open(opts)
     end)
   end })
   api.nvim_create_autocmd('VimResized', { group = P.augroup, callback = function()
-    local o = P.opts
+    -- reopen at the new size with what was chosen: query, scope, kinds, selection
+    local o = vim.tbl_extend('force', P.opts, { query = query(), scope = P.scope, project = P.project,
+      kind_set = P.kind_set, sel = P.sel })
     M.close()
-    M.open(vim.tbl_extend('force', o, { query = query() }))
+    M.open(o)
   end })
   P.unsub = search.on_ready(function() if P then run() end end)
   local mine = P

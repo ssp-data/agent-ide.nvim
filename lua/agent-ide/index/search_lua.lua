@@ -205,7 +205,7 @@ function M.search(params, cb)
           title = f.m.title, kind = f.kind, event = f.event, ts = f.ts, snippet = snippet, positions = positions,
           match = f.match, score = 0 }
       end
-      cb({ hits = hits, indexing = S.busy or #S.queue > 0 or S.scanning, sessions = #metas, chunks = chunks,
+      cb({ hits = hits, total = #found, indexing = S.busy or #S.queue > 0 or S.scanning, sessions = #metas, chunks = chunks,
         backend = 'lua', limited = true })
     end
     step()

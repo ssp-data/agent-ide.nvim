@@ -33,18 +33,28 @@ function M.projects(cb)
   end)
 end
 
----The event of `hit` in `events`: its index when the kind still fits, else (the transcript
----changed since it was indexed) the first event of that kind whose text holds the snippet, else nil.
-function M.event_index(events, hit)
-  local i, want = hit.event, EVENT_KIND[hit.kind]
-  if not i or not want then return nil end
-  if events[i] and events[i].kind == want then return i end
+-- What a snippet shows of a text: control characters (newlines, tabs) as spaces.
+local function flat(t) return (t:gsub('%c', ' ')) end
+
+local function holds(ev, want, probe)
+  if ev.kind ~= want or ev.sidechain then return false end
+  if want == 'tool_call' then return vim.startswith(probe, tostring(ev.name) .. ':') end
+  return type(ev.text) == 'string' and flat(ev.text):find(probe, 1, true) ~= nil
+end
+
+---Index in `events` (which start at event number `first`, default 1) of the event of `hit`:
+---the indexed one when its kind fits and its text holds the snippet; else (the transcript
+---changed since it was indexed) the first event of that kind whose text holds it; else nil.
+function M.event_index(events, hit, first)
+  first = first or 1
+  local want = EVENT_KIND[hit.kind]
+  if not hit.event or not want then return nil end
   local probe = (hit.snippet or ''):gsub('^…', ''):gsub('…$', '')
-  if probe == '' or want == 'tool_call' then return nil end
+  if probe == '' then return nil end
+  local i = hit.event - first + 1
+  if events[i] and holds(events[i], want, probe) then return i end
   for k, ev in ipairs(events) do
-    if ev.kind == want and not ev.sidechain and type(ev.text) == 'string' and ev.text:find(probe, 1, true) then
-      return k
-    end
+    if holds(ev, want, probe) then return k end
   end
 end
 

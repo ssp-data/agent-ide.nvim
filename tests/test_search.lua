@@ -203,10 +203,22 @@ T['helper hits point at the events lua history returns, and context agrees'] = f
   need_helper()
   use('helper')
   local root = tmp .. '/ev'
-  local path = S.write(root, '-w-e', 'e', S.session('/w/e', 6, 'eventword', 30, 0))
+  -- records whose events changed with the parse rules, before the hits: the indexes must agree
+  local lines = {
+    vim.json.encode({ type = 'user', message = { content = '<local-command-caveat>Caveat: synthetic</local-command-caveat>' } }),
+    vim.json.encode({ type = 'system', subtype = 'local_command', content = '<local-command-stdout>synthetic out</local-command-stdout>' }),
+    vim.json.encode({ type = 'user', message = { content = { { type = 'text', text = '[Request interrupted by user]' } } } }),
+    '{"type": "user", "message": not json at all',
+    vim.json.encode({ type = 'system', subtype = 'informational', content = 'a system note' }),
+  }
+  vim.list_extend(lines, S.session('/w/e', 6, 'eventword', 30, 0))
+  local path = S.write(root, '-w-e', 'e', lines)
   local r = run({ projects_dir = root, query = 'eventword', kinds = { 'prompt', 'answer', 'tool' } })
   eq(#r.hits, 12)
   local all = history(path)
+  local kinds = vim.tbl_map(function(e) return e.kind end, vim.list_slice(all, 1, 4))
+  eq(kinds, { 'meta', 'meta', 'unknown', 'meta' }) -- caveat dropped; output, marker, bad line, note
+  eq(vim.tbl_contains(vim.tbl_map(function(h) return h.snippet end, r.hits), '[Request interrupted by user]'), false)
   for _, h in ipairs(r.hits) do
     local ev = all[h.event]
     eq(ev.kind, h.kind == 'prompt' and 'prompt' or 'text')
@@ -216,6 +228,94 @@ T['helper hits point at the events lua history returns, and context agrees'] = f
     vim.wait(5000, function() return first ~= nil end, 5)
     eq(events[h.event - first + 1], ev)
   end
+end
+
+-- A helper script for the cases below (synthetic; runs `nvim -l` on a Lua file).
+local function fake_helper(body)
+  local lua = tmp .. '/fake_helper.lua'
+  vim.fn.writefile(vim.split(body, '\n'), lua)
+  local sh = tmp .. '/fake_helper.sh'
+  vim.fn.writefile({ '#!/bin/sh', ('exec nvim --clean -l %q'):format(lua) }, sh)
+  vim.uv.fs_chmod(sh, tonumber('755', 8))
+  config.setup({ helper = { enabled = true, path = sh } })
+  helper._reset(); index._reset(); search._reset()
+end
+
+T['context falls back to the history when the helper fails (exits, out of date)'] = function()
+  local p = fixtures .. '/-home-u-git-alpha/11111111-1111-4111-8111-111111111111.jsonl'
+  for _, body in ipairs({
+    'os.exit(1)', -- cannot answer: process exited
+    -- answers hello with other rules: out of date
+    'local l = io.read("l"); local m = vim.json.decode(l); io.write(vim.json.encode({ id = m.id, result = { rules_version = 999 } }), "\\n"); io.flush(); io.read("a")',
+  }) do
+    fake_helper(body)
+    eq(index.backend(), 'helper')
+    local first, events
+    search.context(p, 3, function(f, e) first, events = f or false, e end)
+    vim.wait(8000, function() return first ~= nil end, 5)
+    eq(first, 1)
+    eq(events[1].kind, 'prompt')
+  end
+end
+
+T['searches sent before the hello reply of an out-of-date helper fall back to Lua cleanly'] = function()
+  -- hello answered late, with other rules; the search sent meanwhile is never answered by it
+  fake_helper([[
+local l = io.read("l")
+local m = vim.json.decode(l)
+vim.uv.sleep(300)
+io.write(vim.json.encode({ id = m.id, result = { rules_version = 999 } }), "\n")
+io.flush()
+io.read("a")
+]])
+  local notes, orig = {}, vim.notify
+  vim.notify = function(msg) notes[#notes + 1] = msg end
+  local out
+  search.search({ projects_dir = fixtures, query = 'greeting', limit = 50 }, function(r) out = r end)
+  vim.wait(10000, function() return out ~= nil end, 5)
+  vim.notify = orig
+  eq(out.backend, 'lua')
+  eq(index.backend(), 'lua')
+  eq(run({ projects_dir = fixtures, query = 'greeting' }).hits[1].snippet, 'Please add a greeting to main.')
+  eq(vim.iter(notes):any(function(n) return n:find('out of date', 1, true) ~= nil end), true)
+  helper._reset()
+end
+
+T['context sends only what the renderer shows of big tool output; the render is the same'] = function()
+  need_helper()
+  use('helper')
+  local root = tmp .. '/trim'
+  local big = {}
+  for i = 1, 5000 do big[#big + 1] = 'output line ' .. i end
+  local cmd = {}
+  for i = 1, 100 do cmd[#cmd + 1] = 'echo ' .. i end
+  local side = {}
+  for i = 1, 50 do side[#side + 1] = 'edit ' .. i end
+  local enc = vim.json.encode
+  local lines = {
+    S.user('trimword prompt', 1, '/w/t'),
+    enc({ type = 'assistant', message = { content = { { type = 'tool_use', id = 'b', name = 'Bash', input = { command = table.concat(cmd, '\n') } } } } }),
+    S.result('b', table.concat(big, '\r\n')),
+    enc({ type = 'assistant', message = { content = { { type = 'tool_use', id = 'e', name = 'Edit',
+      input = { file_path = 'x', old_string = table.concat(side, '\n'), new_string = table.concat(side, '\r') } } } } }),
+    S.result('e', 'ok'),
+    enc({ type = 'assistant', message = { content = { { type = 'tool_use', id = 'w', name = 'Write',
+      input = { file_path = 'y', content = table.concat(cmd, '\n') .. '\n' } } } } }),
+    S.result('w', table.concat(big, '\n') .. '\n'),
+    S.answer('trimword answer', 2),
+    S.user('next prompt', 3, '/w/t'),
+  }
+  local path = S.write(root, '-w-t', 't', lines)
+  local r = run({ projects_dir = root, query = 'trimword answer', kinds = { 'answer' } })
+  local h = r.hits[1]
+  local first, events
+  search.context(path, h.event, function(f, e) first, events = f, e end)
+  vim.wait(5000, function() return first ~= nil end, 5)
+  local all = history(path)
+  local turn = vim.list_slice(all, first, first + #events - 1)
+  local render = require('agent-ide.transcript.render')
+  eq(render.render(events), render.render(turn))
+  eq(#vim.json.encode(events) < #vim.json.encode(turn) / 3, true)
 end
 
 return T

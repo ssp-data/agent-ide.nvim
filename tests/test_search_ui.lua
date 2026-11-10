@@ -141,10 +141,10 @@ T['picker with the helper: fuzzy, answers, kinds cycle, Enter opens the chat on 
   type_query('umlatu')
   local hits = state().hits
   eq(hits[1].match, 'fuzzy')
-  -- <C-k> cycles kinds: prompts only, then answers only
-  child.type_keys('<C-k>')
+  -- <C-t> cycles kinds: prompts only, then answers only
+  child.type_keys('<C-t>')
   wait_for(function() return vim.deep_equal(state().kinds, { 'prompt' }) end, 'kinds prompt')
-  child.type_keys('<C-k>')
+  child.type_keys('<C-t>')
   wait_for(function() return vim.deep_equal(state().kinds, { 'answer' }) and #state().hits > 0 and state().hits[1].kind == 'answer' end, 'answers')
   eq(state().hits[1].snippet, 'Fixed the umlaut handling.')
   child.type_keys('<CR>')
@@ -189,13 +189,13 @@ T['a transcript rewritten after indexing still opens on the hit (found by its te
   wait_for(function() return child.lua_get('vim.api.nvim_get_current_line()') == 'Release notes written.' end, 'hit line')
 end
 
-T['<C-y> copies the full text, <C-r> puts a prompt into the chat prompt'] = function()
+T['<C-y> copies the full text, <C-e> puts a prompt into the chat prompt'] = function()
   start('lua')
   open_picker()
   type_query('release notes')
   child.type_keys('<C-y>')
   wait_for(function() return child.lua_get('vim.fn.getreg(\'"\')') == 'now write the release notes' end, 'copied')
-  child.type_keys('<C-r>')
+  child.type_keys('<C-e>')
   eq(child.lua_get('_G.notes[#_G.notes]'):find('no chat prompt', 1, true) ~= nil, true)
   child.type_keys('<Esc>q')
   -- open a chat (its prompt below), then reuse a prompt from the picker
@@ -205,7 +205,7 @@ T['<C-y> copies the full text, <C-r> puts a prompt into the chat prompt'] = func
   wait_for(function() return child.lua_get('vim.api.nvim_get_current_line()') == 'alpha second session prompt' end, 'chat')
   open_picker()
   type_query('umlaut bug')
-  child.type_keys('<C-r>')
+  child.type_keys('<C-e>')
   wait_for(function() return state() == vim.NIL end, 'picker closed')
   local pbuf = child.lua_get('vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().prompt)')
   eq(child.lua_get('vim.api.nvim_buf_get_lines(..., 0, -1, false)', { pbuf }), { 'fix the umlaut bug in Übersetzung' })
@@ -272,6 +272,131 @@ T['entry points: keys, :AgentsSearch, prompt history newest first; stale results
   vim.wait(400)
   eq(state().query, 'beta')
   eq(state().hits[1].session, 'b1')
+end
+
+T['an index pointing at another answer of the same kind still opens on the hit text'] = function()
+  need_helper()
+  start('helper')
+  open_picker('require("agent-ide").search({ kinds = { "answer" } })')
+  type_query('umlaut handling')
+  eq(state().hits[1].event, 2)
+  -- another answer now sits at index 2: same kind, other text
+  local path = projects .. '/-w-alpha/a1.jsonl'
+  local lines = vim.fn.readfile(path)
+  table.insert(lines, 3, S.answer('a different answer here', 1))
+  vim.fn.writefile(lines, path)
+  child.type_keys('<CR>')
+  wait_for(function() return child.lua_get('vim.api.nvim_get_current_line()') == 'Fixed the umlaut handling.' end, 'hit line')
+end
+
+T['copy refuses when the full text cannot be read, never copies a snippet'] = function()
+  start('lua')
+  open_picker()
+  type_query('release notes')
+  child.lua('vim.fn.setreg(\'"\', "before")')
+  vim.fn.delete(projects .. '/-w-alpha/a1.jsonl')
+  child.type_keys('<C-y>')
+  wait_for(function()
+    return vim.iter(child.lua_get('_G.notes')):any(function(n) return n:find('could not read the full text', 1, true) ~= nil end)
+  end, 'notice')
+  eq(child.lua_get('vim.fn.getreg(\'"\')'), 'before')
+end
+
+T['a resize keeps query, scope, kinds and selection'] = function()
+  start('lua')
+  open_picker()
+  type_query('release')
+  child.type_keys('<C-t>') -- prompts only
+  wait_for(function() return vim.deep_equal(state().kinds, { 'prompt' }) and #state().hits == 2 end, 'prompts')
+  child.type_keys('<C-n>')
+  eq(state().sel, 2)
+  child.lua('vim.api.nvim_exec_autocmds("VimResized", {})')
+  wait_for(function() local s = state(); return s ~= vim.NIL and s.query == 'release' and #s.hits == 2 end, 'reopened')
+  eq(state().kinds, { 'prompt' })
+  eq(state().scope, 'all')
+  eq(state().sel, 2)
+end
+
+T['the preview folds like the chat, the hit fold open'] = function()
+  need_helper()
+  start('helper')
+  open_picker('require("agent-ide").search({ kinds = { "title", "prompt", "answer", "tool" } })')
+  type_query('umlaut handling')
+  eq(state().hits[1].kind, 'answer')
+  local win = state().wins.preview
+  wait_for(function() return vim.tbl_contains(preview_lines(), 'Fixed the umlaut handling.') end, 'preview')
+  eq(child.lua_get('vim.wo[...].foldmethod', { win }), 'expr')
+  local row
+  for i, l in ipairs(preview_lines()) do if l:find('▸ Bash', 1, true) then row = i end end
+  eq(child.lua_get('vim.api.nvim_win_call(..., function() return vim.fn.foldclosed(' .. row .. ') end)', { win }), row)
+  child.type_keys('<C-u>')
+  type_query('cargo test umlaut')
+  eq(state().hits[1].kind, 'tool')
+  wait_for(function()
+    local cur = child.lua_get('vim.api.nvim_win_get_cursor(...)[1]', { win })
+    return preview_lines()[cur] == '▸ Bash: cargo test umlaut'
+      and child.lua_get('vim.api.nvim_win_call(..., function() return vim.fn.foldclosed(".") end)', { win }) == -1
+  end, 'tool fold open')
+end
+
+T['the helper cache directory is 0700 and its files 0600'] = function()
+  need_helper()
+  local xdg = tmp .. '/xdg'
+  vim.fn.mkdir(xdg .. '/nvim/agent-ide', 'p', tonumber('755', 8))
+  vim.uv.os_setenv('XDG_CACHE_HOME', xdg)
+  local ok, err = pcall(function()
+    child.restart({ '-u', 'tests/minimal_init.lua' })
+    child.lua([[require('agent-ide').setup({ projects_dir = ..., live = { interval_ms = 600000, cmd = { 'echo', '[]' } } })]],
+      { projects })
+    eq(child.lua_get('vim.fn.stdpath("cache")'), xdg .. '/nvim')
+    open_picker()
+    type_query('release')
+  end)
+  vim.uv.os_unsetenv('XDG_CACHE_HOME')
+  if not ok then error(err, 0) end
+  local dir = xdg .. '/nvim/agent-ide'
+  local mode = function(p) return bit.band(vim.uv.fs_stat(p).mode, tonumber('777', 8)) end
+  eq(mode(dir), tonumber('700', 8))
+  wait_for(function() return vim.uv.fs_stat(dir .. '/search-v1.json') ~= nil end, 'search index written')
+  eq(mode(dir .. '/search-v1.json'), tonumber('600', 8))
+end
+
+T['picker keys come from config; <C-r> and <C-k> keep their Vim meaning'] = function()
+  start('lua')
+  child.lua('require("agent-ide").setup(vim.tbl_deep_extend("force", require("agent-ide.config").get(), { keys = { search_picker = { kinds = "<C-g>", reuse = false } } }))')
+  open_picker()
+  local buf = state().bufs.input
+  local mapped = function(lhs, mode)
+    return child.lua('local b, l, m = ...; return vim.api.nvim_buf_call(b, function() return vim.fn.maparg(l, m) end)', { buf, lhs, mode })
+  end
+  eq(mapped('<C-r>', 'i'), '')
+  eq(mapped('<C-k>', 'i'), '')
+  eq(mapped('<C-e>', 'i'), '')
+  eq(mapped('<C-t>', 'i'), '')
+  eq(mapped('<C-g>', 'i') ~= '', true)
+  eq(mapped('<Esc>', 'i'), '')
+  eq(mapped('<Esc>', 'n') ~= '', true)
+  child.type_keys('<C-g>')
+  wait_for(function() return vim.deep_equal(state().kinds, { 'prompt' }) end, 'kinds by <C-g>')
+end
+
+T['prompt history: repeated prompts are one row with a count; how many of how many'] = function()
+  local lines = {}
+  for i = 1, 520 do lines[#lines + 1] = S.user('distinct prompt ' .. i, i, '/w/many') end
+  for i = 1, 3 do lines[#lines + 1] = S.user('the same prompt', 600 + i, '/w/many') end
+  S.write(projects, '-w-many', 'm1', lines)
+  start('lua')
+  child.type_keys(' aP')
+  wait_for(function() local s = state(); return s ~= vim.NIL and #s.hits > 0 and s.hits[1].snippet == 'the same prompt' end, 'history')
+  eq(state().hits[1].count, 3)
+  eq(state().hits[2].snippet, 'distinct prompt 520')
+  local list = list_lines()
+  eq(list[1]:find('the same prompt', 1, true) ~= nil, true)
+  local marks = child.lua_get([[vim.tbl_map(function(m) return m[4].virt_text and m[4].virt_text[1][1] or '' end,
+    vim.api.nvim_buf_get_extmarks(..., -1, { 0, 0 }, { 0, -1 }, { details = true }))]], { state().bufs.list })
+  eq(vim.iter(marks):any(function(t) return t:find('×3', 1, true) ~= nil end), true)
+  local footer = child.lua_get('vim.api.nvim_win_get_config(...).footer[1][1]', { state().wins.list })
+  eq(footer:find('newest 500 of 527', 1, true) ~= nil, true)
 end
 
 return T

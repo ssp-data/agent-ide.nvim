@@ -8,9 +8,9 @@ local M = {}
 local ns = api.nvim_create_namespace('agent-ide.search')
 local PREVIEW_HL_LINES = 200 -- query words are highlighted this far around the hit
 
-M.TAGS = { title = 'title ', prompt = 'you   ', answer = 'claude', tool = 'tool  ' }
+M.TAGS = { title = 'title ', prompt = 'you   ', answer = 'claude', tool = 'tool  ', project = 'proj  ' }
 local KIND_HL = { title = 'AgentIdeSearchKindTitle', prompt = 'AgentIdeSearchKindPrompt',
-  answer = 'AgentIdeSearchKindAnswer', tool = 'AgentIdeSearchKindTool' }
+  answer = 'AgentIdeSearchKindAnswer', tool = 'AgentIdeSearchKindTool', project = 'AgentIdeSearchMeta' }
 
 local GROUPS = {
   AgentIdeSearchMatch = { link = 'Search' },
@@ -113,7 +113,7 @@ function M.render_list(v, hits, sel, empty, footer)
   local lines, metas, cut = {}, {}, {}
   local width = api.nvim_win_get_width(v.list_win)
   for i, h in ipairs(hits) do
-    metas[i] = ' ' .. (h.project or '?') .. ' · ' .. age(h.ts) .. ' '
+    metas[i] = ' ' .. (h.count and ('×' .. h.count .. ' · ') or '') .. (h.project or '?') .. ' · ' .. age(h.ts) .. ' '
     local line = (M.TAGS[h.kind] or '?     ') .. ' ' .. h.snippet
     -- leave room for the project and age on the right
     local room = math.max(10, width - vim.fn.strdisplaywidth(metas[i]) - 1)
@@ -159,28 +159,36 @@ function M.select(v, sel)
 end
 
 ---Show `lines` in the preview, `target` highlighted and centred, `words` marked around it.
-function M.render_preview(v, lines, target, words, title, footer)
-  vim.bo[v.preview_buf].modifiable = true
-  api.nvim_buf_set_lines(v.preview_buf, 0, -1, false, lines)
-  vim.bo[v.preview_buf].modifiable = false
-  api.nvim_buf_clear_namespace(v.preview_buf, ns, 0, -1)
+function M.render_preview(v, out, target, words, title, footer)
+  local lines, buf, win = out.lines, v.preview_buf, v.preview_win
+  -- folded like the chat (tool blocks closed), through the same fold expression
+  local history = require('agent-ide.ui.history')
+  history.set_folds(buf, require('agent-ide.transcript.render').fold_levels(out.folds or {}, #lines))
+  vim.bo[buf].bufhidden = 'wipe' -- set_folds makes it 'hide' the first time
+  vim.bo[buf].modifiable = true
+  api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modifiable = false
+  history.apply_win(win, buf)
+  vim.wo[win].winbar = ''
+  api.nvim_buf_clear_namespace(buf, ns, 0, -1)
   target = math.max(1, math.min(target or 1, #lines))
   if #lines > 0 and target then
-    api.nvim_buf_set_extmark(v.preview_buf, ns, target - 1, 0, { line_hl_group = 'AgentIdeSearchTarget' })
+    api.nvim_buf_set_extmark(buf, ns, target - 1, 0, { line_hl_group = 'AgentIdeSearchTarget' })
   end
   if #words > 0 then
     for l = math.max(1, target - PREVIEW_HL_LINES), math.min(#lines, target + PREVIEW_HL_LINES) do
       for _, r in ipairs(match.positions(lines[l], words)) do
-        api.nvim_buf_set_extmark(v.preview_buf, ns, l - 1, r[1], { end_col = r[2], hl_group = 'AgentIdeSearchMatch' })
+        api.nvim_buf_set_extmark(buf, ns, l - 1, r[1], { end_col = r[2], hl_group = 'AgentIdeSearchMatch' })
       end
     end
   end
-  api.nvim_win_set_config(v.preview_win, {
+  api.nvim_win_set_config(win, {
     title = { { ' ' .. (title or ''):gsub('[\r\n]+', ' ') .. ' ', 'FloatTitle' } }, title_pos = 'center',
     footer = { { ' ' .. (footer or '') .. ' ', 'FloatFooter' } }, footer_pos = 'right',
   })
-  api.nvim_win_set_cursor(v.preview_win, { target, 0 })
-  api.nvim_win_call(v.preview_win, function() vim.cmd('normal! zz') end)
+  api.nvim_win_set_cursor(win, { target, 0 })
+  -- the hit's fold (if any) open, the hit in the middle
+  api.nvim_win_call(win, function() vim.cmd('normal! zxzz') end) -- zx: folds recomputed, then zv
 end
 
 return M
