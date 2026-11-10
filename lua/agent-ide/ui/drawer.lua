@@ -197,7 +197,9 @@ function actions.lazygit()
   local node = current_node()
   local p = node and node.project
   if not (p and p.is_git and p.root) then return notify('not a git project') end
-  require('agent-ide.ui.lazygit').open(p.root)
+  -- the row's own work tree: a git row's, a session's (a linked worktree), else the project's
+  local root = node.root or (node.session and require('agent-ide.ui.git_sections').tree_of(node.session.cwd)) or p.root
+  require('agent-ide.ui.lazygit').open(root)
 end
 
 function actions.help()
@@ -206,7 +208,7 @@ function actions.help()
     { key = 'za', desc = 'toggle fold' },
     { key = 'R', desc = 'refresh' },
     { key = 'gp', desc = 'jump to tmux pane' },
-    { key = 'gl', desc = 'lazygit for the project' },
+    { key = 'glg', desc = 'lazygit for the project (or the row\'s worktree)' },
     { key = 'q', desc = 'close drawer' },
     { key = '?', desc = 'this help' },
     { key = '/', desc = 'search (built-in)' },
@@ -227,7 +229,7 @@ local function ensure_buf()
   map('za', actions.fold)
   map('R', actions.refresh)
   map('gp', actions.jump)
-  map('gl', actions.lazygit)
+  map('glg', actions.lazygit)
   api.nvim_create_autocmd('BufEnter', { buffer = buf, callback = function() sections.focus() end })
   map('q', actions.close)
   map('?', actions.help)

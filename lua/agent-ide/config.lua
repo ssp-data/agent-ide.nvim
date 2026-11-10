@@ -23,7 +23,7 @@ local function defaults()
         answer_inner = 'ir', answer_outer = 'ar', mode = '<S-Tab>', model = '<leader>aM', answer = '<leader>ay',
         raw = 'gr', raw_event = 'gR', diff = 'gd' },
       -- diff view, buffer-local on both sides (]c / [c stay Neovim's hunk motions)
-      diff = { next_file = ']f', prev_file = '[f', flip = 'gb', branch = 'gB', close = 'q', help = '?', lazygit = 'gl' },
+      diff = { next_file = ']f', prev_file = '[f', flip = 'gb', branch = 'gB', close = 'q', help = '?', lazygit = 'glg' },
     },
     -- prompt buffer: `/` opens the command menu, `@` opens the file picker
     chat = { auto_slash = true, at_picker = true },

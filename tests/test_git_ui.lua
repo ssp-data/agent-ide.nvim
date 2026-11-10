@@ -329,6 +329,59 @@ T[':bd on the scratch side, then the right window; an unsaved real file is never
   eq(child.lua_get('vim.bo[vim.fn.bufnr(...)].modified', { repo .. '/a.lua' }), true)
 end
 
+T['a session in a linked worktree: one row per work tree, diffs, gd, lazygit and refresh use the worktree'] = function()
+  local wt = tmp .. '/wt'
+  R.git(repo, { 'worktree', 'add', '-q', '-b', 'wtb', wt, 'main' })
+  R.write(wt, 'w.lua', { 'return "w"' })
+  R.commit(wt, 'in the worktree')
+  R.write(wt, 'a.lua', { 'changed in the worktree' })
+  local WT_ID = '33333333-3333-4333-8333-333333333333'
+  vim.fn.writefile({
+    vim.json.encode({ type = 'user', uuid = 'w1', cwd = wt, message = { role = 'user', content = 'Worktree job' } }),
+    vim.json.encode({ type = 'assistant', uuid = 'w2', cwd = wt, message = { role = 'assistant', content = {
+      { type = 'tool_use', id = 'e1', name = 'Edit', input = { file_path = wt .. '/w.lua', old_string = 'a', new_string = 'b' } },
+    } } }),
+  }, projects .. '/-r/' .. WT_ID .. '.jsonl')
+  start()
+  child.lua('_G.Snacks = { lazygit = function(o) _G.snacks_cwd = o.cwd end }')
+  child.lua('require("agent-ide").toggle()')
+  press_on('P r  ')
+  wait_for(function() return has_line(drawer_lines(), '⎇ wtb · wt') ~= nil end, 'worktree row')
+  local l = drawer_lines()
+  eq(has_line(l, '⎇ feat · r') < has_line(l, '⎇ wtb · wt'), true) -- the main checkout first
+  eq(has_line(l, 'Sessions (2)') ~= nil, true) -- still one project row
+  press_on('⎇ wtb · wt')
+  wait_for(function() return has_line(drawer_lines(), '    > Changes vs main (2)') ~= nil end, 'worktree changes')
+  press_on('    > Changes vs main (2)')
+  press_on('A w.lua')
+  wait_for(function() local v = view(); return v ~= vim.NIL and v.right.diff end, 'worktree diff')
+  eq(view().right.name, wt .. '/w.lua')
+  eq(child.lua_get('require("agent-ide.ui.diff").state().root'), wt)
+  child.type_keys('q')
+  wait_for(function() return view() == vim.NIL end, 'closed')
+  press_on('A w.lua', 'glg')
+  eq(child.lua_get('_G.snacks_cwd'), wt)
+  press_on('Worktree job', 'glg')
+  eq(child.lua_get('_G.snacks_cwd'), wt)
+  -- a turn of the worktree session ends: the worktree's data reloads
+  local gen = child.lua_get('require("agent-ide.git_cache").peek(...).gen', { wt })
+  child.lua(([[local s = require('agent-ide.session').open({ id = '%s', cwd = '%s' })
+    s:_set_state('busy'); s:_set_state('idle')]]):format(WT_ID, wt))
+  eq(child.lua_get('require("agent-ide.git_cache").peek(...).gen', { wt }) > gen, true)
+  -- gd in the worktree session's chat
+  press_on('Worktree job')
+  local row
+  wait_for(function()
+    local t = child.lua_get('vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().transcript), 0, -1, false)')
+    row = has_line(t, '▸ Edit: ')
+    return row ~= nil
+  end, 'edit fold')
+  child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.chat")._windows().transcript); vim.api.nvim_win_set_cursor(0, { ..., 0 })', { row })
+  child.type_keys('gd')
+  wait_for(function() local v = view(); return v ~= vim.NIL and v.path == 'w.lua' end, 'gd diff in the worktree')
+  eq(child.lua_get('require("agent-ide.ui.diff").state().root'), wt)
+end
+
 T['late git results after collapsing the project or closing the tab are harmless'] = function()
   start()
   child.lua('require("agent-ide").toggle()')
@@ -393,7 +446,7 @@ T['refresh: R, a session finishing its turn, drawer focus after 5 s; the open di
   wait_for(function() return has_line(drawer_lines(), 'Changes vs main (8)') ~= nil end, 'focus refresh')
 end
 
-T['gl: Snacks.lazygit when loaded, a terminal tab otherwise, a notice without lazygit; data invalidated'] = function()
+T['glg: Snacks.lazygit when loaded, a terminal tab otherwise, a notice without lazygit; data invalidated'] = function()
   start()
   child.lua([[_G.Snacks = { lazygit = function(o)
     _G.snacks_cwd = o.cwd
@@ -404,7 +457,7 @@ T['gl: Snacks.lazygit when loaded, a terminal tab otherwise, a notice without la
   child.lua('require("agent-ide").toggle()')
   press_on('P r  ')
   wait_for(function() return has_line(drawer_lines(), 'Changes vs main (5)') ~= nil end, 'changes')
-  press_on('Sessions (1)', 'gl')
+  press_on('Sessions (1)', 'glg')
   eq(child.lua_get('_G.snacks_cwd'), repo)
   local gen = child.lua_get('require("agent-ide.git_cache").peek(...).gen', { repo })
   child.lua('vim.api.nvim_buf_delete(_G.snacks_buf, { force = true })')
@@ -416,27 +469,27 @@ T['gl: Snacks.lazygit when loaded, a terminal tab otherwise, a notice without la
   vim.fn.setfperm(bin .. '/lazygit', 'rwxr-xr-x')
   child.lua('_G.Snacks = nil; vim.env.PATH = ... .. ":" .. vim.env.PATH', { bin })
   gen = child.lua_get('require("agent-ide.git_cache").peek(...).gen', { repo })
-  press_on('Sessions (1)', 'gl')
+  press_on('Sessions (1)', 'glg')
   wait_for(function() return vim.fn.filereadable(tmp .. '/lg.args') == 1 end, 'lazygit ran')
   eq(vim.fn.readfile(tmp .. '/lg.args'), { '-p ' .. repo })
   wait_for(function() return child.lua_get('require("agent-ide.git_cache").peek(...).gen', { repo }) > gen end, 'invalidated 2')
   wait_for(function() return child.lua_get('vim.fn.tabpagenr("$")') == 2 end, 'lazygit tab closed')
   -- not installed
   child.lua('vim.env.PATH = "/nonexistent"; _G.notes = {}')
-  press_on('Sessions (1)', 'gl')
+  press_on('Sessions (1)', 'glg')
   eq(child.lua_get('_G.notes'), { 'Agent-IDE: lazygit is not installed' })
 end
 
-T['gl and ? in the diff view'] = function()
+T['glg and ? in the diff view'] = function()
   start()
   open_file('M a.lua')
   child.lua('_G.Snacks = { lazygit = function(o) _G.snacks_cwd = o.cwd end }')
-  child.type_keys('gl')
+  child.type_keys('glg')
   eq(child.lua_get('_G.snacks_cwd'), repo)
   child.type_keys('?')
   wait_for(function() return child.lua_get('vim.api.nvim_win_get_config(0).relative') ~= '' end, 'help')
   local text = table.concat(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), '\n')
-  for _, k in ipairs({ ']f', '[f', 'gb', 'gB', 'q', ']c / [c', 'gl' }) do eq(text:find(k, 1, true) ~= nil, true) end
+  for _, k in ipairs({ ']f', '[f', 'gb', 'gB', 'q', ']c / [c', 'glg' }) do eq(text:find(k, 1, true) ~= nil, true) end
 end
 
 T['gd on an Edit or Write fold in the chat opens the branch diff of that file'] = function()

@@ -51,9 +51,11 @@ end
 local function root_of(s, path)
   local chat = package.loaded['agent-ide.ui.chat']
   local p = chat and chat.project_of(s)
-  if p and p.root and vim.startswith(path, p.root .. '/') then return p.root, p end
-  local root = require('agent-ide.project').git_root(vim.fs.dirname(path), vim.uv.os_homedir() or '')
-  return root, p and p.root == root and p or { key = root, root = root, name = root and vim.fs.basename(root), is_git = true, sessions = {} }
+  -- the file's own work tree first (a linked worktree under the project is not the project root)
+  local root = vim.fs.root(vim.fs.dirname(path), '.git')
+  if not root and p and p.root and vim.startswith(path, p.root .. '/') then root = p.root end
+  if not root then return nil end
+  return root, p or { key = root, root = root, name = vim.fs.basename(root), is_git = true, sessions = {} }
 end
 
 ---Open the branch diff of the file of the Edit/Write fold under the cursor.
