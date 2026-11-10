@@ -106,7 +106,7 @@ T['changes: renames, deletes, binary, spaces, non-ASCII, uncommitted, untracked'
   R.write(d, 'sp ace.txt', { 'old', 'new' }) -- uncommitted change
   R.write(d, 'new dir/ünt racked.txt', { '1', '2', '3' })
   R.write(d, 'untracked.bin', 'x\0y')
-  local files = R.await(function(cb) git.changes(d, cb) end)
+  local files = R.await(function(cb) git.changes(d, function() end, nil, cb) end) -- with the untracked counts
   local m = by_path(files)
   eq({ m['a.txt'].status, m['a.txt'].added, m['a.txt'].removed }, { 'M', 2, 1 })
   eq({ m['ren2.txt'].status, m['ren2.txt'].old_path, m['ren2.txt'].added }, { 'R', 'ren.txt', 0 })
@@ -238,6 +238,58 @@ T['signature changes with the working tree'] = function()
   eq(R.await(function(cb) git.signature(d, cb) end), a)
   R.write(d, 'zz.txt', 'z\n')
   eq(R.await(function(cb) git.signature(d, cb) end) ~= a, true)
+end
+
+T['base: local main behind origin/main uses the fork point nearest HEAD'] = function()
+  local d = R.init(tmp .. '/r')
+  R.write(d, 'f', 'a\n')
+  R.commit(d, 'c1')
+  R.git(d, { 'checkout', '-q', '-b', 'tmp' })
+  R.write(d, 'f', 'b\n')
+  local c2 = R.commit(d, 'c2 (only on origin)')
+  R.git(d, { 'update-ref', 'refs/remotes/origin/main', c2 })
+  R.git(d, { 'checkout', '-q', '-b', 'feat' })
+  R.git(d, { 'branch', '-q', '-D', 'tmp' })
+  R.write(d, 'g', 'g\n')
+  R.commit(d, 'c3')
+  local b = R.await(function(cb) git.base(d, cb) end)
+  eq({ b.merge_base, b.mode }, { c2, 'branch' })
+  local cs = R.await(function(cb) git.commits(d, cb) end)
+  eq(vim.tbl_map(function(c) return c.subject end, cs), { 'c3' })
+  eq(vim.tbl_map(function(f) return f.path end, R.await(function(cb) git.changes(d, cb) end)), { 'g' })
+  -- on local main itself, still the default branch
+  R.git(d, { 'checkout', '-q', 'main' })
+  eq(R.await(function(cb) git.base(d, cb) end).on_default, true)
+end
+
+T['an inherited GIT_DIR / GIT_WORK_TREE never overrides the repository'] = function()
+  local d = feature_repo()
+  local other = R.init(tmp .. '/other', 'elsewhere')
+  R.write(other, 'o', 'o\n')
+  R.commit(other, 'o')
+  vim.uv.os_setenv('GIT_DIR', other .. '/.git')
+  vim.uv.os_setenv('GIT_WORK_TREE', other)
+  local ok, branch = pcall(R.await, function(cb) git.branch(d, cb) end)
+  vim.uv.os_unsetenv('GIT_DIR')
+  vim.uv.os_unsetenv('GIT_WORK_TREE')
+  eq({ ok, branch }, { true, 'feat' })
+end
+
+T['changes arrive before the untracked line counts; nested repositories are dirs'] = function()
+  local d = feature_repo()
+  R.write(d, 'u1.txt', { '1', '2' })
+  R.init(d .. '/nested')
+  R.write(d .. '/nested', 'n', 'n\n')
+  R.commit(d .. '/nested', 'n')
+  local first, counted
+  git.changes(d, function(files)
+    first = {}
+    for _, f in ipairs(files) do first[f.path] = f.added end
+  end, nil, function(files) counted = files end)
+  vim.wait(5000, function() return counted ~= nil end, 5)
+  eq(first['u1.txt'], nil)
+  local m = by_path(counted)
+  eq({ m['u1.txt'].added, m['nested/'].dir, m['nested/'].added }, { 2, true, nil })
 end
 
 return T

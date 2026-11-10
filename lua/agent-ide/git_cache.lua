@@ -30,13 +30,15 @@ local function emit(root, kind)
 end
 
 -- Run `start(done)` once per generation for `kind`; `done(value)` stores and tells listeners.
+-- Commit files (`files:<hash>`) never change: their loads ignore generations.
 local function load(root, kind, start)
   local e = entry(root)
-  if e.loading[kind] == e.gen then return end
+  local stable = kind:find('^files:') ~= nil
+  if e.loading[kind] ~= nil and (stable or e.loading[kind] == e.gen) then return end
   e.loading[kind] = e.gen
   local gen = e.gen
   start(function(value)
-    if entries[root] ~= e or e.gen ~= gen then return end
+    if entries[root] ~= e or (not stable and e.gen ~= gen) then return end
     e.loading[kind] = nil
     e.data[kind], e.loaded[kind] = value, true
     emit(root, kind)
@@ -72,7 +74,12 @@ end
 
 local loaders = {
   head = function(root)
-    load(root, 'head', function(done) git.head(root, done, { background = true }) end)
+    load(root, 'head', function(done, e)
+      git.head(root, function(h)
+        done(h)
+        snapshot(root, e)
+      end, { background = true })
+    end)
   end,
   base = function(root)
     local e = entry(root)
@@ -81,10 +88,14 @@ local loaders = {
   changes = function(root)
     load(root, 'changes', function(done, e)
       with_base(root, e, function(b)
+        local gen = e.gen
         git.changes(root, function(files)
           done(files)
           snapshot(root, e)
-        end, b)
+        end, b, function()
+          -- untracked line counts were filled into the same tables: one more re-render
+          if entries[root] == e and e.gen == gen then emit(root, 'changes') end
+        end)
       end)
     end)
   end,
@@ -172,14 +183,25 @@ function M.invalidate(root)
   local e = entries[root]
   if not e then return end
   e.gen = e.gen + 1
-  e.loading, e.base_waiters, e.base_gen = {}, nil, nil
-  local kinds = {}
-  for kind in pairs(e.loaded) do
-    if not kind:find('^files:') then kinds[#kinds + 1] = kind end
+  local kinds, seen = {}, {}
+  local function add(kind)
+    if not kind:find('^files:') and not seen[kind] then
+      seen[kind] = true
+      kinds[#kinds + 1] = kind
+    end
   end
+  -- what was loaded, and what is still loading: its answer is dropped, so it starts again
+  for kind in pairs(e.loaded) do add(kind) end
+  for kind in pairs(e.loading) do add(kind) end
+  if e.base_waiters then add('base') end
+  local keep = {}
+  for kind, v in pairs(e.loading) do
+    if kind:find('^files:') then keep[kind] = v end
+  end
+  e.loading, e.base_waiters, e.base_gen = keep, nil, nil
   for _, kind in ipairs(kinds) do e.loaded[kind] = nil end
   for _, kind in ipairs(kinds) do
-    if kind == 'head' and vim.tbl_contains(kinds, 'base') then
+    if kind == 'head' and seen.base then
       -- head comes with the base
     elseif loaders[kind] then
       loaders[kind](root)
@@ -193,7 +215,7 @@ end
 ---@param root string
 function M.check(root)
   local e = entries[root]
-  if not e or not (e.loaded.changes or e.loaded.commits) or now() - e.checked < CHECK_AFTER then return end
+  if not e or not (e.loaded.changes or e.loaded.commits or e.loaded.head) or now() - e.checked < CHECK_AFTER then return end
   e.checked = now()
   local gen, before = e.gen, e.sig
   git.signature(root, function(sig)

@@ -186,4 +186,40 @@ T['check invalidates only when the status snapshot changed and 5 s passed'] = fu
   eq(cache.changes(d)[1].path, 'new')
 end
 
+T['invalidate between when() and the git answer still answers'] = function()
+  local d = R.init(tmp .. '/r')
+  R.write(d, 'a', 'a\n')
+  R.commit(d, 'init')
+  R.git(d, { 'checkout', '-q', '-b', 'feat' })
+  R.write(d, 'b', 'b\n')
+  local hash = R.commit(d, 'b')
+  local got, files
+  cache.when(d, 'changes', function(v) got = v end)
+  cache.when(d, 'files:' .. hash, function(v) files = v end)
+  cache.invalidate(d) -- the loads above are still running
+  vim.wait(3000, function() return got ~= nil and files ~= nil end, 10)
+  eq({ got and #got, files and #files }, { 1, 1 })
+  local b
+  cache._reset()
+  cache.when(d, 'base', function(v) b = v end)
+  cache.invalidate(d)
+  vim.wait(3000, function() return b ~= nil end, 10)
+  eq(b.branch, 'feat')
+end
+
+T['check also covers repositories with only the branch loaded'] = function()
+  local d = R.init(tmp .. '/r')
+  R.write(d, 'a', 'a\n')
+  R.commit(d, 'init')
+  R.git(d, { 'checkout', '-q', '-b', 'one' })
+  cache.head(d)
+  vim.wait(3000, function() return cache.head(d) ~= nil end, 10)
+  vim.wait(3000, function() return cache.peek(d).sig ~= nil end, 10)
+  R.git(d, { 'checkout', '-q', '-b', 'two' })
+  cache.peek(d).checked = 0
+  cache.check(d)
+  vim.wait(3000, function() return cache.head(d).branch == 'two' end, 10)
+  eq(cache.head(d).branch, 'two')
+end
+
 return T

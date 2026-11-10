@@ -8,16 +8,29 @@ local M = {}
 local RECENT = 20 -- commits shown on the default branch
 local MAX_COMMITS = 1000
 local MAX_COUNT_BYTES = 2 * 1024 * 1024 -- untracked files larger than this get no line count
-local MAX_COUNTED = 500 -- untracked files whose lines are counted
+local COUNT_BUDGET = 16 * 1024 * 1024 -- bytes read in total to count untracked lines
+local COUNT_PARALLEL = 4 -- untracked files read at a time
 
 -- Background queue: at most BG_MAX git processes at once for work nobody waits for.
 local BG_MAX = 4
 local bg_running, bg_queue = 0, {}
 
+-- Variables that would override `-C <root>` when inherited (e.g. Neovim started from a git hook).
+local DROP_ENV = { GIT_DIR = true, GIT_WORK_TREE = true, GIT_INDEX_FILE = true, GIT_COMMON_DIR = true }
+
+local function child_env()
+  local env = {}
+  for k, v in pairs(vim.fn.environ()) do
+    if not DROP_ENV[k] then env[k] = v end
+  end
+  env.GIT_OPTIONAL_LOCKS, env.GIT_TERMINAL_PROMPT = '0', '0'
+  return env
+end
+
 local function spawn(root, args, cb)
   local cmd = { 'git', '--no-optional-locks', '-C', root }
   vim.list_extend(cmd, args)
-  local ok, err = pcall(vim.system, cmd, { text = false, env = { GIT_OPTIONAL_LOCKS = '0', GIT_TERMINAL_PROMPT = '0' } },
+  local ok, err = pcall(vim.system, cmd, { text = false, env = child_env(), clear_env = true },
     function(r) vim.schedule(function() cb(r.code, r.stdout or '', r.stderr or '') end) end)
   if not ok then vim.schedule(function() cb(-1, '', tostring(err)) end) end
 end
@@ -65,17 +78,18 @@ end
 ---@param opts? { background?: boolean }
 function M.head(root, cb, opts)
   all(root, {
-    { 'for-each-ref', '--format=%(refname)%00%(symref)', 'refs/remotes/origin/HEAD', 'refs/heads/main', 'refs/heads/master' },
+    { 'for-each-ref', '--format=%(refname)%00%(symref)', 'refs/remotes/origin/HEAD', 'refs/heads/main', 'refs/heads/master',
+      'refs/remotes/origin/main', 'refs/remotes/origin/master' },
     { 'symbolic-ref', '-q', 'HEAD' },
     { 'rev-parse', '-q', '--verify', 'HEAD' },
   }, function(r)
     if r[1].code ~= 0 then return cb(nil) end -- not a repository
-    local ref, name = parse.default_ref(r[1].out)
+    local ref, name, refs = parse.default_ref(r[1].out)
     local sha = r[3].code == 0 and parse.line(r[3].out) or nil
     local branch = r[2].code == 0 and parse.line(r[2].out):gsub('^refs/heads/', '') or nil
     local detached = branch == nil and sha ~= nil
     if detached then branch = sha:sub(1, 7) end
-    cb({ branch = branch, detached = detached, head = sha, default_ref = ref, default_name = name })
+    cb({ branch = branch, detached = detached, head = sha, default_ref = ref, default_name = name, default_refs = refs })
   end, opts)
 end
 
@@ -111,7 +125,8 @@ function M.base(root, cb)
       end)
     end
     if not (h.head and b.ref) then return finish(nil) end
-    M.run(root, { 'merge-base', b.ref, 'HEAD' }, function(code, out)
+    -- with local and origin refs: the fork point nearest HEAD (a stale local main never wins)
+    M.run(root, vim.list_extend({ 'merge-base', 'HEAD' }, h.default_refs), function(code, out)
       finish(code == 0 and parse.line(out) or nil)
     end)
   end)
@@ -122,40 +137,49 @@ local function with_base(root, base, cb)
   M.base(root, cb)
 end
 
--- Count lines of untracked files (async reads; binary when a NUL byte is found).
+-- Count lines of untracked files (async reads, 4 at a time, 16 MB in total; binary when a NUL
+-- byte is found). Files beyond the budget keep no count.
 local function count_lines(root, files, cb)
-  local left = 0
-  for _, f in ipairs(files) do
-    if left >= MAX_COUNTED then break end
-    left = left + 1
-    local path = root .. '/' .. f.path
-    vim.uv.fs_open(path, 'r', 438, function(err, fd)
+  local next_i, running, budget = 1, 0, COUNT_BUDGET
+  local finished = false
+  local function pump()
+    while running < COUNT_PARALLEL and next_i <= #files do
+      local f = files[next_i]
+      next_i = next_i + 1
+      running = running + 1
       local function done()
-        left = left - 1
-        if left == 0 then vim.schedule(cb) end
+        running = running - 1
+        pump()
       end
-      if err or not fd then return done() end
-      vim.uv.fs_fstat(fd, function(_, st)
-        if not st or st.type ~= 'file' or st.size > MAX_COUNT_BYTES then
-          vim.uv.fs_close(fd)
-          return done()
-        end
-        vim.uv.fs_read(fd, st.size, 0, function(_, data)
-          vim.uv.fs_close(fd)
-          data = data or ''
-          if data:find('\0', 1, true) then
-            f.binary = true
-          else
-            local _, n = data:gsub('\n', '')
-            if #data > 0 and data:sub(-1) ~= '\n' then n = n + 1 end
-            f.added, f.removed = n, 0
+      vim.uv.fs_open(root .. '/' .. f.path, 'r', 438, function(err, fd)
+        if err or not fd then return done() end
+        vim.uv.fs_fstat(fd, function(_, st)
+          if not st or st.type ~= 'file' or st.size > MAX_COUNT_BYTES or st.size > budget then
+            vim.uv.fs_close(fd)
+            return done()
           end
-          done()
+          budget = budget - st.size
+          vim.uv.fs_read(fd, st.size, 0, function(_, data)
+            vim.uv.fs_close(fd)
+            data = data or ''
+            if data:find('\0', 1, true) then
+              f.binary = true
+            else
+              local _, n = data:gsub('\n', '')
+              if #data > 0 and data:sub(-1) ~= '\n' then n = n + 1 end
+              f.added, f.removed = n, 0
+            end
+            done()
+          end)
         end)
       end)
-    end)
+    end
+    if running == 0 and next_i > #files and not finished then
+      finished = true
+      vim.schedule(cb)
+    end
   end
-  if left == 0 then vim.schedule(cb) end
+  pump()
 end
 
 local DIFF = { '-z', '--no-ext-diff', '--no-textconv', '-M', '--raw', '--numstat' }
@@ -163,10 +187,17 @@ local DIFF = { '-z', '--no-ext-diff', '--no-textconv', '-M', '--raw', '--numstat
 ---Files changed between `base.rev` and the working tree, uncommitted and untracked included.
 ---@param root string
 ---@param cb fun(files: table[], base: table|nil)
+---The list comes first (untracked files without a count); `on_counts(files)` follows once the
+---untracked line counts are filled in, in the same tables.
 ---@param base? table from `M.base` (fetched when nil)
-function M.changes(root, cb, base)
+---@param on_counts? fun(files: table[])
+function M.changes(root, cb, base, on_counts)
   with_base(root, base, function(b)
-    if not b or not b.rev then return cb({}, b) end
+    if not b or not b.rev then
+      cb({}, b)
+      if on_counts then on_counts({}) end
+      return
+    end
     all(root, {
       vim.list_extend({ 'diff' }, vim.list_extend(vim.list_slice(DIFF), { b.rev, '--' })),
       { 'ls-files', '-z', '--others', '--exclude-standard' },
@@ -175,12 +206,15 @@ function M.changes(root, cb, base)
       local untracked = {}
       if r[2].code == 0 then
         for _, p in ipairs(parse.paths(r[2].out)) do
-          local f = { status = '?', path = p, untracked = true, binary = false, submodule = false }
+          -- a trailing slash: an untracked folder of its own (a nested repository)
+          local dir = p:sub(-1) == '/'
+          local f = { status = '?', path = p, untracked = true, binary = false, submodule = false, dir = dir or nil }
           files[#files + 1] = f
-          untracked[#untracked + 1] = f
+          if not dir then untracked[#untracked + 1] = f end
         end
       end
-      count_lines(root, untracked, function() cb(files, b) end)
+      cb(files, b)
+      count_lines(root, untracked, function() if on_counts then on_counts(files) end end)
     end)
   end)
 end
@@ -199,7 +233,7 @@ end
 function M.commits(root, cb, base)
   with_base(root, base, function(b)
     if not b or not b.head then return cb({}, b) end
-    local args = { 'log', '--no-color', LOG_FORMAT, '--shortstat', '--diff-merges=first-parent' }
+    local args = { 'log', '--no-color', '--no-show-signature', LOG_FORMAT, '--shortstat', '--diff-merges=first-parent' }
     M.run(root, vim.list_extend(args, log_range(b)), function(code, out)
       cb(code == 0 and parse.log(out) or {}, b)
     end)
@@ -216,7 +250,7 @@ function M.file_commits(root, path, cb, base, old_path)
   with_base(root, base, function(b)
     if not b or not b.head then return cb({}) end
     local range = b.mode == 'branch' and { b.merge_base .. '..HEAD' } or { '--max-count=' .. RECENT, 'HEAD' }
-    local args = vim.list_extend({ 'log', '--no-color', LOG_FORMAT }, range)
+    local args = vim.list_extend({ 'log', '--no-color', '--no-show-signature', LOG_FORMAT }, range)
     vim.list_extend(args, { '--', path, old_path })
     M.run(root, args, function(code, out) cb(code == 0 and parse.log(out) or {}) end)
   end)

@@ -79,24 +79,36 @@ function M.log(out)
   return commits
 end
 
----Default branch from `for-each-ref --format=%(refname)%00%(symref)` over origin/HEAD, main
----and master: origin/HEAD's target, else main, else master.
+---Default branch from `for-each-ref --format=%(refname)%00%(symref)` over origin/HEAD, main,
+---master, origin/main and origin/master: origin/HEAD's target, else main, else master. `refs`
+---are every existing ref of that branch (local and origin), for a merge-base nearest HEAD.
 ---@param out string
----@return string|nil ref, string|nil name e.g. 'origin/main', 'main'
+---@return string|nil ref, string|nil name, string[] refs e.g. 'origin/main', 'main', { 'main', 'origin/main' }
 function M.default_ref(out)
   local refs = {}
   for line in (out or ''):gmatch('[^\n]+') do
     local name, target = line:match('^([^%z]*)%z?(.*)$')
     refs[name] = target
   end
+  local function existing(name)
+    local list = {}
+    if refs['refs/heads/' .. name] then list[#list + 1] = name end
+    if refs['refs/remotes/origin/' .. name] then list[#list + 1] = 'origin/' .. name end
+    return list
+  end
   local target = refs['refs/remotes/origin/HEAD']
   if target and target ~= '' then
     local short = target:gsub('^refs/remotes/', '')
-    return short, (short:gsub('^origin/', ''))
+    local name = short:gsub('^origin/', '')
+    local list = existing(name)
+    if #list == 0 then list = { short } end
+    return short, name, list
   end
-  if refs['refs/heads/main'] then return 'main', 'main' end
-  if refs['refs/heads/master'] then return 'master', 'master' end
-  return nil, nil
+  for _, name in ipairs({ 'main', 'master' }) do
+    local list = existing(name)
+    if #list > 0 then return list[1], name, list end
+  end
+  return nil, nil, {}
 end
 
 ---@param s string
