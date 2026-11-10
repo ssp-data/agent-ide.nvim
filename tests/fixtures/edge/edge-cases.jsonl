@@ -37,5 +37,13 @@ not json with bad byte þ
 {"type":"system","level":"error"}
 {"type":"system","subtype":"local_command","content":{"x":1},"isSidechain":true}
 {"type":"attachment","attachment":{"k":"v"}}
+{"type":"user","isMeta":true,"message":{"content":"<local-command-caveat>Caveat: the command below ran locally.</local-command-caveat>"}}
+{"type":"system","subtype":"local_command","content":"<local-command-stdout>## Out\n\nrow\n\n</local-command-stdout>"}
+{"type":"system","subtype":"local_command","content":"<local-command-stdout>x</local-command-stdout> tail"}
+{"type":"user","message":{"content":[{"type":"text","text":"[Request interrupted by user]"}]}}
+{"type":"user","message":{"content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]}}
+{"type":"user","message":{"content":[{"type":"text","text":"[Request interrupted by user] and more"}]}}
+{"type":"user","isMeta":true,"message":{"content":" \n\t<local-command-caveat>Caveat: indented.</local-command-caveat>"}}
+{"type":"user","message":{"content":"<command-name>/model</command-name>\n            <command-message>model</command-message>\n            <command-args>sonnet</command-args>"}}
 {"type":"user","message":{"content":"cut off here
 {"type":"assistant","message":{"content":"still being writ

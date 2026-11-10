@@ -48,3 +48,21 @@ fn scan_and_history_over_fixtures() {
     let golden: Value = serde_json::from_str(&std::fs::read_to_string(format!("{root}/golden/alpha-basic.events.json")).unwrap()).unwrap();
     assert_eq!(r["result"]["events"], golden);
 }
+
+#[test]
+fn hello_reports_the_rules_version() {
+    let r = server().handle_line(r#"{"id":7,"method":"hello"}"#).unwrap();
+    assert_eq!(r["id"], json!(7));
+    assert_eq!(r["result"]["rules_version"], json!(crate::events::RULES_VERSION));
+    assert_eq!(r["result"]["crate_version"], json!(env!("CARGO_PKG_VERSION")));
+}
+
+/// The Lua parser's `M.RULES_VERSION` must equal ours: both backends follow the same rules.
+#[test]
+fn rules_version_matches_the_lua_side() {
+    let path = format!("{}/../lua/agent-ide/transcript/parse.lua", env!("CARGO_MANIFEST_DIR"));
+    let text = std::fs::read_to_string(path).unwrap();
+    let line = text.lines().find(|l| l.starts_with("M.RULES_VERSION = ")).expect("M.RULES_VERSION in parse.lua");
+    let lua: u64 = line["M.RULES_VERSION = ".len()..].trim().parse().unwrap();
+    assert_eq!(lua, crate::events::RULES_VERSION);
+}

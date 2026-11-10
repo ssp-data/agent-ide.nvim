@@ -47,10 +47,25 @@ function H.delta(s, a)
   s:_emit('delta')
 end
 
+-- Claude writes a model switch to the transcript as the user's `/model <name>` command, then
+-- its output; the stream shows only the output. Record the command too (history equals live).
+local function model_command(s)
+  local id, req
+  for rid, r in pairs(s.requests) do
+    if r.subtype == 'set_model' and not r.recorded and (not id or tonumber(rid:sub(2)) < tonumber(id:sub(2))) then
+      id, req = rid, r
+    end
+  end
+  if not req then return end
+  req.recorded = true
+  s:_append({ kind = 'prompt', text = '/model ' .. tostring(req.model) })
+end
+
 function H.event(s, a)
   local ev = a.event
   ev.streamed = nil
   if a.streamed then s.streaming = '' end
+  if a.command_stdout then model_command(s) end
   s:_append(ev)
 end
 
@@ -121,6 +136,14 @@ end
 
 function H.result(s, a)
   s:_flush_streaming()
+  -- a mode sent with a permission answer is reported within the turn; never pending for ever
+  if s.mode_by_answer then
+    if s.mode_requested == s.mode_by_answer then
+      s.mode_requested = nil
+      s:_emit('meta')
+    end
+    s.mode_by_answer = nil
+  end
   s.echo_expected = nil
   if a.is_error then s:_append(live_meta('error', a.text or 'Turn failed')) end
   clear_permissions(s)

@@ -126,7 +126,9 @@ T['replayed prompt, command output, interrupt marker and slash output'] = functi
     '{"type":"assistant","message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"## Context Usage"}]},"parent_tool_use_id":null,"local_command_run":{"command":"context","args":""}}',
   })
   eq(a[1], { type = 'echo', text = 'hello' })
-  eq(a[2], { type = 'event', event = { kind = 'meta', label = 'command output', text = 'Set model to haiku' } })
+  -- flagged: the output of a command Claude ran for a control request (set_model)
+  eq(a[2], { type = 'event', event = { kind = 'meta', label = 'command output', text = 'Set model to haiku' },
+    command_stdout = true })
   eq(a[3], { type = 'event', event = { kind = 'meta', label = 'meta', text = '[Request interrupted by user]' } })
   eq(a[4], { type = 'event', event = { kind = 'meta', label = 'command output', text = '## Context Usage' } })
   eq(#a, 4)

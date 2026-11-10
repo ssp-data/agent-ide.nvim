@@ -193,6 +193,14 @@ function actions.jump()
   end)
 end
 
+function actions.park()
+  local node = current_node()
+  if not node or node.type ~= 'session' then return notify('no session under cursor') end
+  local s = session.get(node.session.id)
+  if not s then return notify('nothing to park; it is not running in this Neovim') end
+  require('agent-ide.ui.chat').park(s)
+end
+
 function actions.close() M.close() end
 
 function actions.lazygit()
@@ -210,6 +218,7 @@ function actions.help()
     { key = 'za', desc = 'toggle fold' },
     { key = 'R', desc = 'refresh' },
     { key = 'gp', desc = 'jump to tmux pane' },
+    { key = 'x', desc = 'park the session: stop its Claude process here' },
     { key = 'glg', desc = 'lazygit for the project (or the row\'s worktree)' },
     { key = 'q', desc = 'close drawer' },
     { key = '?', desc = 'this help' },
@@ -231,6 +240,7 @@ local function ensure_buf()
   map('za', actions.fold)
   map('R', actions.refresh)
   map('gp', actions.jump)
+  map('x', actions.park)
   map('glg', actions.lazygit)
   api.nvim_create_autocmd('BufEnter', { buffer = buf, callback = function() sections.focus() end })
   map('q', actions.close)

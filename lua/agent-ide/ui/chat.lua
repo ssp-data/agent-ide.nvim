@@ -43,7 +43,7 @@ local function winbar_text(c)
     s.title and (s.title:gsub('[\r\n]+', ' ')) or 'new session',
     model,
     mode,
-    drawer().state_of(s.id),
+    require('agent-ide.ui.handoff').away(s) and 'in native Claude (tmux pane)' or drawer().state_of(s.id),
   }
   if #s.queue > 0 then parts[#parts + 1] = 'queued:' .. #s.queue end
   return (table.concat(parts, ' · '):gsub('%%', '%%%%'))
@@ -130,6 +130,10 @@ local function send(c)
   if not valid_buf(c.pbuf) then return end
   local text = prompt.text_to_send(api.nvim_buf_get_lines(c.pbuf, 0, -1, false))
   if not text:find('%S') then return end
+  if require('agent-ide.ui.handoff').away(c.s) then
+    return notify('Agent-IDE: this session is open in native Claude (tmux pane); quit it there to continue here',
+      vim.log.levels.WARN)
+  end
   if c.loading then
     c.send_after_load = true
     return
@@ -257,6 +261,26 @@ local function load(c, fresh)
   end)
 end
 
+---Continue the session in native Claude in a tmux pane (again while it is away: take it back).
+---When it is back, reload it from disk in the background: never a focus or mode change; a chat
+---on screen is refreshed in place, otherwise a notice says it is back.
+function ACT.native(c)
+  require('agent-ide.ui.handoff').start(c.s, {
+    away = function()
+      update_winbar(c)
+      drawer().refresh()
+    end,
+    back = function(s)
+      if valid_buf(c.tbuf) then load(c, false) else s:load() end
+      if not s.visible then
+        notify(('Agent-IDE: %s is back from native Claude'):format(s.title and (s.title:gsub('[\r\n]+', ' ')) or 'the session'))
+      end
+      update_winbar(c)
+      drawer().refresh()
+    end,
+  })
+end
+
 -- Public -------------------------------------------------------------------------------------
 
 ---Open the chat of session `s` in the Agents tab: transcript in the main window, prompt below
@@ -296,6 +320,27 @@ function M.refresh_winbars()
   for _, c in pairs(chats) do
     if c.s.visible then update_winbar(c) end
   end
+end
+
+---Park `s`: stop the Claude process this Neovim runs for it (asking first when it works). Queued
+---prompts it drops go back to its prompt buffer, as after an interrupt. The transcript stays;
+---the next send resumes the session. A session without a process here gets a notice.
+---@param s table Session
+function M.park(s)
+  if not s.owned then
+    local why = s:_elsewhere() and 'it runs in another Claude' or 'it is not running in this Neovim'
+    return notify('Agent-IDE: nothing to park; ' .. why)
+  end
+  s:park(function(parked, dropped)
+    if not parked then return end
+    local c = chats[s.id]
+    if dropped and #dropped > 0 and c and valid_buf(c.pbuf) then
+      prompt.restore(c.pbuf, dropped)
+      notify(('Agent-IDE: parked; %d queued prompt(s) returned to the prompt buffer'):format(#dropped))
+    end
+    if c then update_winbar(c) end
+    drawer().refresh()
+  end)
 end
 
 ---Session owning a chat buffer (transcript or prompt).

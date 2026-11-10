@@ -21,7 +21,10 @@ local function defaults()
       chat = { send = '<C-CR>', send_alt = '<leader><CR>', interrupt = '<C-c>', prompt = '<leader>ap', help = '?',
         history_prev = '<C-p>', history_next = '<C-n>', attach = '<leader>af',
         answer_inner = 'ir', answer_outer = 'ar', mode = '<S-Tab>', model = '<leader>aM', answer = '<leader>ay',
-        raw = 'gr', raw_event = 'gR', diff = { 'gd', '<leader>gd' } },
+        raw = 'gr', raw_event = 'gR',
+        native = '<leader>at', -- continue the session in native Claude in a tmux pane
+        park = '<leader>ax', -- park: stop the session's Claude process (the next send resumes)
+        diff = { 'gd', '<leader>gd' } },
       -- diff view, buffer-local on both sides (]c / [c stay Neovim's hunk motions); each value is a
       -- key, a list of keys, or false
       diff = { next_file = { ']f', '<leader>gj' }, prev_file = { '[f', '<leader>gk' }, flip = { 'gb', '<leader>gt' },

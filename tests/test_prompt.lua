@@ -77,7 +77,7 @@ T['tabs, CRLF remnants, quotes and unicode are untouched'] = function()
 end
 
 T['attach path is trimmed; tilde fences, longer fences and unclosed fences'] = function()
-  eq(P.text_to_send({ '[attach] a b.lua \t\r' }), '@a b.lua')
+  eq(P.text_to_send({ '[attach] ab.lua \t\r' }), '@ab.lua')
   eq(P.text_to_send({ '[attach]nospace', '[attach]   ' }), '[attach]nospace\n[attach]   ')
   eq(P.text_to_send({ '~~~', '[attach] x', '~~~', '[attach] y' }), '~~~\n[attach] x\n~~~\n@y')
   -- a shorter or different fence does not close
@@ -90,6 +90,13 @@ T['attach path is trimmed; tilde fences, longer fences and unclosed fences'] = f
   eq(P.text_to_send({ '```', '  ```', '[attach] x', '```', '[attach] y' }), '```\n  ```\n[attach] x\n```\n@y')
   eq(P.text_to_send({ '~~~', '  ~~~', '[attach] x' }), '~~~\n  ~~~\n[attach] x')
   eq(P.text_to_send({ '[attach] a', '[attach] b' }), '@a\n@b')
+end
+
+-- Claude Code reads `@my notes.txt` as `@my`; only the quoted form attaches the file.
+T['attach path with whitespace is quoted'] = function()
+  eq(P.text_to_send({ '[attach] my notes.txt \t' }), '@"my notes.txt"')
+  eq(P.text_to_send({ '[attach] dir/a\tb.lua' }), '@"dir/a\tb.lua"')
+  eq(P.text_to_send({ '[attach] plain/path.lua' }), '@plain/path.lua')
 end
 
 -- slash completion ---------------------------------------------------------------------------
