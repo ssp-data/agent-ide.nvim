@@ -49,3 +49,23 @@ Given by the user while testing `full-build` before the drawer polish landed. Th
 11. **`/` menu cannot be filtered.** "writing `/` and then typing `model` gives me `/__remote-workflowmode` instead of `/model` — the list comes up, but the typing does not work, I can't arrow-down the 1000 entries, I need a search."
    - Cause to confirm: the completion inserts the first candidate as soon as the menu opens (the buffer-local `completeopt` was removed in review, so the user's global setting applies), so further typing no longer narrows from `/`. Also `/model` is not in Claude's list at all (screen-only command).
    - To do: the `/` menu must narrow while typing and never insert before the user chooses (`noinsert,noselect` for this completion only, fuzzy matching), or be a small filterable picker; add the plugin's own entries for screen-only commands that have an equivalent (`/model` → model picker, `/copy` → yank last answer, `/clear`/`/resume` → explain or map), marked as plugin actions. See also item 2.
+
+## Appendix: the user's mock compared with the real views (from the drawer polish, 2026-11-10)
+
+The drawer now follows the mock. For the other scenes of `mock.lua`, what the mock shows that the real view lacks or does differently, for the user to choose from:
+
+| Scene | Difference | Size |
+|---|---|---|
+| g1 chat | Winbar with icon, coloured state icon and key hints on the right (real: plain `project · title · model · mode:x · state`); a winbar on the prompt window with key hints (real: none); richer fold headers: thinking with duration, `Read: file (n lines)`, `Edit: file +4 −1 (<CR> opens the diff)`, `Agent: Explore "…" (n tool calls)`, `● waiting for permission` on the pending fold | winbars small; fold headers medium |
+| g2 permission | A centred float with the command, a description and single-letter keys `[a]/[s]/[d]/[e]`, violet border (real: `vim.ui.select` with Allow, Deny, suggestions) | medium |
+| g3 slash | A float with description and a kind column (skill, built-in, command) (real: native completion, names only) | medium |
+| g4 model/mode | One float listing models and modes with `●` on the current ones (real: model picker `<leader>aM`, mode cycles with `<S-Tab>`) | medium |
+| g5 diff | Winbars with icons and key hints (real: `base origin/main (rev) · path · file i/n`, no hints) | small |
+| g6 raw | Winbar with project, title, event count and hints; a `gs` "sent text" key (real: `raw · <id8> · >> sent << received · q: back`, no `gs`) | small; `gs` medium |
+| g7 running elsewhere | Winbar `running in tmux pane 2.1 · read-only`; a red "sending refused" bar with the `gp` hint in the prompt (real: live state in the winbar, a notice on send) | small to medium |
+| g8 prompt library | Prompt winbar showing where the text came from and `:w / ZZ update file · <leader>W save · <C-CR> send` (real: no prompt winbar) | small |
+| g9 search | One-line rows: project, state icon, title, age, snippet; no preview (real: kind tags, preview pane, footer) | medium |
+| g0 help | One float grouping Drawer, Chat and Anywhere with highlighted keys (real: one help per view) | small |
+| footer | Several segments (`● input required (2)`, `◐ 3 running · ✔ 1 done · <leader>an next`) plus quota bars (real: one level text, model, quota) | medium |
+
+Items 1, 1.2, 2, 6 and 11 above overlap with g0, g3, g4 and g1.
