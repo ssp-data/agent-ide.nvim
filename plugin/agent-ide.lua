@@ -1,8 +1,13 @@
 if vim.g.loaded_agent_ide then return end
 vim.g.loaded_agent_ide = true
 
-vim.api.nvim_create_user_command('Agents', function() require('agent-ide').toggle() end,
-  { desc = 'Agent-IDE: toggle the Agents tab' })
+vim.api.nvim_create_user_command('Agents', function(o)
+  if o.args == '' then return require('agent-ide').toggle() end
+  require('agent-ide').scope(o.args)
+end, { nargs = '?', desc = 'Agent-IDE: toggle the Agents tab; `project` / `all` switch the scope',
+  complete = function(lead)
+    return vim.tbl_filter(function(w) return vim.startswith(w, lead) end, { 'project', 'all' })
+  end })
 
 vim.api.nvim_create_user_command('AgentsSearch', function(o)
   require('agent-ide').search({ query = o.args })
