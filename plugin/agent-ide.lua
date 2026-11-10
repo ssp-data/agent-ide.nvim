@@ -10,3 +10,7 @@ end, { nargs = '*', desc = 'Agent-IDE: search all sessions' })
 
 vim.api.nvim_create_user_command('AgentsGraph', function() require('agent-ide').graph() end,
   { desc = 'Agent-IDE: commit graph of the current project' })
+
+vim.api.nvim_create_user_command('AgentsTrash', function(o)
+  require('agent-ide.ui.delete').command(o.args)
+end, { nargs = '?', complete = function() return { 'empty' } end, desc = 'Agent-IDE: restore or purge deleted sessions' })

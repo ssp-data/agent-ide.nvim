@@ -153,17 +153,36 @@ local function score(name, query)
   return first, pos - first
 end
 
+---Claude's command list for session `s`: its own, else the last one seen for its project, else
+---the most recent one of any project (session/commands.lua); nil when none is known.
+local function claude_commands(s)
+  local own = s and s.slash_commands
+  if own and #own > 0 then return own end
+  return require('agent-ide.session.commands').fallback(s and s.cwd)
+end
+
+-- Names of the commands and skills the Prompts node found (cached per scan result).
+local discovered = { entries = nil, names = {} }
+local function discovered_names()
+  local entries = require('agent-ide.prompts.cache').global()
+  if entries ~= discovered.entries then
+    local names = {}
+    for _, e in ipairs(entries or {}) do
+      if (e.kind == 'command' or e.kind == 'skill') and type(e.name) == 'string' then names[#names + 1] = e.name end
+    end
+    discovered = { entries = entries, names = names }
+  end
+  return discovered.names
+end
+
 ---Menu entries for `base` (`/` and what follows): the plugin's own commands first, then
----Claude's (the session's, else the last list seen for its folder in this Neovim).
+---Claude's (see `claude_commands`) merged with the commands and skills found on disk.
 ---@param s table|nil Session
 ---@param base string
 ---@return table[] complete-items
 function M.matches(s, base)
   local query = (base or ''):gsub('^/', '')
-  local commands = s and s.slash_commands
-  if (not commands or #commands == 0) and s and s.cwd then
-    commands = require('agent-ide.session')._commands_seen[s.cwd]
-  end
+  local commands = claude_commands(s)
   local found, seen = {}, {}
   local function add(name, kind, info, rank)
     if seen[name] then return end
@@ -178,6 +197,7 @@ function M.matches(s, base)
   for _, c in ipairs(commands or {}) do
     if type(c) == 'string' then add(c, '', nil, 1) end
   end
+  for _, name in ipairs(discovered_names()) do add(name, '', nil, 1) end
   table.sort(found, function(a, b)
     if a.sc ~= b.sc then return a.sc < b.sc end
     if a.span ~= b.span then return a.span < b.span end
@@ -196,9 +216,7 @@ function M.complete(findstart, base)
   if findstart == 1 then return line:match(SLASH) and 0 or -2 end
   local st = bufs[api.nvim_get_current_buf()]
   local s = st and st.s
-  local known = s and ((s.slash_commands and #s.slash_commands > 0)
-    or (s.cwd and require('agent-ide.session')._commands_seen[s.cwd]))
-  if not known and not hinted then
+  if not claude_commands(s) and not hinted then
     hinted = true
     vim.notify(HINT, vim.log.levels.INFO)
   end
@@ -206,14 +224,9 @@ function M.complete(findstart, base)
 end
 
 -- 'completeopt' while the `/` menu is open: nothing inserted or selected before a choice.
-local fuzzy_ok
+-- `fuzzy` came with Neovim 0.11; decided by version, so no option is written to find out.
 local function menu_completeopt()
-  if fuzzy_ok == nil then
-    local old = vim.o.completeopt
-    fuzzy_ok = pcall(function() vim.o.completeopt = 'menuone,fuzzy' end)
-    vim.o.completeopt = old
-  end
-  return 'menuone,noinsert,noselect' .. (fuzzy_ok and ',fuzzy' or '')
+  return 'menuone,noinsert,noselect' .. (vim.fn.has('nvim-0.11') == 1 and ',fuzzy' or '')
 end
 
 ---Set the menu's 'completeopt' on prompt `buf` (put back when the menu is done) and close the
@@ -466,6 +479,9 @@ function M.setup_buf(buf, s)
   local list = require('agent-ide.util.keys').list
 
   if opts.auto_slash ~= false then
+    -- what the menu needs is ready before the first `/`: the project key and the found commands
+    if s and s.cwd then require('agent-ide.session.commands').key_of(s.cwd) end
+    require('agent-ide.prompts.cache').global()
     map('i', '/', function()
       local empty_line = api.nvim_get_current_line() == ''
       if empty_line and bufs[buf] and not menu_visible() then

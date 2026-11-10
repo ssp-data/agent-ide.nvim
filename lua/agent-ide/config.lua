@@ -57,6 +57,9 @@ local function defaults()
     -- { "limits": [ { "label", "percent" (fraction used), "resetsAt" } ], "updatedAt" }; when it is
     -- readable and fresh (30 min) the footer shows those limits instead of its own
     quota = { file = nil },
+    -- deleted sessions (`D` in the drawer) stay in stdpath('data')/agent-ide/trash until
+    -- `:AgentsTrash empty`; keep_days (nil: keep) purges older ones at setup
+    trash = { keep_days = nil },
     -- prompt buffer: `/` opens the command menu, `@` opens the file picker
     chat = { auto_slash = true, at_picker = true },
     -- 'nerd' (needs a Nerd Font in the terminal) or 'plain'; `icons` overrides single entries
