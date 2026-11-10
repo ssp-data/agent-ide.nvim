@@ -492,17 +492,257 @@ local function stub_select(choice_index)
   ]], { choice_index or vim.NIL })
 end
 
-T['@ after whitespace inserts an [attach] line above and leaves the cursor in place'] = function()
+-- vim.ui.select that picks the item `name` (nil: cancels), at once.
+local function stub_pick(name)
+  child.lua([[
+    local name = ...
+    _G.offered = nil
+    vim.ui.select = function(items, _, on_choice)
+      _G.offered = items
+      on_choice(name ~= vim.NIL and name or nil)
+    end
+  ]], { name or vim.NIL })
+end
+
+-- vim.ui.select that answers later: `_G.answer(name|nil)` chooses on a later tick. With
+-- `normal`, it leaves insert mode first, as a picker in its own window does.
+local function stub_async(normal)
+  child.lua([[
+    local normal = ...
+    _G.offered, _G.answer = nil, nil
+    vim.ui.select = function(items, _, on_choice)
+      _G.offered = items
+      if normal then vim.cmd('stopinsert') end
+      _G.answer = function(name) vim.schedule(function() on_choice(name) end) end
+    end
+  ]], { normal or false })
+end
+
+local function cursor() return child.lua_get('vim.api.nvim_win_get_cursor(0)') end
+local function mode() return child.lua_get('vim.api.nvim_get_mode().mode') end
+local function sent() return child.lua_get('require("agent-ide.ui.prompt").text_to_send(vim.api.nvim_buf_get_lines(0, 0, -1, false))') end
+local function pick_marks()
+  return child.lua_get([[#vim.api.nvim_buf_get_extmarks(0, vim.api.nvim_get_namespaces()['agent-ide.prompt.pick'], 0, -1, {})]])
+end
+
+-- Prompt text `lines`, then insert mode with the cursor before byte `col` (0-based) of `row`.
+local function edit_at(lines, row, col)
+  child.type_keys('<Esc>')
+  child.lua([[
+    local lines, row, col = ...
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, lines)
+    vim.api.nvim_win_set_cursor(0, { row, col })
+  ]], { lines, row, col })
+  -- normal mode cannot stand past the last byte: append there instead
+  child.type_keys((col > 0 and col >= #lines[row]) and 'A' or 'i')
+end
+
+local function article()
+  local l = {}
+  for i = 1, 30 do l[i] = ('Line %d of a long article, with a few words.'):format(i) end
+  l[17] = 'Here we look at the parser and its tests.'
+  l[10], l[20] = '', ''
+  return l
+end
+
+T['@ mid-sentence inserts the reference inline at that byte, cursor after it in insert mode'] = function()
+  start()
+  stub_pick('a.lua')
+  local text = article()
+  local col = #'Here we look at '
+  edit_at(text, 17, col)
+  child.type_keys('@')
+  local want = vim.deepcopy(text)
+  want[17] = 'Here we look at @a.lua the parser and its tests.'
+  wait_for(function() return vim.deep_equal(lines_of('prompt'), want) end, 'inline reference')
+  eq(cursor(), { 17, col + #'@a.lua ' })
+  eq(mode(), 'i')
+  eq(pick_marks(), 0)
+  child.type_keys('x')
+  want[17] = 'Here we look at @a.lua xthe parser and its tests.'
+  eq(lines_of('prompt'), want)
+  -- sent in place, every other line byte for byte
+  eq(sent(), table.concat(want, '\n'))
+end
+
+T['@ at the end of a line, at column 0 of text, after multi-byte text'] = function()
+  start()
+  stub_pick('sub/b.lua')
+  edit_at({ 'look ' }, 1, 5)
+  child.type_keys('@')
+  wait_for(function() return lines_of('prompt')[1] == 'look @sub/b.lua ' end, 'reference at the end')
+  eq(cursor(), { 1, #'look @sub/b.lua ' })
+  child.type_keys('rest')
+  eq(lines_of('prompt'), { 'look @sub/b.lua rest' })
+
+  -- column 0 of a line with text: inline; a space already after the spot is not doubled
+  edit_at({ 'first', 'tail' }, 2, 0)
+  child.type_keys('@')
+  wait_for(function() return lines_of('prompt')[2] == '@sub/b.lua tail' end, 'reference at column 0')
+  eq(cursor(), { 2, #'@sub/b.lua ' })
+  edit_at({ 'a  b' }, 1, 2)
+  child.type_keys('@')
+  wait_for(function() return lines_of('prompt')[1] == 'a @sub/b.lua b' end, 'no double space')
+  eq(cursor(), { 1, #'a @sub/b.lua ' })
+
+  -- umlauts and an emoji before the cursor: byte columns
+  local before = 'Grüße 🎉 und ä '
+  edit_at({ before .. 'Ende' }, 1, #before)
+  child.type_keys('@')
+  wait_for(function() return lines_of('prompt')[1] == before .. '@sub/b.lua Ende' end, 'after multi-byte text')
+  eq(cursor(), { 1, #before + #'@sub/b.lua ' })
+  child.type_keys('ö')
+  eq(lines_of('prompt'), { before .. '@sub/b.lua öEnde' })
+end
+
+T['@ on an empty line between paragraphs adds an [attach] line there'] = function()
+  start()
+  stub_pick('a.lua')
+  edit_at({ 'para one', '', 'para two' }, 2, 0)
+  child.type_keys('@')
+  wait_for(function() return #lines_of('prompt') == 4 end, 'attach line')
+  eq(lines_of('prompt'), { 'para one', '[attach] a.lua', '', 'para two' })
+  eq(cursor(), { 3, 0 })
+  eq(mode(), 'i')
+  eq(sent(), 'para one\n@a.lua\n\npara two')
+end
+
+T['three attachments keep their places and order when sent'] = function()
+  vim.fn.writefile({ '' }, repo .. '/my notes.md')
+  start()
+  local text = article()
+  edit_at(text, 10, 0) -- the empty line 10
+  stub_pick('sub/b.lua')
+  child.type_keys('@')
+  wait_for(function() return #lines_of('prompt') == 31 end, 'first')
+  child.type_keys('<Esc>')
+  -- line 17 is now 18
+  edit_at(lines_of('prompt'), 18, #'Here we look at ')
+  stub_pick('my notes.md')
+  child.type_keys('@')
+  wait_for(function() return lines_of('prompt')[18]:find('notes') ~= nil end, 'second')
+  child.type_keys('<Esc>')
+  local l3 = lines_of('prompt')[3]
+  edit_at(lines_of('prompt'), 3, #l3)
+  stub_pick('a.lua')
+  child.type_keys(' ', '@')
+  wait_for(function() return lines_of('prompt')[3]:find('a.lua') ~= nil end, 'third')
+  local want = vim.deepcopy(text)
+  table.insert(want, 10, '[attach] sub/b.lua')
+  want[18] = 'Here we look at @"my notes.md" the parser and its tests.'
+  want[3] = text[3] .. ' @a.lua '
+  eq(lines_of('prompt'), want)
+  local out = vim.deepcopy(want)
+  out[10] = '@sub/b.lua'
+  eq(sent(), table.concat(out, '\n'))
+end
+
+T['a late picker answer lands at the original spot after the cursor moved and text was typed'] = function()
+  start()
+  stub_async(false)
+  edit_at({ 'one', 'see the file', 'three' }, 2, 4)
+  child.type_keys('@')
+  wait_for(function() return child.lua_get('_G.answer ~= nil') end, 'picker open')
+  -- meanwhile: typing at the spot, on another line, and a new line above
+  child.type_keys('new ', '<Esc>', 'gg', 'A', ' more', '<Esc>', 'O', 'top')
+  eq(lines_of('prompt'), { 'top', 'one more', 'see new the file', 'three' })
+  child.lua('_G.answer("a.lua")')
+  wait_for(function() return lines_of('prompt')[3] == 'see @a.lua new the file' end, 'reference at the spot')
+  eq(lines_of('prompt'), { 'top', 'one more', 'see @a.lua new the file', 'three' })
+  -- the user is typing elsewhere: cursor and mode stay
+  eq(cursor(), { 1, 3 })
+  eq(mode(), 'i')
+  eq(pick_marks(), 0)
+
+  -- same on an empty line: the [attach] line goes above it, the typed text stays below
+  edit_at({ 'one', '' }, 2, 0)
+  child.type_keys('@')
+  wait_for(function() return child.lua_get('_G.answer ~= nil') end, 'picker open')
+  child.type_keys('typed', '<Esc>', 'gg', 'A', '!')
+  child.lua('_G.answer("a.lua")')
+  wait_for(function() return #lines_of('prompt') == 3 end, 'attach line')
+  eq(lines_of('prompt'), { 'one!', '[attach] a.lua', 'typed' })
+  eq(cursor(), { 1, 4 })
+end
+
+T['a picker that leaves insert mode: the reference lands and insert mode resumes after it'] = function()
+  start()
+  stub_async(true)
+  edit_at({ 'see the file' }, 1, 4)
+  child.type_keys('@')
+  wait_for(function() return child.lua_get('_G.answer ~= nil') and mode() == 'n' end, 'picker in normal mode')
+  child.lua('_G.answer("a.lua")')
+  wait_for(function() return lines_of('prompt')[1] == 'see @a.lua the file' and mode() == 'i' end, 'insert again')
+  eq(cursor(), { 1, #'see @a.lua ' })
+  child.type_keys('x')
+  eq(lines_of('prompt'), { 'see @a.lua xthe file' })
+
+  -- at the end of the line
+  child.type_keys('<Esc>')
+  edit_at({ 'look ' }, 1, 5)
+  child.type_keys('@')
+  wait_for(function() return child.lua_get('_G.answer ~= nil') and mode() == 'n' end, 'picker in normal mode')
+  child.lua('_G.answer("a.lua")')
+  wait_for(function() return lines_of('prompt')[1] == 'look @a.lua ' and mode() == 'i' end, 'insert at the end')
+  child.type_keys('x')
+  eq(lines_of('prompt'), { 'look @a.lua x' })
+
+  -- cancelled: a literal @ at the spot, insert mode right after it
+  child.type_keys('<Esc>')
+  edit_at({ 'see the file' }, 1, 4)
+  child.type_keys('@')
+  wait_for(function() return child.lua_get('_G.answer ~= nil') and mode() == 'n' end, 'picker in normal mode')
+  child.lua('_G.answer(nil)')
+  wait_for(function() return lines_of('prompt')[1] == 'see @the file' and mode() == 'i' end, 'literal @')
+  eq(cursor(), { 1, 5 })
+  eq(pick_marks(), 0)
+  child.type_keys('x')
+  eq(lines_of('prompt'), { 'see @xthe file' })
+end
+
+T['cancel mid-line leaves the text as typed with a literal @; paths with spaces, unicode and %'] = function()
+  vim.fn.mkdir(repo .. '/dir ü', 'p')
+  vim.fn.writefile({ '' }, repo .. '/dir ü/naïve 🎉.md')
+  vim.fn.writefile({ '' }, repo .. '/100%.txt')
+  vim.fn.writefile({ '' }, repo .. '/größe.md')
+  start()
+  stub_pick(nil)
+  edit_at({ 'see the file' }, 1, 4)
+  child.type_keys('@')
+  wait_for(function() return lines_of('prompt')[1] == 'see @the file' end, 'literal @')
+  eq(cursor(), { 1, 5 })
+  eq(mode(), 'i')
+  eq(pick_marks(), 0)
+
+  local function inline(name)
+    stub_pick(name)
+    child.type_keys('<Esc>')
+    edit_at({ 'a ' }, 1, 2)
+    child.type_keys('@')
+    wait_for(function() return lines_of('prompt')[1] ~= 'a ' end, 'reference ' .. name)
+    return lines_of('prompt')[1]
+  end
+  eq(inline('dir ü/naïve 🎉.md'), 'a @"dir ü/naïve 🎉.md" ')
+  eq(inline('100%.txt'), 'a @100%.txt ')
+  eq(inline('größe.md'), 'a @größe.md ')
+  -- as [attach] lines, sent the same way
+  eq(P.text_to_send({ '[attach] dir ü/naïve 🎉.md', '[attach] 100%.txt', '[attach] größe.md' }),
+    '@"dir ü/naïve 🎉.md"\n@100%.txt\n@größe.md')
+end
+
+T['text_to_send converts [attach] lines in place: nothing moved, blank lines kept'] = function()
+  local lines = { 'intro', '', '[attach] a.lua', 'middle @b.lua text', '', '', '```', '[attach] in/fence', '```',
+    'end', '[attach] my file.md', '', '' }
+  eq(P.text_to_send(lines), 'intro\n\n@a.lua\nmiddle @b.lua text\n\n\n```\n[attach] in/fence\n```\nend\n@"my file.md"')
+end
+
+T['@ after whitespace in a git work tree offers the tracked and untracked files'] = function()
   git_init()
   start()
   stub_select(1)
   child.type_keys('i', 'look ', '@')
-  wait_for(function() return lines_of('prompt')[1] == '[attach] a.lua' end, 'attach line')
-  eq(lines_of('prompt'), { '[attach] a.lua', 'look ' })
-  eq(child.lua_get('vim.api.nvim_win_get_cursor(0)'), { 2, 5 })
+  wait_for(function() return lines_of('prompt')[1] == 'look @a.lua ' end, 'reference')
   eq(child.lua_get('_G.offered'), { 'a.lua', 'node_modules/x/n.js', 'sub/b.lua' })
-  child.type_keys('rest')
-  eq(lines_of('prompt'), { '[attach] a.lua', 'look rest' })
 end
 
 T['@ in the middle of a word inserts normally; cancel inserts a literal @'] = function()
