@@ -14,7 +14,7 @@ pub type Event = Value;
 /// activity and session metadata) here, `transcript/parse.lua` and `index/lua_scan.lua` in
 /// the plugin. A rule change on EITHER side requires bumping this AND `M.RULES_VERSION` in
 /// `lua/agent-ide/transcript/parse.lua`; the plugin does not use a helper whose number differs.
-pub const RULES_VERSION: u64 = 2;
+pub const RULES_VERSION: u64 = 3;
 
 const BOOKKEEPING: &[&str] = &[
     "last-prompt",
@@ -222,6 +222,45 @@ fn raw_content_blocks(line: &[u8]) -> Option<Vec<String>> {
 
 // ---------------------------------------------------------------------------------------------
 
+/// Decoded size of base64 `data` in bytes: floor(len * 3 / 4) minus the padding.
+fn base64_size(data: &str) -> u64 {
+    let pad = if data.ends_with("==") { 2 } else if data.ends_with('=') { 1 } else { 0 };
+    ((data.len() as u64) * 3 / 4).saturating_sub(pad)
+}
+
+/// `123 B`, `45.6 KB`, `1.2 MB`. One decimal by integer rounding (half up), like the Lua side.
+fn format_size(n: u64) -> String {
+    if n < 1024 {
+        return format!("{n} B");
+    }
+    let (unit, suffix) = if n >= 1_048_576 { (1_048_576, "MB") } else { (1024, "KB") };
+    let tenths = (n * 10 + unit / 2) / unit;
+    format!("{}.{} {suffix}", tenths / 10, tenths % 10)
+}
+
+/// What an `image` block shows instead of its data: `<media type>, <size>` for a base64 source,
+/// the address for a url source, `image` for anything else. The data itself is not kept.
+fn image_text(block: &Value) -> String {
+    let Some(src) = field(block, "source").filter(|s| s.is_object()) else {
+        return "image".into();
+    };
+    match (field(src, "type"), field(src, "url")) {
+        (Some(Value::String(t)), _) if t == "base64" => {
+            let media = match field(src, "media_type") {
+                Some(Value::String(m)) if !m.is_empty() => m.as_str(),
+                _ => "image",
+            };
+            let size = match field(src, "data") {
+                Some(Value::String(d)) => base64_size(d),
+                _ => 0,
+            };
+            format!("{media}, {}", format_size(size))
+        }
+        (Some(Value::String(t)), Some(Value::String(u))) if t == "url" => u.clone(),
+        _ => "image".into(),
+    }
+}
+
 fn tool_result_text(content: Option<&Value>) -> String {
     match content {
         Some(Value::String(s)) => s.clone(),
@@ -230,6 +269,11 @@ fn tool_result_text(content: Option<&Value>) -> String {
             for item in items {
                 match item {
                     Value::Object(_) => {
+                        if matches!(field(item, "type"), Some(Value::String(t)) if t == "image") {
+                            let t = image_text(item);
+                            parts.push(if t == "image" { "[image]".into() } else { format!("[image: {t}]") });
+                            continue;
+                        }
                         if let (Some(Value::String(t)), Some(Value::String(txt))) = (field(item, "type"), field(item, "text")) {
                             if t == "text" {
                                 parts.push(txt.clone());
@@ -354,6 +398,7 @@ fn block_event(rtype: &str, is_meta: bool, block: &Value, raw: &mut dyn FnMut() 
             f.push(("input", input));
             Some(event("tool_call", f))
         }
+        (_, Some("image")) => Some(event("meta", vec![("label", "image".into()), ("text", image_text(block).into())])),
         _ => Some(unknown(lua_tostring(bt), raw())),
     }
 }

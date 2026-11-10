@@ -93,6 +93,17 @@ T['interaction: user question and plan approval arrive as permission asks'] = fu
   eq(vim.tbl_map(function(e) return e.kind end, ev), { 'tool_call', 'tool_result', 'tool_call', 'tool_result' })
 end
 
+T['an image block streams as the same event as the transcript record'] = function()
+  local block = '{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}}'
+  for _, role in ipairs({ 'assistant', 'user' }) do
+    local line = '{"type":"' .. role .. '","message":{"role":"' .. role .. '","content":[' .. block .. ']}}'
+    local a = feed_lines({ line })
+    eq(#a, 1)
+    eq(a[1].event, { kind = 'meta', label = 'image', text = 'image/png, 8 B' })
+    eq({ a[1].event }, parse.parse_line(line))
+  end
+end
+
 T['non-streamed assistant text (synthetic message) becomes a text event'] = function()
   local a = feed_lines({ '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hi"}]},"parent_tool_use_id":null}' })
   eq(#a, 1)

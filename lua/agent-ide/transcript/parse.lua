@@ -6,7 +6,7 @@ local M = {}
 -- activity and session metadata) on the Lua side, events.rs and scan.rs in the Rust helper.
 -- A rule change on EITHER side requires bumping this AND `RULES_VERSION` in
 -- helper/src/events.rs; a helper reporting another number is out of date and not used.
-M.RULES_VERSION = 2
+M.RULES_VERSION = 3
 
 -- JSON null is nil in objects (the key is absent) and vim.NIL in arrays, so arrays keep
 -- their length and a null element is seen, not skipped. The helper client decodes the
@@ -136,6 +136,37 @@ end
 
 local function trim(s) return (s:gsub('^%s+', ''):gsub('%s+$', '')) end
 
+---Decoded size of base64 `data` in bytes: floor(len * 3 / 4) minus the padding.
+local function base64_size(data)
+  local pad = 0
+  if sub(data, -1) == '=' then pad = sub(data, -2, -2) == '=' and 2 or 1 end
+  return math.max(0, math.floor(#data * 3 / 4) - pad)
+end
+
+---`123 B`, `45.6 KB`, `1.2 MB`. One decimal by integer rounding (half up), so the Rust side
+---prints the same text without depending on how a float formatter breaks ties.
+local function format_size(n)
+  if n < 1024 then return ('%d B'):format(n) end
+  local unit, suffix = 1024, 'KB'
+  if n >= 1048576 then unit, suffix = 1048576, 'MB' end
+  local tenths = math.floor((n * 10 + unit / 2) / unit)
+  return ('%d.%d %s'):format(math.floor(tenths / 10), tenths % 10, suffix)
+end
+
+---What an `image` block shows instead of its data: `<media type>, <size>` for a base64 source,
+---the address for a url source, `image` for anything else. The data itself is not kept.
+local function image_text(block)
+  local src = block.source
+  if type(src) ~= 'table' then return 'image' end
+  if src.type == 'base64' then
+    local media = (type(src.media_type) == 'string' and src.media_type ~= '') and src.media_type or 'image'
+    return media .. ', ' .. format_size(base64_size(type(src.data) == 'string' and src.data or ''))
+  elseif src.type == 'url' and type(src.url) == 'string' then
+    return src.url
+  end
+  return 'image'
+end
+
 local function tool_result_text(content)
   if type(content) == 'string' then return content end
   if type(content) ~= 'table' then return '' end
@@ -143,6 +174,9 @@ local function tool_result_text(content)
   for _, item in ipairs(content) do
     if type(item) == 'table' and item.type == 'text' and type(item.text) == 'string' then
       parts[#parts + 1] = item.text
+    elseif type(item) == 'table' and item.type == 'image' then
+      local t = image_text(item)
+      parts[#parts + 1] = t == 'image' and '[image]' or ('[image: ' .. t .. ']')
     elseif item == vim.NIL then
       parts[#parts + 1] = '[null]'
     elseif type(item) == 'table' then
@@ -206,6 +240,8 @@ local function block_events(rec, block, raw)
     if type(t) == 'string' and t ~= '' then events[1] = { kind = 'thinking', text = t } end
   elseif rec.type == 'assistant' and bt == 'tool_use' then
     events[1] = { kind = 'tool_call', id = block.id, name = block.name, input = block.input or {} }
+  elseif bt == 'image' then
+    events[1] = { kind = 'meta', label = 'image', text = image_text(block) }
   else
     unknown(tostring(bt))
   end
