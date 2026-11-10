@@ -294,10 +294,10 @@ T['a setMode answer Claude never confirms is no longer pending after the turn'] 
   assert(wait(function() return s.state == 'waiting' end))
   local sugg = { type = 'setMode', mode = 'acceptEdits', destination = 'session' }
   s:answer('p4', true, { updated_permissions = { sugg } })
-  eq(ins(log)[2].response.response.updatedPermissions, { sugg })
   eq(s.mode_requested, 'acceptEdits')
   assert(wait(function() return s.state == 'idle' end))
   eq(s.mode_requested, nil)
+  eq(ins(log)[2].response.response.updatedPermissions, { sugg })
 end
 
 T['crash mid-answer keeps the partial text, then the next send resumes'] = function()
