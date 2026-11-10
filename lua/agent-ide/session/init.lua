@@ -64,7 +64,9 @@ function M.get(id) return by_id[id] end
 ---@return table[] sessions in creation order
 function M.all() return vim.list_slice(order) end
 
----@param fn fun(session: table, what: 'state'|'events'|'delta'|'meta'|'permission'|'quota')
+---`control_error`: Claude refused a mode or model change; `session.control_error` holds
+---`{ what = 'mode'|'model', value, error }`.
+---@param fn fun(session: table, what: 'state'|'events'|'delta'|'meta'|'permission'|'quota'|'control_error')
 function M.on_change(fn) listeners[#listeners + 1] = fn end
 
 ---@param fn function

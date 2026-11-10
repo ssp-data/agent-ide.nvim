@@ -1,24 +1,28 @@
 -- What the user sees and does when Claude needs a decision: a tool permission, an
 -- AskUserQuestion, an ExitPlanMode plan approval. The choice is a `vim.ui.select`, opened only
 -- for the session whose chat the user is in (its transcript or prompt window is the current
--- window), never while the user types in that prompt, and always through `vim.schedule`. Asks
--- of other sessions only show in their transcript and in the drawer, so nothing interrupts.
+-- window), only in plain normal mode (never while typing, in a command line, an operator, or
+-- visual mode), and always through `vim.schedule`. Asks of other sessions only show in their
+-- transcript and in the drawer, so nothing interrupts.
 local api = vim.api
 local ask = require('agent-ide.transcript.ask')
 local config = require('agent-ide.config')
-local session = require('agent-ide.session')
 
 local M = {}
 
 local QUESTION_CANCELLED = 'User cancelled the question in Neovim'
 local KEEP_PLANNING = 'User wants to keep planning'
+local STALE = 'Agent-IDE: that ask is no longer open'
+local BLOCKED_RETRY_MS = 200
 
-local per = {} -- session id -> { scheduled, force, cancelled = { [request_id] = true }, echoed = {} }
-local active = false -- a select (or a chain of question selects) is open
-local seen, seq = {}, 0 -- request_id -> order of arrival (for "oldest ask first" across sessions)
+-- session id -> { scheduled, force, cancelled = {}, echoed = {}, seen = {} } (keyed by request_id)
+local per = {}
+---@type { s: table, request_id: string }|nil the open select (or chain of question selects)
+local active = nil
+local seq = 0 -- arrival counter for `seen` ("oldest ask first" across sessions)
 
 local function st(s)
-  per[s.id] = per[s.id] or { cancelled = {}, echoed = {} }
+  per[s.id] = per[s.id] or { cancelled = {}, echoed = {}, seen = {} }
   return per[s.id]
 end
 
@@ -30,11 +34,20 @@ local function answer_key()
   return k or 'the answer key'
 end
 
+local function is_open(s, request_id)
+  for _, p in ipairs(s.pending_permissions) do
+    if p.request_id == request_id then return true end
+  end
+  return false
+end
+
 -- Where the user is ----------------------------------------------------------------------
 
 ---The current window shows the transcript or the prompt of `s`, and the transcript is shown in
 ---the current tab.
-local function in_chat(s)
+---@param s table Session
+---@return boolean
+function M.in_chat(s)
   local tbuf, pbuf = chat().buffers(s)
   if not tbuf then return false end
   local cur = api.nvim_get_current_buf()
@@ -45,46 +58,46 @@ local function in_chat(s)
   return false
 end
 
-local function typing_in_prompt(s)
+local function typing_in_prompt(s, mode)
   local _, pbuf = chat().buffers(s)
-  local m = api.nvim_get_mode().mode
-  return api.nvim_get_current_buf() == pbuf and m:match('^[iR]') ~= nil
+  return api.nvim_get_current_buf() == pbuf and mode:match('^[iR]') ~= nil
 end
 
+local function first_line(v) return (tostring(v or ''):match('^[^\r\n]*')) end
+
+---One line that fits the space left for messages, so it never causes a hit-enter prompt.
 local function echo(msg)
-  msg = vim.fn.strcharpart(msg, 0, math.max(vim.o.columns - 12, 20)) -- never a hit-enter prompt
+  local room = math.max(vim.v.echospace, 1)
+  if vim.fn.strdisplaywidth(msg) > room then
+    local n = vim.fn.strchars(msg)
+    while n > 0 and vim.fn.strdisplaywidth(vim.fn.strcharpart(msg, 0, n) .. '…') > room do n = n - 1 end
+    msg = vim.fn.strcharpart(msg, 0, n) .. '…'
+  end
   api.nvim_echo({ { msg } }, true, {})
 end
 
 -- Choices ----------------------------------------------------------------------------------
 
-local function rule_summary(sugg)
-  local out = {}
-  for _, r in ipairs(type(sugg.rules) == 'table' and sugg.rules or {}) do
-    if type(r) == 'table' then
-      local name = tostring(r.toolName or '?')
-      out[#out + 1] = type(r.ruleContent) == 'string' and r.ruleContent ~= '' and (name .. '(' .. r.ruleContent .. ')') or name
-    end
-  end
-  return table.concat(out, ', ')
-end
+---Extra choices for Claude's suggestions, by suggestion type. Only `setMode` is offered: allow,
+---then `set_permission_mode` (a request shape the protocol notes record). Other types, `addRules`
+---("always allow <rule>") among them, are left out until the shape for sending a suggestion
+---back with the answer is verified against real Claude; add them to this table then.
+local SUGGESTION_CHOICES = {
+  setMode = function(s, p, sugg)
+    if type(sugg.mode) ~= 'string' then return nil end
+    local shown = sugg.mode == 'default' and 'manual' or sugg.mode
+    return { label = ('Allow and switch to %s for this session'):format(shown), run = function()
+      if s:answer(p.request_id, true) then s:set_mode(sugg.mode) end
+    end }
+  end,
+}
 
----Extra choices for Claude's suggestions. Only kinds whose effect we can carry out are offered:
----`setMode` (allow, then `set_permission_mode`) and `addRules` (allow; see the report: the
----protocol notes record no shape for sending a rule back, so the rule itself is not sent).
 local function suggestion_items(s, p)
   local items = {}
   for _, sugg in ipairs(type(p.suggestions) == 'table' and p.suggestions or {}) do
-    if type(sugg) == 'table' and sugg.type == 'setMode' and type(sugg.mode) == 'string' then
-      local shown = sugg.mode == 'default' and 'manual' or sugg.mode
-      items[#items + 1] = { label = ('Allow and switch to %s for this session'):format(shown), run = function()
-        if s:answer(p.request_id, true) then s:set_mode(sugg.mode) end
-      end }
-    elseif type(sugg) == 'table' and sugg.type == 'addRules' and rule_summary(sugg) ~= '' then
-      items[#items + 1] = { label = 'Allow and always allow ' .. rule_summary(sugg), run = function()
-        s:answer(p.request_id, true)
-      end }
-    end
+    local make = type(sugg) == 'table' and SUGGESTION_CHOICES[sugg.type]
+    local item = make and make(s, p, sugg)
+    if item then items[#items + 1] = item end
   end
   return items
 end
@@ -95,7 +108,7 @@ local function select(items, prompt, done)
   end)
 end
 
----Ask the user about `p`; `finish(cancelled)` once the select (chain) is over.
+---Ask the user about `p`; `finish(cancelled, choice)` once the select (chain) is over.
 local function ask_permission(s, p, finish)
   local items = {
     { label = 'Allow', run = function() s:answer(p.request_id, true) end },
@@ -120,16 +133,17 @@ local function ask_questions(s, p, finish)
   local questions = type(input.questions) == 'table' and input.questions or {}
   local answers = {}
   local function cancel()
-    s:answer(p.request_id, false, { message = QUESTION_CANCELLED })
-    finish(false)
+    -- cancelling a question that is gone anyway needs no answer and no notice
+    finish(false, is_open(s, p.request_id) and { run = function()
+      s:answer(p.request_id, false, { message = QUESTION_CANCELLED })
+    end } or nil)
   end
   local function step(i)
     local q = questions[i]
     if q == nil then
       local updated = vim.deepcopy(input)
       updated.answers = answers
-      s:answer(p.request_id, true, { updated_input = updated })
-      return finish(false)
+      return finish(false, { run = function() s:answer(p.request_id, true, { updated_input = updated }) end })
     end
     local items = {}
     for _, o in ipairs(type(q) == 'table' and type(q.options) == 'table' and q.options or {}) do
@@ -139,8 +153,11 @@ local function ask_questions(s, p, finish)
       end
     end
     if #items == 0 then return cancel() end
-    select(items, tostring(q.question), function(choice)
+    local prompt = tostring(q.question) .. (q.multiSelect == true and ' (one choice only)' or '')
+    select(items, prompt, function(choice)
       if not choice then return cancel() end
+      -- the ask went away while this question was open: say so instead of asking on
+      if not is_open(s, p.request_id) then return finish(false, { run = function() end }) end
       answers[tostring(q.question)] = choice.value
       step(i + 1)
     end)
@@ -158,25 +175,35 @@ local function oldest(s, force)
 end
 
 local function open_now(s, force)
-  -- forced (the user asked): also when an earlier select never reported back
-  if (active and not force) or not in_chat(s) then return end
+  if active or not M.in_chat(s) then return end
   local p = oldest(s, force)
   if not p then return end
   local c = st(s)
-  if typing_in_prompt(s) and not force then
-    if not c.echoed[p.request_id] then
+  local m = api.nvim_get_mode()
+  if m.mode ~= 'n' or m.blocking then
+    -- not now: `ModeChanged *:n` brings us back; a blocking key wait has no mode change
+    if force then c.force = true end
+    if m.mode == 'n' then
+      vim.defer_fn(function() M.maybe_prompt(s) end, BLOCKED_RETRY_MS)
+    elseif typing_in_prompt(s, m.mode) and not c.echoed[p.request_id] then
       c.echoed[p.request_id] = true
-      echo(('Claude asks: %s: %s  (%s to answer)'):format(tostring(p.tool_name), ask.summary(p), answer_key()))
+      echo(('Claude asks: %s: %s  (%s to answer)'):format(first_line(p.tool_name), first_line(ask.summary(p)), answer_key()))
     end
     return
   end
-  active = true
+  local token = { s = s, request_id = p.request_id }
+  active = token
   c.cancelled[p.request_id] = nil
   local function finish(cancelled, choice)
-    active = false
+    if active == token then active = nil end
     if cancelled then c.cancelled[p.request_id] = true end
-    -- an ask closed meanwhile (turn ended) is no longer answerable: `answer` returns false
-    if choice and choice.run then choice.run() end
+    if choice and choice.run then
+      if is_open(s, p.request_id) then
+        choice.run()
+      else
+        vim.notify(STALE, vim.log.levels.INFO)
+      end
+    end
     M.maybe_prompt(s)
   end
   if p.tool_name == 'AskUserQuestion' then
@@ -189,7 +216,7 @@ local function open_now(s, force)
 end
 
 ---Open the select for the oldest open ask of `s` when the user is in its chat (scheduled).
----`force` (the answer key, `next_waiting`) also reopens a cancelled ask and opens while typing.
+---`force` (the answer key, `next_waiting`) also reopens a cancelled ask.
 ---@param s table Session
 ---@param opts? { force?: boolean }
 function M.maybe_prompt(s, opts)
@@ -206,7 +233,7 @@ function M.maybe_prompt(s, opts)
   end)
 end
 
----The answer key: reopen the oldest open ask of `s`.
+---The answer key: reopen the oldest open ask of `s` (not while its select is already open).
 ---@param s table Session
 function M.answer(s)
   if #s.pending_permissions == 0 then
@@ -215,21 +242,26 @@ function M.answer(s)
   M.maybe_prompt(s, { force = true })
 end
 
----Session change 'permission': note the arrival order, then maybe open the select.
+---Session change 'permission': note the arrival order, forget answered asks, then maybe open
+---the select.
 ---@param s table Session
 function M.on_permission(s)
+  local c = st(s)
   local ids = {}
   for _, p in ipairs(s.pending_permissions) do
     ids[p.request_id] = true
-    if not seen[p.request_id] then
+    if not c.seen[p.request_id] then
       seq = seq + 1
-      seen[p.request_id] = seq
+      c.seen[p.request_id] = seq
     end
   end
-  local c = st(s)
-  for id in pairs(c.cancelled) do
-    if not ids[id] then c.cancelled[id] = nil end
+  for _, t in ipairs({ c.cancelled, c.echoed, c.seen }) do
+    for id in pairs(t) do
+      if not ids[id] then t[id] = nil end
+    end
   end
+  -- a select whose ask is gone no longer blocks others (its late answer is reported as stale)
+  if active and active.s == s and not ids[active.request_id] then active = nil end
   M.maybe_prompt(s)
 end
 
@@ -237,7 +269,7 @@ end
 ---@param s table Session
 ---@return number
 function M.oldest_ask(s)
-  local best = math.huge
+  local best, seen = math.huge, st(s).seen
   for _, p in ipairs(s.pending_permissions) do best = math.min(best, seen[p.request_id] or math.huge) end
   return best
 end
@@ -245,8 +277,9 @@ end
 local augroup = api.nvim_create_augroup('agent-ide.permission', { clear = true })
 local set_up = false
 
----Entering a chat window, or leaving insert (or any) mode for normal mode in one, opens the
----select for an ask that is waiting there.
+---Entering a chat window, or getting back to normal mode in one, opens the select for an ask
+---that is waiting there. Entering a normal window outside the chat of the open select's
+---session forgets that select (a picker that never reports back must not block for ever).
 function M.setup()
   if set_up then return end
   set_up = true
@@ -254,63 +287,12 @@ function M.setup()
     local s = chat().session_of(ev and ev.buf or api.nvim_get_current_buf())
     if s then M.maybe_prompt(s) end
   end
-  api.nvim_create_autocmd({ 'WinEnter', 'BufEnter' }, { group = augroup, callback = check })
+  api.nvim_create_autocmd('WinEnter', { group = augroup, callback = function(ev)
+    if active and api.nvim_win_get_config(0).relative == '' and not M.in_chat(active.s) then active = nil end
+    check(ev)
+  end })
+  api.nvim_create_autocmd('BufEnter', { group = augroup, callback = check })
   api.nvim_create_autocmd('ModeChanged', { group = augroup, pattern = '*:n', callback = function() check() end })
-end
-
----Sessions that need the user, in order: waiting (oldest ask first), then failed, then done.
----Sessions waiting in another Claude come after this Neovim's waiting ones.
----@return { s: table|nil, id: string, elsewhere: boolean }[]
-function M.needing()
-  local live = require('agent-ide.live').get()
-  local out, mine = {}, {}
-  local rank = { waiting = 1, failed = 3, done = 4 }
-  for i, s in ipairs(session.all()) do
-    mine[s.id] = s.state ~= 'parked' or nil
-    local r = rank[s.state]
-    if r then out[#out + 1] = { s = s, id = s.id, elsewhere = false, r = r, t = M.oldest_ask(s), i = i } end
-  end
-  local n = #out
-  for id, e in pairs(live) do
-    if not mine[id] and e.status == 'waiting' then
-      n = n + 1
-      out[#out + 1] = { id = id, elsewhere = true, r = 2, t = 0, i = n, pid = e.pid }
-    end
-  end
-  table.sort(out, function(a, b)
-    if a.r ~= b.r then return a.r < b.r end
-    if a.t ~= b.t then return a.t < b.t end
-    if a.i ~= b.i then return a.i < b.i end
-    return a.id < b.id
-  end)
-  return out
-end
-
----Go to the next session that needs the user (see `needing`): its chat in the Agents tab, with
----the select for its oldest ask; a session waiting in another Claude is jumped to in tmux.
-function M.next_waiting()
-  local list = M.needing()
-  if #list == 0 then return vim.notify('Agent-IDE: nothing needs you', vim.log.levels.INFO) end
-  local pick = list[1]
-  local cur = chat().current()
-  if cur and pick.s == cur and in_chat(cur) and list[2] then pick = list[2] end
-  if pick.elsewhere then
-    if vim.env.TMUX and vim.env.TMUX ~= '' and pick.pid then
-      return require('agent-ide.tmux').jump_to_pid(pick.pid, function(ok, reason)
-        if not ok then vim.notify('Agent-IDE: cannot jump (' .. tostring(reason) .. ')', vim.log.levels.INFO) end
-      end)
-    end
-    return vim.notify('Agent-IDE: a session waits in another Claude', vim.log.levels.INFO)
-  end
-  local drawer = require('agent-ide.ui.drawer')
-  local tab = drawer.state().tab
-  if not tab then
-    require('agent-ide').toggle()
-  elseif api.nvim_get_current_tabpage() ~= tab then
-    api.nvim_set_current_tabpage(tab)
-  end
-  chat().open(pick.s, chat().project_of(pick.s))
-  M.maybe_prompt(pick.s, { force = true })
 end
 
 return M

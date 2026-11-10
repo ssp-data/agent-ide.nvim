@@ -105,6 +105,8 @@ local function on_change(s, what)
   if what == 'permission' then
     drawer().refresh()
     permission().on_permission(s)
+  elseif what == 'control_error' then
+    require('agent-ide.ui.mode').control_error(s)
   elseif what == 'state' or what == 'meta' then
     if c then update_winbar(c) end
     drawer().refresh()

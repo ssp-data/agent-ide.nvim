@@ -109,10 +109,9 @@ function H.control_error(s, a)
     s[field] = nil
     s:_emit('meta')
   end
-  -- only the session on screen speaks up; others keep the error in their transcript
-  if s.visible then
-    vim.notify(('Agent-IDE: cannot switch %s to %s: %s'):format(what, tostring(value), tostring(a.error)), vim.log.levels.WARN)
-  end
+  -- the UI tells the user (only for the session on screen)
+  s.control_error = { what = what, value = value, error = a.error }
+  s:_emit('control_error')
 end
 
 function H.quota(s, a)

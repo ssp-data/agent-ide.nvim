@@ -372,7 +372,7 @@ T['AskUserQuestion: one select per question; the answers go back in updatedInput
 end
 
 T['AskUserQuestion: cancelling a question denies it'] = function()
-  local input = { questions = { { question = 'Pick?', header = 'P', multiSelect = false,
+  local input = { questions = { { question = 'Pick?', header = 'P', multiSelect = true,
     options = { { label = 'A' }, { label = 'B' } } } } }
   start(flat({ expect = 'Ask me' }, init(), status(), tool_use('t1', 'AskUserQuestion', input),
     ask('q1', 'AskUserQuestion', input), { expect = '"q1"' },
@@ -380,6 +380,7 @@ T['AskUserQuestion: cancelling a question denies it'] = function()
   open_new()
   send_normal('Ask me')
   wait_for(function() return #selects() == 1 end, 'question')
+  eq(selects()[1].prompt, 'Pick? (one choice only)') -- multiSelect is answered with one choice
   child.lua('_G.cancel()')
   wait_for(function() return has_line(transcript(), 'Ok.') ~= nil end, 'answer')
   eq(answers()[1], { subtype = 'success', request_id = 'q1',
@@ -412,14 +413,13 @@ T['ExitPlanMode: the plan shows as markdown; keep planning denies, approve allow
   eq(transcript(), view_parts().rendered)
 end
 
-T['suggestions: setMode and addRules are offered, others left out; setMode allows and switches mode'] = function()
+T['suggestions: only setMode is offered (addRules until its answer shape is verified); it allows and switches mode'] = function()
   start(flat(write_turn('Write it', 'p1', { permission_suggestions = { SET_MODE, ADD_RULES, ADD_DIRS } }),
     { expect = 'set_permission_mode' }, status('acceptEdits'), ok('r1', { mode = 'acceptEdits' })))
   open_new()
   send_normal('Write it')
   wait_for(function() return #selects() == 1 end, 'select')
-  eq(selects()[1].labels, { 'Allow', 'Deny', 'Allow and switch to acceptEdits for this session',
-    'Allow and always allow Bash(npm test:*)' })
+  eq(selects()[1].labels, { 'Allow', 'Deny', 'Allow and switch to acceptEdits for this session' })
   pick('Allow and switch to acceptEdits for this session')
   wait_for(function() return #controls() == 1 end, 'set_permission_mode')
   eq(answers()[1], { subtype = 'success', request_id = 'p1', response = { behavior = 'allow', updatedInput = WRITE } })
@@ -548,6 +548,103 @@ T['next_waiting: nothing needs you; done sessions are opened; global key mapped'
   child.lua('require("agent-ide").next_waiting()')
   wait_for(function() return current().id == b end, 'B opened')
   eq(child.lua_get('require("agent-ide.session").get(...).state', { b }), 'idle')
+end
+
+-- An ask of the session on screen arrives while the user is not in plain normal mode.
+local function ask_later(keys_before, check_mode, keys_after)
+  start(flat({ expect = 'Write it' }, init(), status(), say('ready'), { expect = '"go"' },
+    tool_use('t1', 'Write', WRITE), ask('p1', 'Write', WRITE), { expect = '"p1"' },
+    tool_result('t1', 'written'), say('Written.'), result('Written.')))
+  local id = open_new()
+  send_normal('Write it')
+  wait_for(function() return has_line(transcript(), 'ready') ~= nil end, 'ready')
+  child.type_keys(unpack(keys_before))
+  eq(mode(), check_mode)
+  child.lua('require("agent-ide.session").get(...):_write({ type = "go" })', { id })
+  wait_for(function() return has_line(transcript(), 'Permission needed') ~= nil end, 'block')
+  vim.wait(300)
+  eq(#selects(), 0)
+  eq(mode(), check_mode)
+  eq(child.lua_get('vim.fn.execute("messages")'):find('Claude asks', 1, true), nil) -- echo is for typing only
+  child.type_keys(unpack(keys_after))
+  wait_for(function() return #selects() == 1 end, 'select back in normal mode')
+  vim.wait(200)
+  eq(#selects(), 1)
+  eq(selects()[1].mode, 'n')
+end
+
+T['ask while a command line is being typed: no select until back in normal mode'] = function()
+  ask_later({ ':echo' }, 'c', { '<Esc>' })
+  eq(child.lua_get('vim.fn.getcmdline()'), '')
+end
+
+T['ask while in visual mode: no select until back in normal mode'] = function()
+  ask_later({ 'i', 'abc', '<Esc>', 'v' }, 'v', { '<Esc>' })
+end
+
+T['ask while an operator is pending: no select until it is done'] = function()
+  ask_later({ 'i', 'abc', '<Esc>', 'd' }, 'no', { 'l' })
+end
+
+-- A select stays open while the ask goes away; choosing then says so and sends nothing.
+local function stale_case(gone)
+  start(flat({ expect = 'Write it' }, init(), status(), tool_use('t1', 'Write', WRITE), ask('p1', 'Write', WRITE),
+    { expect = '"go"' }, gone))
+  local id = open_new()
+  send_normal('Write it')
+  wait_for(function() return #selects() == 1 end, 'select')
+  child.lua('require("agent-ide.session").get(...):_write({ type = "go" })', { id })
+  wait_for(function() return has_line(transcript(), 'Permission needed') == nil end, 'ask gone')
+  pick('Allow')
+  vim.wait(100)
+  local notes = child.lua_get('_G.notes')
+  eq(notes[#notes], 'Agent-IDE: that ask is no longer open')
+  eq(answers(), {})
+end
+
+T['ask gone with the process while its select is open: choosing says so'] = function()
+  stale_case({ exit = 0 })
+end
+
+T['ask gone with the turn result while its select is open: choosing says so'] = function()
+  stale_case(result('Gave up.'))
+end
+
+T['answer key while the select is open opens no second one; leaving the chat frees a select that never returns'] = function()
+  start(write_turn('Write it', 'p1'))
+  open_new()
+  send_normal('Write it')
+  wait_for(function() return #selects() == 1 end, 'select')
+  child.type_keys('\\ay')
+  vim.wait(300)
+  eq(#selects(), 1)
+  -- the stub never calls back: go to the drawer (not the chat) and back
+  child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.drawer").state().win)')
+  child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.chat")._windows().prompt)')
+  wait_for(function() return #selects() == 2 end, 'select again')
+  pick('Allow')
+  wait_for(function() return has_line(transcript(), 'Written.') ~= nil end, 'answer')
+  eq(#answers(), 1)
+end
+
+T['echo while typing fits one line: first lines only, cut to the message space'] = function()
+  local input = { file_path = '/x/' .. string.rep('long-name-', 12) .. 'a.txt\nsecond', content = 'c' }
+  start(flat({ expect = 'Write it' }, init(), status(), say('ready'), { expect = '"go"' },
+    tool_use('t1', 'Write\nX', input), ask('p1', 'Write\nX', input)))
+  local id = open_new()
+  child.type_keys('i', 'Write it', '<C-CR>')
+  wait_for(function() return has_line(transcript(), 'ready') ~= nil end, 'ready')
+  child.lua('vim.o.columns = 50')
+  child.lua('require("agent-ide.session").get(...):_write({ type = "go" })', { id })
+  wait_for(function() return child.lua_get('vim.fn.execute("messages")'):find('Claude asks', 1, true) ~= nil end, 'echo')
+  local all = vim.split(child.lua_get('vim.fn.execute("messages")'), '\n')
+  local msg = all[#all]
+  eq(msg:find('Claude asks: Write: /x/long', 1, true), 1)
+  eq(vim.endswith(msg, '…'), true)
+  eq(msg:find('second', 1, true), nil)
+  eq(child.lua_get('vim.fn.strdisplaywidth(...) <= vim.v.echospace', { msg }), true)
+  eq(mode(), 'i')
+  eq(#selects(), 0)
 end
 
 T['help lists the new keys'] = function()

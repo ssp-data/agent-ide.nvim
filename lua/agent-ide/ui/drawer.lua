@@ -6,6 +6,7 @@ local live = require('agent-ide.live')
 local project = require('agent-ide.project')
 local session = require('agent-ide.session')
 local tmux = require('agent-ide.tmux')
+local model = require('agent-ide.ui.drawer_model')
 local tree = require('agent-ide.ui.tree')
 
 local M = {}
@@ -16,8 +17,6 @@ local augroup = api.nvim_create_augroup('agent-ide.drawer', { clear = true })
 local S = { tab = nil, win = nil, buf = nil, projects = {}, nodes = {}, expanded = {} }
 local debounce -- uv timer for index.on_change
 local shown = false -- the drawer window is on screen: live polling and the change timer run
--- Sessions started from "+ New session" that no scan has listed yet: id -> { key, activity }
-local unsaved = {}
 
 local function valid_win(w) return w ~= nil and api.nvim_win_is_valid(w) end
 
@@ -38,63 +37,8 @@ local function node_key(node)
   if node.type == 'new' then return 'n:' .. node.project.key end
 end
 
----State shown for a session: its Session's state when this Neovim has one that is not
----parked, else the live state (another Claude, e.g. in a tmux pane).
----@param id string
----@return string
-function M.state_of(id)
-  local s = session.get(id)
-  if s and s.state ~= 'parked' then return s.state end
-  return live.state_of(live.get(), id)
-end
-
--- Tool a waiting Session of this Neovim waits for (its oldest open ask).
-local function waits_for(id)
-  local s = session.get(id)
-  local p = s and s.state == 'waiting' and s.pending_permissions[1]
-  return p and (tostring(p.tool_name):gsub('[\r\n]', ' ')) or nil
-end
-
-local function first_line(text) return (text or ''):match('^%s*([^\r\n]*)') end
-
----Projects with the unsaved new sessions (once they have a prompt) added to their project.
----A session a scan lists is dropped from `unsaved`, so it never shows twice.
-local function with_unsaved(projects)
-  if next(unsaved) == nil then return projects end
-  local listed = {}
-  for _, p in ipairs(projects) do
-    for _, m in ipairs(p.sessions) do listed[m.id] = true end
-  end
-  for _, id in ipairs(vim.tbl_keys(unsaved)) do
-    if listed[id] or not session.get(id) then unsaved[id] = nil end
-  end
-  local out = {}
-  for i, p in ipairs(projects) do
-    local extra = {}
-    for id, u in pairs(unsaved) do
-      local s = session.get(id)
-      if u.key == p.key and #s.events > 0 then
-        local title = s.title
-        if not title then
-          for _, ev in ipairs(s.events) do
-            if ev.kind == 'prompt' then title = first_line(ev.text); break end
-          end
-        end
-        extra[#extra + 1] = { id = id, cwd = s.cwd, title = title or 'new session', activity = u.activity }
-      end
-    end
-    if #extra == 0 then
-      out[i] = p
-    else
-      table.sort(extra, function(a, b)
-        if a.activity ~= b.activity then return a.activity > b.activity end
-        return a.id < b.id
-      end)
-      out[i] = setmetatable({ sessions = vim.list_extend(extra, p.sessions) }, { __index = p })
-    end
-  end
-  return out
-end
+---State shown for a session (see `drawer_model.state_of`).
+M.state_of = model.state_of
 
 local function set_opt(win, name, value) api.nvim_set_option_value(name, value, { scope = 'local', win = win }) end
 
@@ -104,7 +48,8 @@ local function render(focus)
   sync()
   if not S.buf then return end
   local cfg = config.get()
-  local t = tree.build(with_unsaved(S.projects), M.state_of, S.expanded, os.time(), cfg.icons, cfg.projects_dir, waits_for)
+  local t = tree.build(model.with_unsaved(S.projects), model.state_of, S.expanded, os.time(), cfg.icons, cfg.projects_dir,
+    model.waits_for)
   local row = S.win and api.nvim_win_get_cursor(S.win)[1]
   focus = focus or (row and node_key(S.nodes[row]))
   vim.bo[S.buf].modifiable = true
@@ -211,7 +156,7 @@ function actions.open()
     -- only an absolute key is a folder: a project without cwd is keyed by a bare directory name
     if dir:sub(1, 1) ~= '/' or vim.fn.isdirectory(dir) ~= 1 then return notify('project folder not found: ' .. dir) end
     local s = session.open({ cwd = dir })
-    unsaved[s.id] = { key = p.key, activity = os.time() }
+    model.add_unsaved(s.id, p.key)
     require('agent-ide.ui.chat').open(s, p)
   else
     toggle_node(node)

@@ -35,7 +35,7 @@ end
 ---failed, then a finished turn you have not seen. Notifies when there is none.
 function M.next_waiting()
   require('agent-ide.ui.highlights').setup()
-  require('agent-ide.ui.permission').next_waiting()
+  require('agent-ide.ui.waiting').next_waiting()
 end
 
 ---@return string text for a statusline (percent signs doubled)

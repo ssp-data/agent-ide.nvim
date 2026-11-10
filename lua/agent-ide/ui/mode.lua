@@ -52,6 +52,15 @@ function M.pick_model(s)
   end)
 end
 
+---Tell the user Claude refused the last mode or model change of `s` (session change
+---`control_error`); only for the session on screen, the others keep it in their transcript.
+---@param s table Session
+function M.control_error(s)
+  local e = s.control_error
+  if not e or not s.visible then return end
+  vim.notify(('Agent-IDE: cannot switch %s to %s: %s'):format(e.what, tostring(e.value), tostring(e.error)), vim.log.levels.WARN)
+end
+
 ---`claude-haiku-5-5-20261001` -> `haiku-5-5`.
 local function short_model(model)
   if not model then return 'model ?' end
