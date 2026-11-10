@@ -211,7 +211,8 @@ fn index_bytes(doc: &mut Doc, data: &[u8], base: u64) {
     doc.indexed = base + end as u64;
 }
 
-fn stat(path: &Path) -> Option<(u64, u64)> {
+/// `(mtime seconds, size)` of a file.
+pub fn stat(path: &Path) -> Option<(u64, u64)> {
     let st = std::fs::metadata(path).ok()?;
     let mtime = st.modified().ok()?.duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     Some((mtime, st.len()))
@@ -262,15 +263,17 @@ pub fn refresh(dir: &str, docs: &HashMap<String, Doc>) -> Refresh {
 
 /// The docs of those `files` that are new or changed compared with `docs`, indexed in parallel.
 pub fn changed(files: &[String], docs: &HashMap<String, Doc>) -> Vec<Doc> {
+    stale(files, docs).par_iter().filter_map(|(p, prev)| index_file(Path::new(p), *prev)).collect()
+}
+
+/// Those `files` that are new or changed (mtime or size) compared with `docs`, with their doc.
+pub fn stale<'a>(files: &'a [String], docs: &'a HashMap<String, Doc>) -> Vec<(&'a String, Option<&'a Doc>)> {
     files
-        .par_iter()
+        .iter()
         .filter_map(|p| {
             let (mtime, size) = stat(Path::new(p))?;
             let prev = docs.get(p);
-            if prev.is_some_and(|d| d.meta.mtime == mtime && d.meta.size == size) {
-                return None;
-            }
-            index_file(Path::new(p), prev)
+            (!prev.is_some_and(|d| d.meta.mtime == mtime && d.meta.size == size)).then_some((p, prev))
         })
         .collect()
 }

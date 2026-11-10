@@ -13,7 +13,8 @@ local act = require('agent-ide.ui.search_open')
 local M = {}
 
 M._debounce_ms = 8
-local LIMIT = 100
+local LIMIT = 200
+local CONTEXTS = 20 -- turns kept for the preview
 local PREVIEW_MS = 25
 local KIND_SETS = {
   { label = 'titles, prompts, answers', kinds = { 'title', 'prompt', 'answer' } },
@@ -78,6 +79,7 @@ local function show_preview()
   if P.contexts[key] then return draw(P.contexts[key]) end
   search.context(hit.path, event, function(first, events)
     if not P then return end
+    if vim.tbl_count(P.contexts) >= CONTEXTS then P.contexts = {} end
     P.contexts[key] = { first = first, events = events }
     draw(P.contexts[key])
   end)
@@ -254,6 +256,10 @@ function M.open(opts)
   update_title()
   view.render_list(P.v, {}, 1, 'searching…', '')
   local buf = P.v.input_buf
+  -- no completion menu in the query line (blink.cmp reads `b:completion`)
+  vim.b[buf].completion = false
+  local cmp = package.loaded['cmp']
+  if type(cmp) == 'table' and type(cmp.setup) == 'table' and cmp.setup.buffer then pcall(cmp.setup.buffer, { enabled = false }) end
   map_keys(buf)
   if opts.query and opts.query ~= '' then api.nvim_buf_set_lines(buf, 0, -1, false, { opts.query }) end
   P.augroup = api.nvim_create_augroup('agent-ide.search', { clear = true })

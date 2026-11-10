@@ -72,6 +72,26 @@ fn first_search_builds_saves_and_notifies_then_the_cache_is_reused() {
 }
 
 #[test]
+fn later_changes_are_written_at_most_every_30_s_and_when_the_helper_exits() {
+    let root = tmp("save");
+    let projects = root.join("projects");
+    let cache = root.join("cache");
+    let p = write(&projects, "-w", "s", &user("first", 1));
+    let file = cache.join(crate::search::store::FILE_NAME);
+    let (mut s, _) = server(Some(&cache));
+    search(&mut s, &projects, json!({}));
+    let saved = std::fs::read(&file).unwrap();
+    append(&p, &user("second", 2));
+    std::thread::sleep(std::time::Duration::from_millis(1100)); // the next pass may start
+    let r = search(&mut s, &projects, json!({"query": "second", "kinds": ["prompt"]}));
+    assert_eq!(r["hits"].as_array().unwrap().len(), 1);
+    assert_eq!(std::fs::read(&file).unwrap(), saved, "not written again within 30 s");
+    drop(s);
+    let docs = crate::search::store::load(&file, &projects.to_string_lossy()).unwrap();
+    assert_eq!(docs[0].chunks.len(), 2, "written when the helper exits");
+}
+
+#[test]
 fn scope_and_bad_params() {
     let root = tmp("scope");
     write(&root, "-w-a", "a", &user("shared word", 1));

@@ -110,8 +110,21 @@ end
 
 ---Show `hits` (selected: `sel`); `empty` is shown when there are none; `footer` below the list.
 function M.render_list(v, hits, sel, empty, footer)
-  local lines = {}
-  for i, h in ipairs(hits) do lines[i] = (M.TAGS[h.kind] or '?     ') .. ' ' .. h.snippet end
+  local lines, metas, cut = {}, {}, {}
+  local width = api.nvim_win_get_width(v.list_win)
+  for i, h in ipairs(hits) do
+    metas[i] = ' ' .. (h.project or '?') .. ' · ' .. age(h.ts) .. ' '
+    local line = (M.TAGS[h.kind] or '?     ') .. ' ' .. h.snippet
+    -- leave room for the project and age on the right
+    local room = math.max(10, width - vim.fn.strdisplaywidth(metas[i]) - 1)
+    if vim.fn.strdisplaywidth(line) > room then
+      line = vim.fn.strcharpart(line, 0, room - 1)
+      while vim.fn.strdisplaywidth(line) > room - 1 do line = vim.fn.strcharpart(line, 0, vim.fn.strchars(line) - 1) end
+      cut[i] = #line
+      line = line .. '…'
+    end
+    lines[i] = line
+  end
   if #hits == 0 then lines = { '  ' .. empty } end
   vim.bo[v.list_buf].modifiable = true
   api.nvim_buf_set_lines(v.list_buf, 0, -1, false, lines)
@@ -122,12 +135,11 @@ function M.render_list(v, hits, sel, empty, footer)
     api.nvim_buf_set_extmark(v.list_buf, ns, i - 1, 0, { end_col = tag, hl_group = KIND_HL[h.kind] or 'AgentIdeSearchMeta' })
     for _, r in ipairs(h.positions or {}) do
       local s, e = tag + 1 + r[1], tag + 1 + r[2]
-      if e <= #lines[i] and s < e then
+      if e <= (cut[i] or #lines[i]) and s < e then
         api.nvim_buf_set_extmark(v.list_buf, ns, i - 1, s, { end_col = e, hl_group = 'AgentIdeSearchMatch', priority = 200 })
       end
     end
-    local meta = (h.project or '?') .. ' · ' .. age(h.ts)
-    api.nvim_buf_set_extmark(v.list_buf, ns, i - 1, 0, { virt_text = { { ' ' .. meta .. ' ', 'AgentIdeSearchMeta' } },
+    api.nvim_buf_set_extmark(v.list_buf, ns, i - 1, 0, { virt_text = { { metas[i], 'AgentIdeSearchMeta' } },
       virt_text_pos = 'right_align' })
   end
   if #hits == 0 then

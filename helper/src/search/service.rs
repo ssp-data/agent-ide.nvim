@@ -14,6 +14,8 @@ use crate::protocol::Out;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use rayon::prelude::*;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
@@ -21,6 +23,9 @@ const REFRESH: Duration = Duration::from_secs(1);
 const BATCH: usize = 32;
 const PROGRESS: Duration = Duration::from_millis(300);
 const WAIT_MAX: Duration = Duration::from_secs(300);
+/// A growing transcript changes the index on every pass: it is written at most this often
+/// (and when the helper exits).
+const SAVE_EVERY: Duration = Duration::from_secs(30);
 
 #[derive(Default)]
 struct State {
@@ -43,6 +48,8 @@ struct Inner {
     state: RwLock<State>,
     work: Mutex<Work>,
     idle: Condvar,
+    dirty: AtomicBool,
+    saved: Mutex<Option<Instant>>,
 }
 
 pub struct Service {
@@ -84,10 +91,15 @@ impl Inner {
         let files = crate::scan::list_files(dir);
         let mut shown = Instant::now();
         for batch in files.chunks(BATCH) {
-            let fresh = index::changed(batch, &self.read().docs);
-            if fresh.is_empty() {
+            // the read lock is held only to find the stale files, not while they are indexed
+            let todo: Vec<(String, Option<Doc>)> = {
+                let st = self.read();
+                index::stale(batch, &st.docs).into_iter().map(|(p, d)| (p.clone(), d.cloned())).collect()
+            };
+            if todo.is_empty() {
                 continue;
             }
+            let fresh: Vec<Doc> = todo.par_iter().filter_map(|(p, prev)| index::index_file(Path::new(p), prev.as_ref())).collect();
             changed = true;
             let mut st = self.write();
             if st.dir.as_deref() != Some(dir) {
@@ -111,11 +123,28 @@ impl Inner {
             }
         }
         if changed {
-            if let Some(f) = &self.file {
-                store::save(f, dir, self.read().docs.values());
-            }
             self.write().build_ms = t0.elapsed().as_millis() as u64;
+            self.dirty.store(true, Ordering::SeqCst);
+            let mut saved = self.saved.lock().unwrap_or_else(|e| e.into_inner());
+            if saved.is_none_or(|t| t.elapsed() >= SAVE_EVERY) {
+                self.save();
+                *saved = Some(Instant::now());
+            }
+            drop(saved);
             self.notify();
+        }
+    }
+
+    /// Writes the index when it changed since the last write.
+    fn save(&self) {
+        if !self.dirty.swap(false, Ordering::SeqCst) {
+            return;
+        }
+        let st = self.read();
+        if let (Some(f), Some(dir)) = (&self.file, &st.dir) {
+            if !store::save(f, dir, st.docs.values()) {
+                self.dirty.store(true, Ordering::SeqCst);
+            }
         }
     }
 }
@@ -162,17 +191,17 @@ impl Service {
             state: RwLock::new(State::default()),
             work: Mutex::new(Work::default()),
             idle: Condvar::new(),
+            dirty: AtomicBool::new(false),
+            saved: Mutex::new(None),
         };
         Service { inner: Arc::new(inner) }
     }
 
     /// Starts a background pass over `dir` unless one runs or one started less than `REFRESH` ago.
     fn kick(&self, dir: &str) {
-        {
-            let mut st = self.inner.write();
-            if st.dir.as_deref() != Some(dir) {
-                *st = State { dir: Some(dir.to_string()), ..State::default() };
-            }
+        if self.inner.read().dir.as_deref() != Some(dir) {
+            self.inner.save();
+            *self.inner.write() = State { dir: Some(dir.to_string()), ..State::default() };
         }
         let mut w = self.inner.work.lock().unwrap_or_else(|e| e.into_inner());
         if w.running || w.last.is_some_and(|t| t.elapsed() < REFRESH) && self.inner.read().loaded {
@@ -224,5 +253,14 @@ impl Service {
         let anchors = self.inner.read().docs.get(path).map(|d| d.anchors.clone());
         let (first, events) = context::turn(Path::new(path), anchors.as_deref(), event as u32)?;
         Ok(json!({"first": first, "events": events}))
+    }
+}
+
+impl Drop for Service {
+    /// The helper exits when Neovim closes its stdin: write what the last passes changed.
+    fn drop(&mut self) {
+        if !self.running() {
+            self.inner.save();
+        }
     }
 }
