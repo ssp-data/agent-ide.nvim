@@ -3,7 +3,12 @@
 -- Prints one PASS/FAIL line per check and nothing from the conversation's content.
 -- Cleans up after itself: the temporary repository, the transcript directory Claude made for
 -- it under ~/.claude/projects (only the one named after the temporary path, and only when the
--- run created it) and the plan files Claude reported writing. KEEP=1 keeps them for debugging.
+-- run created it) and the plan files this run's session wrote (only files that were not in
+-- ~/.claude/plans when the run started). KEEP=1 keeps them for debugging.
+-- The child Neovim gets XDG_CACHE_HOME, XDG_STATE_HOME and XDG_RUNTIME_DIR under the temporary
+-- folder (helper cache, quota and status files stay out of the user's); HOME stays, so Claude
+-- keeps its login, and the Claude processes get the original XDG values back.
+-- REAL_DRY=1 does the set-up and clean-up without contacting Claude.
 local uv = vim.uv
 local child = MiniTest.new_child_neovim()
 
@@ -11,6 +16,7 @@ local TURN_MS = tonumber(vim.env.REAL_TURN_MS) or 240000
 local results, turns, pids, pid_seen, plan_files = {}, 0, {}, {}, {}
 
 local function out(line) io.stdout:write(line .. '\n') end
+local DRY = vim.env.REAL_DRY == '1'
 
 -- Temporary project --------------------------------------------------------------------------
 
@@ -33,15 +39,74 @@ vim.fn.system({ 'git', '-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 
 local claude_projects = vim.fn.expand('~/.claude/projects')
 local slug = repo:gsub('[^%w]', '-')
 local real_dir = claude_projects .. '/' .. slug
+local plans_dir = vim.fn.expand('~/.claude/plans')
+local plans_before = {} -- plan files that existed before the run: never deleted
+for _, f in ipairs(vim.fn.glob(plans_dir .. '/*', false, true)) do plans_before[f] = true end
 if uv.fs_stat(real_dir) then
   out('ABORT: ' .. real_dir .. ' exists already; not touching it')
+  vim.fn.delete(tmp, 'rf')
   vim.cmd('cquit 1')
 end
 uv.fs_symlink(real_dir, projects .. '/' .. slug)
 
+-- Plan files to delete: written by this run's session (reported in its plan approval) or new
+-- since the start and naming the temporary repository; never one that existed before.
+local function own_plans()
+  local out_files, seen = {}, {}
+  local function add(f)
+    if not seen[f] and not plans_before[f] and vim.fs.dirname(f) == plans_dir and uv.fs_stat(f) then
+      seen[f] = true
+      out_files[#out_files + 1] = f
+    end
+  end
+  for _, f in ipairs(plan_files) do add(f) end
+  for _, f in ipairs(vim.fn.glob(plans_dir .. '/*', false, true)) do
+    if not plans_before[f] then
+      local fh = io.open(f, 'rb')
+      local text = fh and fh:read('*a') or ''
+      if fh then fh:close() end
+      if text:find(repo, 1, true) then add(f) end
+    end
+  end
+  return out_files
+end
+
+local function cleanup()
+  local plans = own_plans()
+  for _, f in ipairs(plans) do os.remove(f) end
+  -- only the transcript directory this run made for its own temporary path
+  if vim.fs.dirname(real_dir) == claude_projects and vim.fs.basename(real_dir) == slug and uv.fs_stat(real_dir) then
+    vim.fn.delete(real_dir, 'rf')
+  end
+  vim.fn.delete(tmp, 'rf')
+  return #plans
+end
+
+-- Isolation: the child Neovim's own XDG folders; Claude gets the user's values back.
+local XDG = { 'XDG_CACHE_HOME', 'XDG_STATE_HOME', 'XDG_RUNTIME_DIR' }
+local saved, unset, assign = {}, {}, {}
+for _, name in ipairs(XDG) do
+  saved[name] = vim.env[name]
+  if saved[name] then assign[#assign + 1] = name .. '=' .. saved[name] else vim.list_extend(unset, { '-u', name }) end
+end
+local function with_user_env(argv)
+  local cmd = { 'env' }
+  vim.list_extend(cmd, unset)
+  vim.list_extend(cmd, assign)
+  return vim.list_extend(cmd, argv)
+end
+for _, name in ipairs(XDG) do
+  local d = tmp .. '/xdg/' .. name:lower()
+  vim.fn.mkdir(d, 'p', tonumber('700', 8))
+  vim.uv.os_setenv(name, d)
+end
+
 -- Child ------------------------------------------------------------------------------------
 
 child.restart({ '-u', 'tests/minimal_init.lua' })
+for _, name in ipairs(XDG) do
+  if saved[name] then vim.uv.os_setenv(name, saved[name]) else vim.uv.os_unsetenv(name) end
+end
 child.lua([==[
   local opts = ...
   vim.env.TMUX = nil
@@ -206,8 +271,24 @@ child.lua([==[
   -- KEEP=1 writes the events of each history mismatch to REAL_DIAG (default: the temporary folder)
   diag_dir = vim.env.REAL_DIAG or tmp,
   keep = vim.env.KEEP == '1',
-  setup = { projects_dir = projects, claude = { model = 'haiku' } },
+  setup = { projects_dir = projects, claude = { model = 'haiku', cmd = with_user_env({ 'claude' }) },
+    live = { cmd = with_user_env({ 'claude', 'agents', '--json' }) } },
 } })
+
+if DRY then
+  -- set-up done: show that the child's files live under the temporary folder, then clean up
+  local where = child.lua_get([[{ cache = vim.fn.stdpath('cache'), state = vim.fn.stdpath('state'),
+    status = require('agent-ide.status').file(), cmd = require('agent-ide.config').get().claude.cmd }]])
+  local inside = function(p) return vim.startswith(p, tmp .. '/') end
+  out('dry run: child cache, state and status file under the temporary folder: '
+    .. tostring(inside(where.cache) and inside(where.state) and inside(where.status)))
+  out('dry run: Claude gets the original XDG values: ' .. tostring(where.cmd[1] == 'env' and where.cmd[#where.cmd] == 'claude'))
+  out('dry run: transcript link in place: ' .. tostring(uv.fs_lstat(projects .. '/' .. slug) ~= nil))
+  child.stop()
+  local n = cleanup()
+  out(('dry run: cleaned up; temporary folder gone: %s; plan files removed: %d'):format(tostring(uv.fs_stat(tmp) == nil), n))
+  vim.cmd('qall!')
+end
 
 -- Helpers ----------------------------------------------------------------------------------
 
@@ -593,16 +674,8 @@ out(('checks: %d passed, %d failed; turns: %d; notices: %d'):format(passed, fail
 out(('claude processes started by this run still running: %d (of %d seen)'):format(alive, #pids))
 
 if vim.env.KEEP ~= '1' then
-  local plans_dir = vim.fn.expand('~/.claude/plans')
-  for _, p in ipairs(plan_files) do
-    if vim.fs.dirname(p) == plans_dir and uv.fs_stat(p) then os.remove(p) end
-  end
-  -- only the transcript directory this run made for its own temporary path
-  if vim.fs.dirname(real_dir) == claude_projects and vim.fs.basename(real_dir) == slug and uv.fs_stat(real_dir) then
-    vim.fn.delete(real_dir, 'rf')
-  end
-  vim.fn.delete(tmp, 'rf')
-  out('cleaned up: temporary repository, its transcript directory, ' .. #plan_files .. ' plan file(s)')
+  local n = cleanup()
+  out('cleaned up: temporary repository, its transcript directory, ' .. n .. ' plan file(s)')
 else
   out('KEEP=1: left ' .. tmp .. ' and ' .. real_dir)
 end
