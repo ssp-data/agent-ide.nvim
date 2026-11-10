@@ -58,7 +58,7 @@ defaults = function()
       -- handler for a key (a prompt row's keys below) that handler runs instead
       drawer = { open = { '<CR>', 'o' }, fold = 'za', collapse_all = 'z0', expand_all = 'z9', refresh = 'R',
         tmux = { 'gT', '<leader>aT' }, -- jump to the session's tmux pane, or continue it in native Claude there
-        search = { 'z', '<leader>ff', '<leader>z' }, park = 'sP', hide = 'H', delete = 'D', yank = 'y',
+        search = { 'S', '<leader>ff', '<leader>S' }, park = 'sP', hide = 'H', delete = 'D', yank = 'y',
         lazygit = 'glg', close = 'q', help = { '?', 'g?' }, graph = 'G', scope = '<S-Tab>',
         legend = { 'gL', '<leader>aL' }, close_tmux = 'X' },
       -- drawer, on prompt rows (elsewhere these keys keep their normal meaning)

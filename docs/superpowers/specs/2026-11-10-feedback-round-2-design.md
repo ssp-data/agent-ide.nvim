@@ -14,7 +14,7 @@ Every drawer key becomes configurable under `keys.drawer` (a key, a list, or `fa
 | expand all | `zR` | `z9` |
 | refresh | `R` | same |
 | to tmux: jump to the pane of a session running elsewhere; a session here: continue it in native Claude in a tmux pane | `gp` (jump), `<leader>at` (native) | `gT`, `<leader>aT` (one key: the row decides) |
-| search this project | `s` | `z`, `<leader>ff`, `<leader>z` (`Z` first; changed so `ZZ` / `ZQ` stay Vim's; `z` waits for 'timeoutlen' since `za` starts with it) |
+| search this project | `s` | `S`, `<leader>ff`, `<leader>S` (`Z` first, then `z`; the owner settled on `S` so that `ZZ` / `ZQ` stay Vim's and `za` is not delayed) |
 | park | `x` | `sP` |
 | hide | `H` | same |
 | delete (a session: to the trash; a prompt row: its file) | `D` session, `d` prompt | `D` for both |

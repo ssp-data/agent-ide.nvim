@@ -635,7 +635,7 @@ end
 ---Window options for a window showing a prompt buffer (it may be split off a transcript window).
 ---@param win integer
 function M.setup_win(win)
-  for name, value in pairs({ winfixheight = true, winbar = '', foldenable = false, foldmethod = 'manual' }) do
+  for name, value in pairs({ winfixheight = true, winbar = '', foldenable = false, foldmethod = 'manual', wrap = true, linebreak = true }) do
     api.nvim_set_option_value(name, value, { scope = 'local', win = win })
   end
 end

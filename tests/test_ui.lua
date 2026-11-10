@@ -220,7 +220,7 @@ T['no header line: the first row is the Prompts row, the cursor starts on it; ? 
   -- help: the only place the keys are shown
   child.type_keys('?')
   local help = child.lua_get("vim.api.nvim_buf_get_lines(require('agent-ide.ui.help')._state().lbuf, 0, -1, false)")
-  for _, key in ipairs({ '<CR> / o', 'za', 'R', 'gT / <leader>aT', 'z / <leader>ff / <leader>z', 'sP', 'glg', 'q', '? / g?' }) do
+  for _, key in ipairs({ '<CR> / o', 'za', 'R', 'gT / <leader>aT', 'S / <leader>ff / <leader>S', 'sP', 'glg', 'q', '? / g?' }) do
     eq({ key, has_line(help, key) ~= nil }, { key, true })
   end
 end
