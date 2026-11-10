@@ -12,6 +12,32 @@ T['edge-case fixture matches golden events'] = function()
   local golden = vim.json.decode(slurp('tests/fixtures/golden/edge-cases.events.json'), parse.DECODE_OPTS)
   eq(parse.parse_text(slurp('tests/fixtures/edge/edge-cases.jsonl')), golden)
 end
+T['image blocks become meta events without the data; size from the base64 length'] = function()
+  local function img(source)
+    local b = { type = 'image' }
+    b.source = source
+    return parse.parse_line(vim.json.encode({ type = 'user', message = { content = { b } } }))
+  end
+  local function b64(n) return string.rep('A', n) end
+  eq(img({ type = 'base64', media_type = 'image/png', data = 'QUJD' }), { { kind = 'meta', label = 'image', text = 'image/png, 3 B' } })
+  eq(img({ type = 'base64', media_type = 'image/png', data = 'QUI=' })[1].text, 'image/png, 2 B')
+  eq(img({ type = 'base64', media_type = 'image/png', data = 'QQ==' })[1].text, 'image/png, 1 B')
+  eq(img({ type = 'base64', media_type = 'image/png', data = '' })[1].text, 'image/png, 0 B')
+  eq(img({ type = 'base64', data = 'QUJD' })[1].text, 'image, 3 B')
+  eq(img({ type = 'base64', media_type = 'image/png', data = b64(1364) })[1].text, 'image/png, 1023 B')
+  eq(img({ type = 'base64', media_type = 'image/png', data = b64(1368) })[1].text, 'image/png, 1.0 KB')
+  eq(img({ type = 'base64', media_type = 'image/png', data = b64(1700) })[1].text, 'image/png, 1.2 KB') -- 1275 B
+  eq(img({ type = 'base64', media_type = 'image/png', data = b64(777564) })[1].text, 'image/png, 569.5 KB')
+  eq(img({ type = 'base64', media_type = 'image/png', data = b64(1398104) })[1].text, 'image/png, 1.0 MB')
+  eq(img({ type = 'base64', media_type = 'image/png', data = b64(777564 * 4) })[1].text, 'image/png, 2.2 MB')
+  eq(img({ type = 'url', url = 'https://e.x/a.png' })[1].text, 'https://e.x/a.png')
+  eq(img({ type = 'other' })[1].text, 'image')
+  eq(img(nil)[1].text, 'image')
+  local line = '{"type":"assistant","message":{"content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"QUJD"}}]}}'
+  eq(parse.parse_line(line), { { kind = 'meta', label = 'image', text = 'image/png, 3 B' } })
+  local tr = '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"x","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"QUJD"}},{"type":"image"}]}]}}'
+  eq(parse.parse_line(tr)[1].text, '[image: image/png, 3 B]\n[image]')
+end
 T['blank lines yield nothing; invalid lines are unknown events'] = function()
   eq(parse.parse_line(''), {})
   eq(parse.parse_line('   \t'), {})

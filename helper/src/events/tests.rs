@@ -151,3 +151,29 @@ fn numeric_block_type_label_uses_lua_number_format() {
     assert_eq!(label("0.00001"), json!("1e-05"));
     assert_eq!(label("123456789012345678"), json!("1.2345678901235e+17"));
 }
+
+#[test]
+fn image_blocks_become_meta_events_without_the_data() {
+    fn img(source: &str) -> Vec<Value> {
+        one(&format!(r#"{{"type":"user","message":{{"content":[{{"type":"image"{source}}}]}}}}"#))
+    }
+    let b64 = |n: usize| "A".repeat(n);
+    let text = |src: String| img(&src)[0]["text"].as_str().unwrap().to_string();
+    let png = |d: String| format!(r#","source":{{"type":"base64","media_type":"image/png","data":"{d}"}}"#);
+    assert_eq!(img(&png("QUJD".into())), vec![json!({"kind":"meta","label":"image","text":"image/png, 3 B"})]);
+    assert_eq!(text(png("QUI=".into())), "image/png, 2 B");
+    assert_eq!(text(png("QQ==".into())), "image/png, 1 B");
+    assert_eq!(text(png(String::new())), "image/png, 0 B");
+    assert_eq!(text(r#","source":{"type":"base64","data":"QUJD"}"#.into()), "image, 3 B");
+    assert_eq!(text(png(b64(1364))), "image/png, 1023 B");
+    assert_eq!(text(png(b64(1368))), "image/png, 1.0 KB");
+    assert_eq!(text(png(b64(1700))), "image/png, 1.2 KB");
+    assert_eq!(text(png(b64(777564))), "image/png, 569.5 KB");
+    assert_eq!(text(png(b64(1398104))), "image/png, 1.0 MB");
+    assert_eq!(text(png(b64(777564 * 4))), "image/png, 2.2 MB");
+    assert_eq!(text(r#","source":{"type":"url","url":"https://e.x/a.png"}"#.into()), "https://e.x/a.png");
+    assert_eq!(text(r#","source":{"type":"other"}"#.into()), "image");
+    assert_eq!(text(String::new()), "image");
+    let tr = one(r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"x","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"QUJD"}},{"type":"image"}]}]}}"#);
+    assert_eq!(tr[0]["text"], "[image: image/png, 3 B]\n[image]");
+}
