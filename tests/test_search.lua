@@ -113,6 +113,7 @@ T['lua fallback indexes in slices without blocking the UI'] = function()
     end
     S.write(root, '-w-' .. i, 's' .. i, lines)
   end
+  collectgarbage('collect') -- the setup's garbage is not the indexer's pause
   local worst, last = 0, vim.uv.hrtime()
   local timer = vim.uv.new_timer()
   timer:start(1, 1, function()

@@ -183,6 +183,7 @@ T['500 library files in deep folders: the scan never blocks the UI longer than 1
     local dir = tmp .. '/lib/' .. ('g%d/h%d/i%d'):format(i % 7, i % 5, i % 3)
     write(dir .. ('/prompt-%03d.md'):format(i), ('---\nname: Prompt %d\ndescription: d\n---\n# H\n%s'):format(i, string.rep('text ', 200)))
   end
+  collectgarbage('collect') -- the setup's garbage is not the scan's pause
   local timer, last, worst = vim.uv.new_timer(), vim.uv.hrtime(), 0
   timer:start(1, 1, function()
     local now = vim.uv.hrtime()
