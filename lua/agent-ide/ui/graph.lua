@@ -219,7 +219,7 @@ local resize_timer
 
 local function make_buf(root)
   local buf = api.nvim_create_buf(false, true)
-  pcall(api.nvim_buf_set_name, buf, 'agent-ide://graph/' .. root)
+  require('agent-ide.ui.bufname').set(buf, 'agents://' .. require('agent-ide.ui.bufname').clean(vim.fs.basename(root), '?') .. '/graph')
   for name, value in pairs({ buftype = 'nofile', bufhidden = 'wipe', swapfile = false, modifiable = false,
     filetype = 'agent-ide-graph' }) do
     vim.bo[buf][name] = value

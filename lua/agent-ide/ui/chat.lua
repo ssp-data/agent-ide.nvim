@@ -4,6 +4,7 @@
 -- the drawer: they never move focus or open a window.
 local api = vim.api
 local chat_keys = require('agent-ide.ui.chat_keys')
+local bufname = require('agent-ide.ui.bufname')
 local history = require('agent-ide.ui.history')
 local live_render = require('agent-ide.transcript.live')
 local prompt = require('agent-ide.ui.prompt')
@@ -125,6 +126,7 @@ end
 
 -- Every window showing the transcript gets the winbar for its width.
 local function update_winbar(c)
+  bufname.refresh(c.s) -- the buffer names follow the title as the winbar does
   if not valid_buf(c.tbuf) then return end
   local wins = vim.fn.win_findbuf(c.tbuf)
   local first = wins[1] and api.nvim_win_get_width(wins[1]) or vim.o.columns
@@ -383,7 +385,8 @@ function get_chat(s, project)
   if not valid_buf(c.tbuf) then
     drop_stale(c, 'tbuf')
     local buf = api.nvim_create_buf(false, true)
-    api.nvim_buf_set_name(buf, 'agent-ide://chat/' .. s.id)
+    vim.b[buf].agent_ide_kind, vim.b[buf].agent_ide_session = 'chat', s.id
+    bufname.track(buf, s, '', function() return M.project_of(s) end)
     c.tbuf, c.view, fresh = buf, live_render.attach(buf, s), true
     by_buf[buf] = c
     map_keys(c, buf, true)

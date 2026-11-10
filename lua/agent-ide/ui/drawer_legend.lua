@@ -122,6 +122,7 @@ end
 local function ensure_buf()
   if S.buf and api.nvim_buf_is_valid(S.buf) then return S.buf end
   S.buf = api.nvim_create_buf(false, true)
+  require('agent-ide.ui.bufname').set(S.buf, 'agents://legend')
   vim.bo[S.buf].bufhidden = 'hide'
   S.text = nil
   return S.buf

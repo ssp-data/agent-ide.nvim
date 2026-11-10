@@ -149,7 +149,7 @@ T['picker with the helper: fuzzy, answers, kinds cycle, Enter opens the chat on 
   eq(state().hits[1].snippet, 'Fixed the umlaut handling.')
   child.type_keys('<CR>')
   wait_for(function()
-    return child.lua_get('vim.api.nvim_buf_get_name(0)'):find('agent-ide://chat/a1', 1, true) ~= nil
+    return vim.startswith(child.lua_get('(vim.b[0].agent_ide_kind or "") .. "/" .. (vim.b[0].agent_ide_session or "")'), 'chat/a1')
       and child.lua_get('vim.api.nvim_get_current_line()') == 'Fixed the umlaut handling.'
   end, 'chat on the answer line')
   eq(state(), vim.NIL)

@@ -200,7 +200,7 @@ T['new session row opens a chat: transcript above, prompt below (8 lines), left 
   end)(...)]], { w })
   local id = current().id
   eq(layout, { above = true, same_col = true, left = true, height = 8, fix = true, current = true,
-    tname = 'agent-ide://chat/' .. id, pname = 'agent-ide://prompt/' .. id,
+    tname = 'agents://repo/new session', pname = 'agents://repo/new session · prompt',
     tbt = 'nofile', tft = 'markdown', tmod = false, pbt = 'acwrite', pft = 'markdown', pmod = true })
   eq(winbar(), 'I idle · repo · new session')
 end
@@ -267,14 +267,14 @@ T['ZZ hides the prompt, the session stays alive; i in the transcript brings it b
   local w = wins()
   eq(child.lua_get('vim.api.nvim_get_current_win()'), w.prompt)
   eq(child.lua_get('vim.api.nvim_win_get_height(0)'), 8)
-  eq(child.lua_get('vim.api.nvim_buf_get_name(0)'):match('^agent%-ide://prompt/') ~= nil, true)
+  eq(child.lua_get('vim.b.agent_ide_kind'), 'prompt')
   eq(mode(), 'i')
   -- <leader>ap from the transcript also recreates it (normal mode)
   child.type_keys('<Esc>')
   child.cmd('quit')
   child.lua('vim.api.nvim_set_current_win(...)', { before.transcript })
   child.type_keys('\\ap')
-  eq(child.lua_get('vim.api.nvim_buf_get_name(0)'):match('^agent%-ide://prompt/') ~= nil, true)
+  eq(child.lua_get('vim.b.agent_ide_kind'), 'prompt')
   eq(mode(), 'n')
 end
 
@@ -320,7 +320,7 @@ T[':q! in the prompt discards the draft; i brings an empty prompt back'] = funct
   child.type_keys('i', '<Esc>')
   eq(prompt_lines(), { '' })
   eq(child.lua_get('{ vim.bo.buftype, vim.bo.filetype, vim.fn.maparg("<C-CR>", "i") ~= "" }'), { 'acwrite', 'markdown', true })
-  eq(child.lua_get('vim.api.nvim_buf_get_name(0)'), 'agent-ide://prompt/' .. current().id)
+  eq(child.lua_get('(vim.b[0].agent_ide_kind or "") .. "/" .. (vim.b[0].agent_ide_session or "")'), 'prompt/' .. current().id)
 end
 
 -- Transcript of the current chat equals a full render of its session's events.
@@ -339,7 +339,7 @@ local function transcript_props()
     local b = vim.api.nvim_win_get_buf(w)
     local maps = {}
     for _, m in ipairs(vim.api.nvim_buf_get_keymap(b, 'n')) do maps[m.lhs] = true end
-    return { name = vim.api.nvim_buf_get_name(b), bt = vim.bo[b].buftype, ft = vim.bo[b].filetype,
+    return { name = (vim.b[b].agent_ide_kind or "") .. "/" .. (vim.b[b].agent_ide_session or ""), bt = vim.bo[b].buftype, ft = vim.bo[b].filetype,
       mod = vim.bo[b].modifiable, i = maps.i == true, fm = vim.wo[w].foldmethod }
   end)()]])
 end
@@ -355,7 +355,7 @@ T[':bd on the transcript, then reopen: a fresh buffer equal to a full render; li
   drawer_cursor_to('Alpha basics')
   child.type_keys('<CR>')
   wait_for(function() return has_line(transcript(), '## You') ~= nil end, 'history again')
-  eq(transcript_props(), { name = 'agent-ide://chat/' .. id, bt = 'nofile', ft = 'markdown', mod = false, i = true, fm = 'expr' })
+  eq(transcript_props(), { name = 'chat/' .. id, bt = 'nofile', ft = 'markdown', mod = false, i = true, fm = 'expr' })
   eq(equals_render(), true)
   type_prompt('After bd')
   child.type_keys('<C-CR>')
@@ -577,7 +577,7 @@ T['at most one prompt window per tab, also after the transcript is shown elsewhe
   local agents = child.lua_get('vim.api.nvim_get_current_tabpage()')
   local function prompt_wins()
     return child.lua_get([[#vim.tbl_filter(function(w)
-      return vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w)):find('agent-ide://prompt/', 1, true) ~= nil
+      return vim.b[vim.api.nvim_win_get_buf(w)].agent_ide_kind == 'prompt'
     end, vim.api.nvim_tabpage_list_wins(0))]])
   end
   -- a split of the transcript in the same tab
@@ -596,7 +596,7 @@ T['at most one prompt window per tab, also after the transcript is shown elsewhe
   child.lua('vim.api.nvim_set_current_win(...)', { wins().transcript })
   child.type_keys('i', '<Esc>')
   eq(prompt_wins(), 1)
-  eq(child.lua_get('vim.api.nvim_buf_get_name(0)'):find('agent-ide://prompt/', 1, true) ~= nil, true)
+  eq(child.lua_get('vim.b.agent_ide_kind'), 'prompt')
 end
 
 T['a second send while busy shows queued:1; <C-c> interrupts and returns the queue'] = function()

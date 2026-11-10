@@ -259,7 +259,7 @@ T['enter on project expands; enter on session opens its history in the chat view
   drawer_cursor_to('Alpha basics')
   child.type_keys('<CR>')
   wait_for(function() return has_line(buf_lines(), '## You', true) ~= nil end, 'history loaded')
-  eq(in_transcript('vim.api.nvim_buf_get_name(0)'), 'agent-ide://chat/' .. ALPHA_ID)
+  eq(in_transcript('(vim.b[0].agent_ide_kind or "") .. "/" .. (vim.b[0].agent_ide_session or "")'), 'chat/' .. ALPHA_ID)
   local lines = buf_lines()
   local bash = has_line(lines, '▸ Bash:', true)
   eq(bash ~= nil, true)

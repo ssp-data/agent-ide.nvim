@@ -1,32 +1,36 @@
--- Buffers of the diff view: read-only scratch sides named `agent-ide://git/<rev>/<path>`, and
--- buffer-local keys that are put back the way they were when the user's own buffer leaves.
+-- Buffers of the diff view: read-only scratch sides named `agents://<project>/diff/<path> @ <rev>`,
+-- and buffer-local keys that are put back the way they were when the user's own buffer leaves.
 local api = vim.api
+local bufname = require('agent-ide.ui.bufname')
 
 local M = {}
 
-local ours = {} -- scratch buffers made here
+local ours = {} -- scratch buffers made here: buf -> `<root> NUL <rev> NUL <path>`
 
-local function find(name)
-  for _, b in ipairs(api.nvim_list_bufs()) do
-    if ours[b] and api.nvim_buf_is_valid(b) and api.nvim_buf_get_name(b) == name then return b end
+local function find(key)
+  for b, k in pairs(ours) do
+    if k == key and api.nvim_buf_is_valid(b) then return b end
   end
 end
 
----A read-only scratch buffer named `agent-ide://git/<rev>/<path>` holding `lines`, its
----filetype taken from `path`. An existing one of the same name is reused.
+---A read-only scratch buffer named `agents://<project>/diff/<path> @ <rev>` holding `lines`, its
+---filetype taken from `path`. An existing one for the same repository, revision and path is reused.
 ---@param rev string
 ---@param path string
 ---@param lines string[]
+---@param project? { name?: string, root?: string }
 ---@return integer buf
-function M.get(rev, path, lines)
-  local name = 'agent-ide://git/' .. rev .. '/' .. path
-  local buf = find(name)
+function M.get(rev, path, lines, project)
+  project = project or {}
+  local key = tostring(project.root or '') .. '\0' .. rev .. '\0' .. path
+  local buf = find(key)
   if not buf then
     buf = api.nvim_create_buf(false, true)
-    ours[buf] = true
+    ours[buf] = key
     vim.bo[buf].bufhidden = 'wipe'
     vim.bo[buf].swapfile = false
-    api.nvim_buf_set_name(buf, name)
+    bufname.set(buf, ('agents://%s/diff/%s @ %s'):format(bufname.clean(project.name, '?'),
+      bufname.clean(path, '?', 200), bufname.clean(rev, '?')))
     api.nvim_create_autocmd('BufWipeout', { buffer = buf, once = true, callback = function() ours[buf] = nil end })
   end
   vim.bo[buf].modifiable = true
@@ -43,12 +47,13 @@ end
 function M.empty()
   local buf = api.nvim_create_buf(false, true)
   vim.bo[buf].bufhidden = 'wipe'
+  bufname.set(buf, 'agents://empty')
   return buf
 end
 
 ---@param buf integer
 ---@return boolean made here
-function M.is_ours(buf) return ours[buf] == true end
+function M.is_ours(buf) return ours[buf] ~= nil end
 
 local saved = {} -- buf -> { [lhs] = maparg dict|false }
 

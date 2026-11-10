@@ -220,7 +220,7 @@ T['session running elsewhere: refused with the usual notice; the raw view still 
   eq(argvs(), {})
   drawer_cursor_to('Alpha basics')
   child.type_keys('gr')
-  wait_for(function() return child.lua_get('vim.api.nvim_buf_get_name(0)'):find('agent-ide://raw/', 1, true) ~= nil end, 'raw view')
+  wait_for(function() return child.lua_get('vim.b.agent_ide_kind') == 'raw' end, 'raw view')
 end
 
 T['gr opens the raw view in the main window; <leader>at hands an alive session to native Claude'] = function()
@@ -230,7 +230,7 @@ T['gr opens the raw view in the main window; <leader>at hands an alive session t
   drawer_cursor_to('Alpha basics')
   local drawer_win = child.lua_get('require("agent-ide.ui.drawer").state().win')
   child.type_keys('gr')
-  wait_for(function() return child.lua_get('vim.api.nvim_buf_get_name(0)'):find('agent-ide://raw/', 1, true) ~= nil end, 'raw view')
+  wait_for(function() return child.lua_get('vim.b.agent_ide_kind') == 'raw' end, 'raw view')
   eq(child.lua_get('vim.api.nvim_get_current_win()') ~= drawer_win, true)
   eq(has_line(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), '>> ') ~= nil, true)
   -- not in tmux: native parks it and says how to continue by hand

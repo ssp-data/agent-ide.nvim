@@ -65,6 +65,10 @@ function M.create()
   M.define()
   local L = layout()
   local v = { input_buf = scratch(), list_buf = scratch(), preview_buf = scratch('markdown') }
+  local name = require('agent-ide.ui.bufname').set
+  name(v.input_buf, 'agents://search')
+  name(v.list_buf, 'agents://search/results')
+  name(v.preview_buf, 'agents://search/preview')
   vim.bo[v.input_buf].buftype = 'nofile'
   v.list_win = float(v.list_buf, L.list, false, { focusable = false })
   v.preview_win = float(v.preview_buf, L.preview, false, { focusable = false })

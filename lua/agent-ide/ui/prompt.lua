@@ -609,7 +609,8 @@ function M.setup_buf(buf, s)
   end
 end
 
----Create the prompt buffer of session `s`: `agent-ide://prompt/<id>`, `acwrite`, markdown.
+---Create the prompt buffer of session `s`: `agents://<project>/<title> · prompt` (ui/bufname.lua),
+---`acwrite`, markdown.
 ---The buffer is never 'modified': a draft never blocks `:q`, `:qa`, `ZZ` or `:wq`, and hiding
 ---the window keeps it. Saving (`:w`, `ZZ`, `:x`) is prompts/save.lua.
 ---@param s table Session
@@ -619,7 +620,8 @@ function M.create(s)
   vim.bo[buf].buftype = 'acwrite'
   vim.bo[buf].bufhidden = 'hide'
   vim.bo[buf].swapfile = false
-  api.nvim_buf_set_name(buf, 'agent-ide://prompt/' .. s.id)
+  vim.b[buf].agent_ide_kind, vim.b[buf].agent_ide_session = 'prompt', s.id
+  require('agent-ide.ui.bufname').track(buf, s, ' · prompt', function() return require('agent-ide.ui.chat').project_of(s) end)
   vim.bo[buf].filetype = 'markdown'
   api.nvim_create_autocmd({ 'BufWriteCmd', 'TextChanged', 'TextChangedI', 'TextChangedP', 'InsertLeave' }, {
     buffer = buf, callback = function(ev) vim.bo[ev.buf].modified = false end })
