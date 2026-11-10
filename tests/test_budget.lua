@@ -121,7 +121,7 @@ local function open_long_session(dir, id)
   local ok = vim.wait(120000, function()
     local w = require('agent-ide.ui.chat')._windows().transcript
     buf = w and vim.api.nvim_win_get_buf(w)
-    return buf ~= nil and vim.api.nvim_buf_get_name(buf) == 'agent-ide://chat/' .. id
+    return buf ~= nil and vim.b[buf].agent_ide_kind == 'chat' and vim.b[buf].agent_ide_session == id
       and vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] ~= 'Loading…'
   end, 1)
   local elapsed = (vim.uv.hrtime() - t0) / 1e6

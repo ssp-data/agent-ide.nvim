@@ -278,8 +278,8 @@ T['q returns to the chat that was open; the buffer is wiped'] = function()
   child.type_keys('q')
   eq(graph(), vim.NIL)
   wait_for(function() return child.lua_get('require("agent-ide.ui.chat")._windows().prompt ~= nil') end, 'chat back')
-  eq(child.lua_get('vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().transcript))'),
-    'agent-ide://chat/' .. ID)
+  eq(child.lua_get('(vim.b[vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().transcript)].agent_ide_kind or "") .. "/" .. (vim.b[vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().transcript)].agent_ide_session or "")'),
+    'chat/' .. ID)
   eq(child.lua_get('vim.api.nvim_buf_is_valid(...)', { buf }), false)
 end
 

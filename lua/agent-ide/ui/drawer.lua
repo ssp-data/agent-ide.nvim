@@ -519,7 +519,7 @@ local function ensure_buf()
   sync()
   if S.buf then return S.buf end
   local buf = api.nvim_create_buf(false, true)
-  api.nvim_buf_set_name(buf, 'agent-ide://drawer')
+  require('agent-ide.ui.bufname').set(buf, 'agents://drawer')
   vim.bo[buf].bufhidden = 'hide'
   vim.bo[buf].filetype = 'agent-ide'
   vim.bo[buf].modifiable = false
@@ -559,6 +559,16 @@ end
 local function create_tab()
   vim.cmd('tabnew')
   S.tab = api.nvim_get_current_tabpage()
+  -- the empty buffer `:tabnew` made would stay behind as a listed [No Name] once a chat
+  -- replaces it: a scratch placeholder, wiped when it leaves its window
+  local placeholder = api.nvim_get_current_buf()
+  if api.nvim_buf_get_name(placeholder) == '' and not vim.bo[placeholder].modified then
+    vim.bo[placeholder].buflisted = false
+    vim.bo[placeholder].buftype = 'nofile'
+    vim.bo[placeholder].bufhidden = 'wipe'
+    vim.bo[placeholder].swapfile = false
+    require('agent-ide.ui.bufname').set(placeholder, 'agents://empty')
+  end
   api.nvim_clear_autocmds({ group = augroup })
   api.nvim_create_autocmd('TabClosed', { group = augroup, callback = function()
     if S.tab and not api.nvim_tabpage_is_valid(S.tab) then
@@ -598,6 +608,7 @@ function M.main_win()
   local side = cfg.drawer.side == 'left' and 'right' or 'left'
   local scratch = api.nvim_create_buf(false, true)
   vim.bo[scratch].bufhidden = 'wipe'
+  require('agent-ide.ui.bufname').set(scratch, 'agents://empty')
   local w = api.nvim_win_call(S.win, function()
     return api.nvim_open_win(scratch, false, { split = side, win = -1 })
   end)

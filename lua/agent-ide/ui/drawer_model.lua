@@ -149,14 +149,18 @@ end
 -- States in which a session of another project is counted on the drawer's last line.
 local NEEDS = { waiting = true, done = true, failed = true }
 
----Sessions alive in this Neovim, outside the scoped project, that need the user (waiting,
----done unread, failed).
+---Sessions outside the scoped project that need the user: those alive in this Neovim (waiting,
+---done unread, failed) and those waiting for input in another Claude (the current live map).
 ---@param matches fun(s: table): boolean in scope
 ---@return integer
 function M.others_needing(matches)
-  local n = 0
+  local n, mine = 0, {}
   for _, s in ipairs(session.all()) do
+    mine[s.id] = s.state ~= 'parked' or nil
     if NEEDS[s.state] and not matches(s) then n = n + 1 end
+  end
+  for id, e in pairs(require('agent-ide.live').fresh()) do
+    if not mine[id] and e.status == 'waiting' and not matches(e) then n = n + 1 end
   end
   return n
 end

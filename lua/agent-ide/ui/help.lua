@@ -33,6 +33,7 @@ function M.open(title, rows)
   for _, l in ipairs(lines) do w = math.max(w, vim.fn.strdisplaywidth(l)) end
 
   local buf = api.nvim_create_buf(false, true)
+  require('agent-ide.ui.bufname').set(buf, 'agents://help')
   api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.bo[buf].modifiable = false
   vim.bo[buf].bufhidden = 'wipe'

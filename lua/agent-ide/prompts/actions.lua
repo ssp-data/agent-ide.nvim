@@ -54,7 +54,7 @@ end
 local function prompt_of(s)
   local tbuf = chat().buffers(s)
   local cur = api.nvim_get_current_win()
-  if tbuf and api.nvim_win_get_buf(cur) ~= tbuf and not vim.startswith(api.nvim_buf_get_name(api.nvim_win_get_buf(cur)), 'agent-ide://prompt/') then
+  if tbuf and api.nvim_win_get_buf(cur) ~= tbuf and vim.b[api.nvim_win_get_buf(cur)].agent_ide_kind ~= 'prompt' then
     for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
       if api.nvim_win_get_buf(w) == tbuf then
         api.nvim_set_current_win(w)

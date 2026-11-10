@@ -525,10 +525,11 @@ end
 local function edge_key(buf, dir, key, insert)
   return function()
     local st = bufs[buf]
-    if not st or not can_step(st, dir) then return key end
+    if not st then return key end
+    -- the cheap checks first: most presses are not on the edge line
     local row = api.nvim_win_get_cursor(0)[1]
     local at_edge = (dir < 0 and row == 1) or (dir > 0 and row == api.nvim_buf_line_count(buf))
-    if not at_edge or (insert and menu_visible()) then return key end
+    if not at_edge or (insert and menu_visible()) or not can_step(st, dir) then return key end
     return ('<Cmd>lua require("agent-ide.ui.prompt").step(%d, %d)<CR>'):format(buf, dir)
   end
 end
@@ -554,14 +555,16 @@ function M.setup_buf(buf, s)
     -- what the menu needs is ready before the first `/`: the project key and the found commands
     if s and s.cwd then require('agent-ide.session.commands').key_of(s.cwd) end
     require('agent-ide.prompts.cache').global()
-    map('i', '/', function()
-      local empty_line = api.nvim_get_current_line() == ''
-      if empty_line and bufs[buf] and not menu_visible() then
+    -- Not an <expr> mapping, for the reason given at `@` below: in a burst of input (`x/`, a
+    -- macro, `.`) the line would still look empty.
+    local open_keys = api.nvim_replace_termcodes('/<C-x><C-u>', true, false, true)
+    vim.keymap.set('i', '/', function()
+      if api.nvim_get_current_line() == '' and bufs[buf] and not menu_visible() then
         open_menu(buf)
-        return '/<C-x><C-u>'
+        return api.nvim_feedkeys(open_keys, 'in', false)
       end
-      return '/'
-    end, 'command menu')
+      api.nvim_feedkeys('/', 'in', false)
+    end, { buffer = buf, nowait = true, silent = true, desc = 'Agent-IDE: command menu' })
     api.nvim_create_autocmd('CompleteDone', { buffer = buf, callback = function()
       on_complete_done(buf)
       close_menu(buf)
@@ -607,7 +610,8 @@ function M.setup_buf(buf, s)
   end
 end
 
----Create the prompt buffer of session `s`: `agent-ide://prompt/<id>`, `acwrite`, markdown.
+---Create the prompt buffer of session `s`: `agents://<project>/<title> · prompt` (ui/bufname.lua),
+---`acwrite`, markdown.
 ---The buffer is never 'modified': a draft never blocks `:q`, `:qa`, `ZZ` or `:wq`, and hiding
 ---the window keeps it. Saving (`:w`, `ZZ`, `:x`) is prompts/save.lua.
 ---@param s table Session
@@ -617,7 +621,8 @@ function M.create(s)
   vim.bo[buf].buftype = 'acwrite'
   vim.bo[buf].bufhidden = 'hide'
   vim.bo[buf].swapfile = false
-  api.nvim_buf_set_name(buf, 'agent-ide://prompt/' .. s.id)
+  vim.b[buf].agent_ide_kind, vim.b[buf].agent_ide_session = 'prompt', s.id
+  require('agent-ide.ui.bufname').track(buf, s, ' · prompt', function() return require('agent-ide.ui.chat').project_of(s) end)
   vim.bo[buf].filetype = 'markdown'
   api.nvim_create_autocmd({ 'BufWriteCmd', 'TextChanged', 'TextChangedI', 'TextChangedP', 'InsertLeave' }, {
     buffer = buf, callback = function(ev) vim.bo[ev.buf].modified = false end })

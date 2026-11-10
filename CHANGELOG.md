@@ -24,6 +24,26 @@ First public version.
 - **Rust helper** (`make helper`) for fast scanning, fuzzy search and file watching, with a Lua fallback when it is not built.
 - Help in every view with `g?` (also `?` in the drawer), searchable with `/`.
 - Icons: a minimal look with a Nerd Font by default, `icons_style = 'plain'` otherwise.
+- **Hide a session** with `H` on its row: it moves into a collapsed, dimmed `Hidden (n)` group of its project; `H` there shows it again. A hidden session that needs you (waiting, working, done unread, failed) is listed with the others while that lasts. Kept in `hidden.json`, shared by several Neovims.
+- **Delete an inactive session** with `D` (after a confirm): what Claude keeps of it moves into the plugin's trash. `:AgentsTrash` restores a session or deletes it for good, `:AgentsTrash empty` deletes everything in the trash for good. The trash keeps the whole session, prompts and answers included, until you empty it; `trash = { keep_days = 30 }` purges older entries at setup, by default nothing is purged.
+- **Collapse and expand all** in the drawer with `zM` and `zR`.
+- **Project scope** (`scope = 'project'` in `setup()`, `:Agents project`, `:Agents all`, `gs` in the drawer): the drawer, search, `<leader>an` and the footer show one repository; a dimmed last line says when a session of another project needs you.
+- **Legend** of the state marks at the bottom of the drawer; `gL` shows or hides it, `drawer = { legend = false }` starts with it hidden.
+- **Session keys on a drawer row**: `<leader>aM`, `<S-Tab>`, `<C-c>` (asks first), `<leader>at` and `gr` act on that session as in its chat, without opening it.
+- **Close terminal sessions**: `X` on a row of a Claude running in a tmux pane types Claude's own exit (Ctrl-C twice) into that pane after a confirm and a fresh check that this Claude is the pane's foreground program; `:AgentsCloseIdle` does it for every idle one (in project scope for that project, `:AgentsCloseIdle!` for all).
+- **Buffer names**: the chat's buffers are named after the session (`agents://<project>/<title>`, `… · prompt`), so a tabline, a bufferline and `:ls` show them instead of `[No Name]`; they follow the title.
+
+### Changed
+
+- The `/` menu lists Claude's commands and your skills from the first keystroke in a new session (the last list seen for the project, kept in `commands.json`).
+- `+ New session` pressed again while the new session has sent nothing brings it back with its draft instead of starting another (`2<CR>` starts a separate one).
+- `@` puts the file reference where you typed it (mid-line as `@<path>`, on an empty line as an `[attach]` line), types a plain `@` inside a fenced code block, and keeps up with fast typing.
+- `<Up>` on the first line and `<Down>` on the last step through the prompt history in insert mode too.
+
+### Fixed
+
+- `/` typed in a burst (fast typing, a macro, `.`) after other text no longer prepares the command menu; it opens only on an empty line.
+- `X` right after a Claude restarted in its pane no longer says it cannot reach the session: it asks and then checks the pane itself.
 
 ### Notes
 

@@ -16,10 +16,9 @@ end, { nargs = '*', desc = 'Agent-IDE: search all sessions' })
 vim.api.nvim_create_user_command('AgentsGraph', function() require('agent-ide').graph() end,
   { desc = 'Agent-IDE: commit graph of the current project' })
 
--- `close_idle` takes an optional predicate `fun(id, live_entry): boolean`; a project scope can
--- pass one to limit the command to its project's sessions.
-vim.api.nvim_create_user_command('AgentsCloseIdle', function() require('agent-ide.ui.tmux_close').close_idle() end,
-  { desc = 'Agent-IDE: close every Claude idle in a tmux pane (asks first)' })
+-- In project scope only that project's sessions; `!` means every project.
+vim.api.nvim_create_user_command('AgentsCloseIdle', function(o) require('agent-ide.ui.tmux_close').command(o.bang) end,
+  { bang = true, desc = 'Agent-IDE: close every Claude idle in a tmux pane (asks first; ! for all projects)' })
 
 vim.api.nvim_create_user_command('AgentsTrash', function(o)
   require('agent-ide.ui.delete').command(o.args)

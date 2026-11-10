@@ -42,10 +42,13 @@ local ACTIONS = {
     require('agent-ide.ui.mode').cycle(s)
     notify(('Agent-IDE: mode %s%s'):format(tostring(s.mode_requested or s.mode), later(s)))
   end },
-  { name = 'interrupt', fall = true, desc = 'interrupt Claude while it works', run = function(node)
+  { name = 'interrupt', fall = true, desc = 'interrupt Claude while it works (asks first)', run = function(node)
     if elsewhere(node) then return notify(ELSEWHERE, vim.log.levels.WARN) end
     local s = require('agent-ide.session').get(node.session.id)
     if not (s and s:_alive() and (s.state == 'busy' or s.state == 'waiting')) then return end
+    -- Ctrl-C is a reflex in normal mode; on a row (not in the chat) it asks first
+    local title = tostring(node.session.title or s.title or 'session'):gsub('[\r\n\t]+', ' ')
+    if vim.fn.confirm(('Interrupt Claude in "%s"?'):format(title), '&Interrupt\n&Cancel', 2) ~= 1 then return end
     require('agent-ide.ui.chat').interrupt(s)
   end },
   { name = 'native', desc = 'continue in native Claude in a tmux pane', run = function(node)

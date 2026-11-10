@@ -334,7 +334,7 @@ T['session B asks while the user types in session A: nothing interrupts; next_wa
   wait_for(function() return has_line(transcript(), 'Written.') ~= nil end, 'B answer')
   eq(answers()[1].response.behavior, 'allow')
   -- A's draft is still there
-  eq(child.lua_get('vim.api.nvim_buf_get_lines(vim.fn.bufnr("agent-ide://prompt/" .. ...), 0, -1, false)', { a }), { 'draft text more' })
+  eq(child.lua_get('vim.api.nvim_buf_get_lines(select(2, require("agent-ide.ui.chat").buffers(require("agent-ide.session").get(...))), 0, -1, false)', { a }), { 'draft text more' })
 end
 
 T['ask while typing in the same session prompt: echo only; the select opens on <Esc>'] = function()

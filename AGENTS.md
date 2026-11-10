@@ -23,7 +23,16 @@ A Neovim plugin that manages Claude Code sessions from inside Neovim: a drawer w
 | `lua/agent-ide/git*.lua` | read-only, asynchronous git queries, parsing, cache |
 | `lua/agent-ide/prompts/` | prompt library, skills and commands, saved prompts |
 | `lua/agent-ide/ui/` | drawer, chat, prompt, permission, diff, graph, search picker, help, highlights, icons |
+| `lua/agent-ide/ui/drawer_legend.lua`, `drawer_session_keys.lua` | the drawer's legend of state marks (`gL`); the chat's keys on a session row |
+| `lua/agent-ide/ui/graph.lua`, `graph_render.lua`, `graph_keys.lua`, `graph_context.lua` | commit graph: window, pure lane layout, keys, which repository |
+| `lua/agent-ide/ui/tmux_close.lua`, `tmux_verify.lua` | closing a Claude in a tmux pane (`X`, `:AgentsCloseIdle`); the checks before any key is typed |
+| `lua/agent-ide/ui/delete.lua`, `lua/agent-ide/trash.lua` | deleting a session (`D`) into the trash, `:AgentsTrash` restore and empty |
+| `lua/agent-ide/ui/search_hl.lua` | marks of a search query in a transcript window (`]n`, `[n`) |
+| `lua/agent-ide/ui/bufname.lua` | names of the plugin's buffers (`agents://<project>/<title>`, …) |
+| `lua/agent-ide/hidden.lua` | hidden sessions (`H`), kept in `hidden.json` |
 | `lua/agent-ide/scope.lua` | project scope or all: what the drawer, search, next waiting and the footer show |
+| `lua/agent-ide/session/commands.lua` | Claude's command list per project for the `/` menu, kept in `commands.json` |
+| `lua/agent-ide/util/jsonfile.lua` | private JSON files, read leniently and written atomically |
 | `lua/agent-ide/status.lua`, `live.lua`, `tmux.lua` | footer and status files, sessions running elsewhere, tmux |
 | `helper/` | Rust helper `agent-ide-helper` (scan, history, watch, search) |
 | `omarchy/` | Omarchy bar widget |
@@ -48,12 +57,12 @@ Run one file or case: `TEST_FILE=tests/test_tree.lua make test`, `TEST_CASE='tex
 1. **Fidelity.** What Claude sent is what the user sees. Nothing is dropped or altered silently; unknown events are shown as `unknown` folds; anything cut for display carries a counted marker and the raw view (`gr`) keeps everything. The Lua parser (`transcript/parse.lua`) and the Rust parser (`helper/src/events.rs`) must produce the same events: change both, bump `RULES_VERSION` in both, and keep the parity tests green.
 2. **Prompts are sent verbatim.** Templates and saved prompts are loaded and saved byte for byte.
 3. **Never interrupt typing.** No focus changes, no pop-ups while the user types; permission requests and results wait. Nothing synchronous on a keystroke.
-4. **Speed.** The budget tests (`tests/test_budget.lua`, `test_git_budget.lua`, `test_graph_budget.lua`, search budgets) are requirements; never weaken them. No synchronous git or file scanning on the UI thread.
+4. **Speed.** The budget tests (`tests/test_budget.lua`, `test_git_budget.lua`, `test_graph_budget.lua`, `test_search_budget.lua`, with `budget_lib.lua`, and the helper's search budgets in `make test-helper`) are requirements; never weaken them. No synchronous git or file scanning on the UI thread.
 5. **Subscription only.** Claude runs through the Claude Code CLI; `ANTHROPIC_API_KEY` is stripped from every child process. Never read credentials, never call the network from the plugin.
 6. **The plugin works without the helper.** Every helper feature has a Lua fallback (search is limited there).
 7. **Git is read-only.** Queries use `--no-optional-locks`; staging, committing and the like are left to lazygit.
-8. **Writes stay in the plugin's own folders** (`stdpath` data, state, cache, and the runtime dir), files 0600 in 0700 folders, written atomically. The only writes inside Claude's folder are the explicit, confirmed session delete and its restore.
-9. **Never stop a Claude process the plugin did not start**, with one exception: the explicit, confirmed close of a Claude in a tmux pane (`X` in the drawer, `:AgentsCloseIdle`), which types Claude's own exit keys (Ctrl-C twice) into that pane after checking again that the pane still runs that process, and never sends it a signal. Never let two Claude processes drive one session.
+8. **Writes stay in the plugin's own folders** (`stdpath` data, state, cache, and the runtime dir), files 0600 in 0700 folders, written atomically. The only writes inside Claude's folder are the explicit, confirmed session delete and its restore; the trash (a 0700 folder) keeps the moved files with their own modes.
+9. **Never stop a Claude process the plugin did not start**, with one exception: the explicit, confirmed close of a Claude in a tmux pane (`X` in the drawer, `:AgentsCloseIdle`), which types Claude's own exit keys (Ctrl-C twice) into that pane and never sends it a signal. The confirm comes first; afterwards, before any key, a fresh `claude agents` must still list the session with the same process (still idle where idle was confirmed), and `ps`/`tmux` must show that process as a Claude (`claude` or `node`) whose process group is the foreground group of a tmux pane's terminal, with the pane in no mode and not synchronized (`ui/tmux_verify.lua`); anything else, or anything that cannot be checked, sends nothing. Never let two Claude processes drive one session.
 10. **No dependencies** on other plugins. Neovim 0.12+. Optional integrations are guarded (`pcall`, `package.loaded`).
 11. **Privacy.** The repository is public. No personal paths, names of private projects, real session ids, or content from real transcripts in code, tests, docs or commits. Fixtures are synthetic. Tests run with data, cache, state and runtime dirs pointed at temporary folders (`tests/run.lua`) and must not touch the real ones.
 

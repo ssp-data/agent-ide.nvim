@@ -331,7 +331,7 @@ T['<leader>an and the statusline ignore other projects; the status file still li
   eq(child.lua_get('require("agent-ide").statusline()'):match('^agents ok') ~= nil, true)
   eq(child.lua_get('require("agent-ide").statusline_hl()'), 'AgentIdeLevel1')
   child.lua('require("agent-ide").next_waiting()')
-  eq(child.lua_get('_G.notes[#_G.notes]'), 'Agent-IDE: nothing needs you')
+  eq(child.lua_get('_G.notes[#_G.notes]'), 'Agent-IDE: nothing in this project; 1 in other projects (gs)')
   local snap = child.lua_get('require("agent-ide.status").snapshot()')
   eq({ snap.level, snap.waiting, snap.sessions[1].id, snap.sessions[1].state }, { 4, 1, 'b1', 'waiting' })
   local file = child.lua_get('require("agent-ide.status").file()')
@@ -363,6 +363,13 @@ T['live entries of other projects are not counted in project scope'] = function(
   eq(child.lua_get('#require("agent-ide.ui.waiting").needing()'), 0)
   eq(child.lua_get('require("agent-ide.status").level(nil, nil, require("agent-ide.scope").matches).waiting'), 0)
   eq(child.lua_get('require("agent-ide.status").level().waiting'), 1)
+  -- but they are not hidden without a hint: the drawer's last line and <leader>an say so
+  wait_for(function() return find('1 session in other projects needs you · gs') ~= nil end, 'others line')
+  child.lua('require("agent-ide").next_waiting()')
+  eq(child.lua_get('_G.notes[#_G.notes]'), 'Agent-IDE: nothing in this project; 1 in other projects (gs)')
+  -- in all scope it is simply the next one
+  child.lua('require("agent-ide.scope").set("all")')
+  eq(child.lua_get('#require("agent-ide.ui.waiting").needing()'), 1)
 end
 
 T['each scope keeps its own open folds; the cursor stays on its node; focus does not move'] = function()

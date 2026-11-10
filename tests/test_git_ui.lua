@@ -212,7 +212,7 @@ T['Enter on a changed file: base scratch left, the real file right, both in diff
   open_file('M a.lua')
   local v = view()
   local mb = vim.trim(R.git(repo, { 'merge-base', 'main', 'HEAD' })):sub(1, 7)
-  eq(v.left.name, 'agent-ide://git/' .. mb .. '/a.lua')
+  eq(v.left.name, 'agents://r/diff/a.lua @ ' .. mb)
   eq({ v.left.ft, v.left.modifiable, v.left.buftype, v.left.lines[2] }, { 'lua', false, 'nofile', 'local x2 = 2' })
   eq({ v.right.name, v.right.ft, v.right.modifiable, v.right.buftype, v.right.diff }, { repo .. '/a.lua', 'lua', true, '', true })
   eq(v.left.winbar, 'base main (' .. mb .. ') · a.lua · file 1/5')
@@ -262,7 +262,7 @@ T['gb picks a commit of this file, gB goes back to the branch view'] = function(
   local v = view()
   local one = vim.trim(R.git(repo, { 'rev-parse', '--short', 'HEAD~1' }))
   eq({ v.left.name, v.right.name, v.left.lines[2], v.right.lines[2], v.right.modifiable },
-    { 'agent-ide://git/' .. one .. '^/a.lua', 'agent-ide://git/' .. one .. '/a.lua', 'local x2 = 2', 'local x2 = 20', false })
+    { 'agents://r/diff/a.lua @ ' .. one .. '^', 'agents://r/diff/a.lua @ ' .. one, 'local x2 = 2', 'local x2 = 20', false })
   eq(v.right.winbar, one .. ' one · file 1/1')
   child.type_keys('gB')
   wait_for(function() return view().right.name == repo .. '/a.lua' end, 'branch mode')
@@ -333,8 +333,8 @@ T['q returns to the chat that was open; keys and diff options are gone from the 
   child.type_keys('\\gq')
   wait_for(function() return view() == vim.NIL end, 'closed')
   wait_for(function() return child.lua_get('require("agent-ide.ui.chat")._windows().prompt ~= nil') end, 'chat back')
-  eq(child.lua_get('vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().transcript))'),
-    'agent-ide://chat/' .. ID)
+  eq(child.lua_get('(vim.b[vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().transcript)].agent_ide_kind or "") .. "/" .. (vim.b[vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().transcript)].agent_ide_session or "")'),
+    'chat/' .. ID)
   eq(child.lua_get('#vim.tbl_filter(function(w) return vim.api.nvim_win_get_config(w).focusable end, vim.api.nvim_tabpage_list_wins(0))'), 3) -- transcript, prompt, drawer
   child.lua([[vim.api.nvim_buf_call(vim.fn.bufnr(...), function() vim.cmd('normal q') end)]], { repo .. '/a.lua' })
   eq(child.lua_get('_G.mine'), true) -- the user's own buffer-local q is back
@@ -346,8 +346,8 @@ T['q returns to the chat that was open; keys and diff options are gone from the 
   child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.diff").state().left); vim.cmd("quit")')
   wait_for(function() return view() == vim.NIL end, 'closed by :q on the left')
   wait_for(function() return child.lua_get('require("agent-ide.ui.chat")._windows().prompt ~= nil') end, 'chat back after :q')
-  eq(child.lua_get('vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().transcript))'),
-    'agent-ide://chat/' .. ID)
+  eq(child.lua_get('(vim.b[vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().transcript)].agent_ide_kind or "") .. "/" .. (vim.b[vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().transcript)].agent_ide_session or "")'),
+    'chat/' .. ID)
   eq(real_buf_opts(repo .. '/a.lua').bar, 'GLOBAL')
 end
 
@@ -369,7 +369,7 @@ T['opening a chat or another diff replaces the view cleanly; repeated opens keep
   local o = real_buf_opts(repo .. '/a.lua')
   eq({ o.diff, o.scb, o.crb, o.bar }, { false, false, false, 'GLOBAL' })
   -- no scratch buffer is left behind
-  eq(child.lua_get('#vim.tbl_filter(function(b) return vim.api.nvim_buf_get_name(b):find("agent-ide://git/", 1, true) ~= nil end, vim.api.nvim_list_bufs())'), 0)
+  eq(child.lua_get('#vim.tbl_filter(function(b) return require("agent-ide.ui.diff_buf").is_ours(b) end, vim.api.nvim_list_bufs())'), 0)
 end
 
 T['closing the Agents tab with a diff open; the real file shown again has no diff'] = function()
@@ -674,7 +674,7 @@ T['q returns to a parked or handed-off session\'s chat; the hand-off key outside
   wait_for(function() return view() == vim.NIL end, 'closed')
   wait_for(function() return child.lua_get('require("agent-ide.ui.chat")._windows().prompt ~= nil') end, 'chat back')
   local w = child.lua_get('require("agent-ide.ui.chat")._windows().transcript')
-  eq(child.lua_get('vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(...))', { w }), 'agent-ide://chat/' .. ID)
+  eq(child.lua_get('(vim.b[vim.api.nvim_win_get_buf(...)].agent_ide_kind or "") .. "/" .. (vim.b[vim.api.nvim_win_get_buf(...)].agent_ide_session or "")', { w }), 'chat/' .. ID)
   eq(child.lua_get('vim.wo[...].winbar', { w }):find('%#AgentIdeAge#native%*', 1, true) ~= nil, true)
   eq(child.lua_get('require("agent-ide.session").get(...).state', { ID }), 'parked')
   child.lua('require("agent-ide.ui.handoff").away = _G.orig_away')
