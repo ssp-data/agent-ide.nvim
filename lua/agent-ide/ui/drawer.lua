@@ -163,6 +163,18 @@ end
 
 function actions.close() M.close() end
 
+function actions.help()
+  require('agent-ide.ui.help').open('Agent-IDE drawer', {
+    { key = '<CR> / o', desc = 'open session or toggle project' },
+    { key = 'za', desc = 'toggle fold' },
+    { key = 'R', desc = 'refresh' },
+    { key = 'gp', desc = 'jump to tmux pane' },
+    { key = 'q', desc = 'close drawer' },
+    { key = '?', desc = 'this help' },
+    { key = '/', desc = 'search (built-in)' },
+  })
+end
+
 local function ensure_buf()
   sync()
   if S.buf then return S.buf end
@@ -178,6 +190,7 @@ local function ensure_buf()
   map('R', actions.refresh)
   map('gp', actions.jump)
   map('q', actions.close)
+  map('?', actions.help)
   S.buf = buf
   return buf
 end
@@ -188,7 +201,7 @@ local function open_drawer()
   local side = cfg.drawer.side == 'left' and 'left' or 'right'
   S.win = api.nvim_open_win(buf, true, { split = side, win = -1, width = cfg.drawer.width })
   for name, value in pairs({ winfixwidth = true, number = false, relativenumber = false, signcolumn = 'no',
-    wrap = false, cursorline = true, foldenable = false }) do
+    wrap = false, list = false, cursorline = true, foldenable = false }) do
     set_opt(S.win, name, value)
   end
   render()

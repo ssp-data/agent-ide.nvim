@@ -5,6 +5,10 @@
 //! first 256 KiB, else `(untitled)`. A file of 512 KiB or less is read whole and its last
 //! `aiTitle` anywhere wins. cwd and branch come from the first 256 KiB. Files are never read
 //! beyond these two windows.
+//!
+//! Activity rule, identical in Lua: the `timestamp` of the last `user`/`assistant` record with a
+//! valid UTC ISO 8601 timestamp, looked up in the same windows (tail, then head, or the whole
+//! small file), else the file's mtime.
 use crate::cache::Cache;
 use crate::events::{is_space, parse_line};
 use rayon::prelude::*;
@@ -28,6 +32,7 @@ pub struct SessionMeta {
     pub title: String,
     pub branch: Option<String>,
     pub mtime: u64,
+    pub activity: u64,
     pub size: u64,
 }
 
@@ -86,7 +91,7 @@ fn collapse_newlines(s: &str) -> String {
 fn default_meta(path: &str, mtime: u64, size: u64) -> SessionMeta {
     let tail = path.rsplit('/').next().unwrap_or(path);
     let id = tail.strip_suffix(".jsonl").unwrap_or(tail).to_string();
-    SessionMeta { id, path: path.to_string(), cwd: None, title: UNTITLED.into(), branch: None, mtime, size }
+    SessionMeta { id, path: path.to_string(), cwd: None, title: UNTITLED.into(), branch: None, mtime, activity: mtime, size }
 }
 
 fn first_prompt_text(line: &[u8]) -> Option<String> {
@@ -120,6 +125,54 @@ fn ai_title_of(line: &[u8]) -> Option<String> {
     nonempty_str(&rec, "aiTitle").map(String::from)
 }
 
+/// Days since 1970-01-01 of a proleptic Gregorian date (month 1..=12).
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146097 + doe - 719468
+}
+
+/// UNIX seconds of `YYYY-MM-DDTHH:MM:SS[.fff]Z` (UTC); anything else, and dates before 1970, give `None`.
+fn parse_timestamp(s: &str) -> Option<u64> {
+    let b = s.as_bytes();
+    if b.len() < 20 || b[b.len() - 1] != b'Z' {
+        return None;
+    }
+    let num = |from: usize, to: usize| -> Option<i64> {
+        let part = &b[from..to];
+        part.iter().all(u8::is_ascii_digit).then(|| part.iter().fold(0i64, |a, d| a * 10 + (d - b'0') as i64))
+    };
+    if [(4, b'-'), (7, b'-'), (10, b'T'), (13, b':'), (16, b':')].iter().any(|&(i, c)| b[i] != c) {
+        return None;
+    }
+    let (y, mo, d, h, mi, sec) = (num(0, 4)?, num(5, 7)?, num(8, 10)?, num(11, 13)?, num(14, 16)?, num(17, 19)?);
+    let frac = &b[19..b.len() - 1];
+    if !frac.is_empty() && !(frac[0] == b'.' && frac.len() > 1 && frac[1..].iter().all(u8::is_ascii_digit)) {
+        return None;
+    }
+    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    let dim = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    if !(1..=12).contains(&mo) || d < 1 || d > dim[(mo - 1) as usize] || h > 23 || mi > 59 || sec > 59 {
+        return None;
+    }
+    let t = days_from_civil(y, mo, d) * 86400 + h * 3600 + mi * 60 + sec;
+    u64::try_from(t).ok()
+}
+
+/// The `timestamp` of the last `user`/`assistant` record among the lines of `b` with a valid one.
+fn last_activity(b: &[u8]) -> Option<u64> {
+    b.rsplit(|c| *c == b'\n').filter(|l| contains(l, b"\"timestamp\"")).find_map(|l| {
+        let rec = decode(l)?;
+        match rec.get("type").and_then(Value::as_str) {
+            Some("user") | Some("assistant") => parse_timestamp(rec.get("timestamp")?.as_str()?),
+            _ => None,
+        }
+    })
+}
+
 /// What metadata is read from: the first `WINDOW` bytes, and either the whole file (when it is
 /// `2 * WINDOW` bytes or less) or its last `WINDOW` bytes.
 pub enum Windows<'a> {
@@ -150,13 +203,14 @@ pub fn meta_from_windows(path: &str, mtime: u64, size: u64, w: Windows) -> Sessi
             break;
         }
     }
-    let ai_title = match w {
-        Windows::Whole(all) => last_ai_title(all),
+    let (ai_title, activity) = match w {
+        Windows::Whole(all) => (last_ai_title(all), last_activity(all)),
         Windows::HeadTail(h, tail) => {
             let rest = tail.iter().position(|c| *c == b'\n').map_or(&tail[tail.len()..], |p| &tail[p + 1..]);
-            last_ai_title(rest).or_else(|| last_ai_title(h))
+            (last_ai_title(rest).or_else(|| last_ai_title(h)), last_activity(rest).or_else(|| last_activity(h)))
         }
     };
+    meta.activity = activity.unwrap_or(mtime);
     if let Some(t) = ai_title {
         meta.title = t;
     } else if let Some(p) = first_prompt {

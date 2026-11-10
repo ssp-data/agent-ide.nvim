@@ -65,7 +65,7 @@ fn garbage_cache_file_is_ignored_and_rewritten() {
 fn no_cache_dir_means_no_cache_file() {
     let c = Cache::load(None);
     assert!(c.get("x", 1, 1).is_none());
-    let m = SessionMeta { id: "a".into(), path: "x".into(), cwd: None, title: "t".into(), branch: None, mtime: 1, size: 1 };
+    let m = SessionMeta { id: "a".into(), path: "x".into(), cwd: None, title: "t".into(), branch: None, mtime: 1, activity: 1, size: 1 };
     let mut c = c;
     c.insert(m);
     c.save(); // must not panic or write anywhere
@@ -73,7 +73,7 @@ fn no_cache_dir_means_no_cache_file() {
 
 #[test]
 fn cache_written_by_another_version_is_ignored() {
-    assert_eq!(crate::cache::FILE_NAME, "index-v2.json");
+    assert_eq!(crate::cache::FILE_NAME, "index-v3.json");
     let root = tmp("version");
     let cache_dir = root.join("cache");
     let projects = root.join("projects");

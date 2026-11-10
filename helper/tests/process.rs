@@ -29,7 +29,7 @@ fn answers_every_line_survives_garbage_and_exits_when_stdin_closes() {
     let r = ask(&format!(r#"{{"id":2,"method":"scan","params":{{"projects_dir":"{}"}}}}"#, fixtures()));
     assert_eq!(r["id"], 2);
     assert_eq!(r["result"]["sessions"].as_array().unwrap().len(), 4);
-    assert!(cache.join("index-v2.json").exists());
+    assert!(cache.join("index-v3.json").exists());
     drop(stdin);
     let status = child.wait().unwrap();
     assert!(status.success());

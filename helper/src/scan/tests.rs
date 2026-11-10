@@ -151,3 +151,57 @@ fn a_user_line_with_an_ai_title_key_can_still_be_the_first_prompt() {
     let text = "{\"type\":\"user\",\"aiTitle\":\"not a title record\",\"message\":{\"content\":\"quoted prompt\"}}\n";
     assert_eq!(meta_from_bytes("/p/a.jsonl", 1, 1, text.as_bytes()).title, "quoted prompt");
 }
+
+fn rec(ty: &str, ts: &str) -> String {
+    format!("{}\n", serde_json::json!({"type": ty, "timestamp": ts, "message": {"content": "x"}}))
+}
+
+const TS: &str = "2026-01-02T03:04:05.000Z";
+const TS_SECONDS: u64 = 1767323045;
+
+#[test]
+fn activity_is_last_conversational_record() {
+    let m = |t: &str, mtime: u64| meta_from_bytes("/p/a.jsonl", mtime, t.len() as u64, t.as_bytes());
+    let text = format!(
+        "{}{}{}{}",
+        rec("user", "2026-01-01T00:00:00Z"),
+        rec("assistant", TS),
+        "{\"type\":\"ai-title\",\"aiTitle\":\"T\",\"timestamp\":\"2030-01-01T00:00:00.000Z\"}\n",
+        "{\"type\":\"mode\",\"timestamp\":\"2031-01-01T00:00:00.000Z\"}\n"
+    );
+    let a = m(&text, 1_900_000_000);
+    assert_eq!((a.activity, a.mtime), (TS_SECONDS, 1_900_000_000));
+    // no conversational record, or an empty file: mtime
+    assert_eq!(m("{\"type\":\"ai-title\",\"aiTitle\":\"T\",\"timestamp\":\"2030-01-01T00:00:00.000Z\"}\n", 1234).activity, 1234);
+    assert_eq!(m("", 77).activity, 77);
+    // unparsable timestamps are skipped; fraction optional; sidechain/meta count
+    let bad = format!(
+        "{}{}{}{}{}",
+        rec("user", TS),
+        rec("assistant", "garbage"),
+        rec("assistant", "2026-13-40T99:00:00Z"),
+        "{\"type\":\"user\",\"timestamp\":5}\n",
+        rec("assistant", "2026-01-02T03:04:05.000+01:00")
+    );
+    assert_eq!(m(&bad, 9).activity, TS_SECONDS);
+    assert_eq!(m(&rec("assistant", "2026-01-02T03:04:05Z"), 9).activity, TS_SECONDS);
+    let flags = "{\"type\":\"assistant\",\"isSidechain\":true,\"isMeta\":true,\"timestamp\":\"2026-01-02T03:04:05.000Z\"}\n";
+    assert_eq!(m(flags, 9).activity, TS_SECONDS);
+    assert_eq!(m(&rec("assistant", "1969-12-31T23:59:59Z"), 9).activity, 9);
+}
+
+#[test]
+fn activity_windows_on_big_files() {
+    let m = |t: &str, mtime: u64| meta_from_bytes("/p/a.jsonl", mtime, t.len() as u64, t.as_bytes());
+    let filler = |n: usize| "{\"type\":\"progress\",\"x\":\"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\"}\n".repeat(n / 100 + 1);
+    // the last message is in the tail window; a middle one outside both windows is not looked at
+    let big = format!("{}{}{}{}{}{}", rec("user", "2026-01-01T00:00:00.000Z"), filler(300 * 1024), rec("user", "2026-06-01T00:00:00Z"), filler(300 * 1024), rec("assistant", TS), filler(10 * 1024));
+    assert_eq!(m(&big, 5).activity, TS_SECONDS);
+    // no conversational record in the tail window: the head window decides
+    let progress = "{\"type\":\"progress\",\"timestamp\":\"2030-01-01T00:00:00Z\"}\n";
+    let head_only = format!("{}{}", rec("assistant", TS), progress.repeat(14000));
+    assert!(head_only.len() > 512 * 1024);
+    assert_eq!(m(&head_only, 5).activity, TS_SECONDS);
+    let none = progress.repeat(12000);
+    assert_eq!(m(&none, 5).activity, 5);
+}

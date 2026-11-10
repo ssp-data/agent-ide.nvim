@@ -1,4 +1,4 @@
-//! On-disk metadata cache: `<cache-dir>/index-v2.json`, holding the crate version and a map
+//! On-disk metadata cache: `<cache-dir>/index-v3.json`, holding the crate version and a map
 //! path -> { mtime, size, meta }. A file written by another version is ignored and rewritten,
 //! so a change to the metadata rules never serves stale titles.
 use crate::scan::SessionMeta;
@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
-pub const FILE_NAME: &str = "index-v2.json";
+pub const FILE_NAME: &str = "index-v3.json";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

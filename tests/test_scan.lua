@@ -102,4 +102,56 @@ T['an error in the scan callback is reported once at WARN'] = function()
   eq(notes[1][2], vim.log.levels.WARN)
   eq(notes[1][1]:find('consumer boom', 1, true) ~= nil, true)
 end
+
+-- activity: time of the last user/assistant record, not the file's mtime
+local synth = dofile(vim.fn.getcwd() .. '/tests/synthetic.lua')
+local function rec(ty, ts, extra)
+  return vim.json.encode(vim.tbl_extend('force', { type = ty, timestamp = ts, message = { content = 'x' } }, extra or {})) .. '\n'
+end
+local function meta_of(text, mtime)
+  local path = vim.fn.tempname() .. '.jsonl'
+  synth.write(path, text)
+  local m = scan.meta(path, mtime, #text)
+  vim.fn.delete(path)
+  return m
+end
+local TS = '2026-01-02T03:04:05.000Z'
+local TS_SECONDS = 1767323045
+
+T['activity: last conversational record, bookkeeping ignored, mtime unchanged'] = function()
+  local now = os.time()
+  local m = meta_of(rec('user', '2026-01-01T00:00:00Z') .. rec('assistant', TS)
+    .. '{"type":"ai-title","aiTitle":"T","timestamp":"2030-01-01T00:00:00.000Z"}\n'
+    .. '{"type":"mode","timestamp":"2031-01-01T00:00:00.000Z"}\n', now)
+  eq({ m.activity, m.mtime }, { TS_SECONDS, now })
+end
+T['activity: no conversational record gives mtime'] = function()
+  local m = meta_of('{"type":"ai-title","aiTitle":"T","timestamp":"2030-01-01T00:00:00.000Z"}\n', 1234)
+  eq(m.activity, 1234)
+  eq(meta_of('', 77).activity, 77)
+end
+T['activity: unparsable timestamps are skipped, fraction optional, sidechain counts'] = function()
+  local text = rec('user', TS) .. rec('assistant', 'garbage') .. rec('assistant', '2026-13-40T99:00:00Z')
+    .. rec('user', 5) .. rec('assistant', '2026-01-02T03:04:05.000+01:00')
+  eq(meta_of(text, 9).activity, TS_SECONDS)
+  eq(meta_of(rec('assistant', '2026-01-02T03:04:05Z'), 9).activity, TS_SECONDS)
+  eq(meta_of(rec('assistant', TS, { isSidechain = true, isMeta = true }), 9).activity, TS_SECONDS)
+  eq(meta_of(rec('assistant', '1969-12-31T23:59:59Z'), 9).activity, 9)
+end
+T['activity: tail window, then head window, then mtime on big files'] = function()
+  local tail = rec('assistant', TS)
+  local old = rec('user', '2026-01-01T00:00:00.000Z')
+  -- last message in the tail window; a middle one outside both windows is not looked at
+  local big = old .. synth.filler(300 * 1024) .. rec('user', '2026-06-01T00:00:00Z') .. synth.filler(300 * 1024) .. tail .. synth.filler(10 * 1024)
+  eq(meta_of(big, 5).activity, TS_SECONDS)
+  -- the tail window holds no conversational record: the head window decides
+  local head_only = rec('assistant', TS) .. string.rep('{"type":"progress","timestamp":"2030-01-01T00:00:00Z"}\n', 14000)
+  eq(#head_only > 512 * 1024, true)
+  eq(meta_of(head_only, 5).activity, TS_SECONDS)
+  -- neither window: mtime
+  local none = string.rep('{"type":"progress","timestamp":"2030-01-01T00:00:00Z"}\n', 12000)
+  eq(#none > 512 * 1024, true)
+  eq(meta_of(none, 5).activity, 5)
+end
 return T
+

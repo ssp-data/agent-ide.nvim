@@ -63,10 +63,52 @@ local function last_ai_title(text, from)
   end
 end
 
+-- Days since 1970-01-01 of a proleptic Gregorian date (month 1..12).
+local function days_from_civil(y, m, d)
+  if m <= 2 then y = y - 1 end
+  local era = math.floor(y / 400)
+  local yoe = y - era * 400
+  local doy = math.floor((153 * (m > 2 and m - 3 or m + 9) + 2) / 5) + d - 1
+  local doe = yoe * 365 + math.floor(yoe / 4) - math.floor(yoe / 100) + doy
+  return era * 146097 + doe - 719468
+end
+
+-- UNIX seconds of `YYYY-MM-DDTHH:MM:SS[.fff]Z` (UTC); anything else, and dates before 1970, give nil.
+local function parse_timestamp(ts)
+  if type(ts) ~= 'string' then return nil end
+  local y, mo, d, h, mi, sec, frac = ts:match('^(%d%d%d%d)-(%d%d)-(%d%d)T(%d%d):(%d%d):(%d%d)(.-)Z$')
+  if not y or (frac ~= '' and not frac:match('^%.%d+$')) then return nil end
+  y, mo, d, h, mi, sec = tonumber(y), tonumber(mo), tonumber(d), tonumber(h), tonumber(mi), tonumber(sec)
+  local leap = (y % 4 == 0 and y % 100 ~= 0) or y % 400 == 0
+  local dim = { 31, leap and 29 or 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 }
+  if mo < 1 or mo > 12 or d < 1 or d > dim[mo] or h > 23 or mi > 59 or sec > 59 then return nil end
+  local t = days_from_civil(y, mo, d) * 86400 + h * 3600 + mi * 60 + sec
+  if t >= 0 then return t end
+end
+
+-- The `timestamp` of the last user/assistant record with a valid one among the lines of `text`
+-- that start at or after byte `from`. Only lines containing `"timestamp"` are decoded.
+local function last_activity(text, from)
+  local lines = {}
+  for line in text:sub(from):gmatch('[^\n]+') do
+    if line:find('"timestamp"', 1, true) then lines[#lines + 1] = line end
+  end
+  for i = #lines, 1, -1 do
+    local rec = decode(lines[i])
+    if rec and (rec.type == 'user' or rec.type == 'assistant') then
+      local t = parse_timestamp(rec.timestamp)
+      if t then return t end
+    end
+  end
+end
+
 ---Title rule (same in the helper): the last `aiTitle` in the last WINDOW bytes (its first,
 ---possibly partial, line ignored), else the last one in the first WINDOW bytes, else the first
 ---prompt in the first WINDOW bytes, else `(untitled)`. A file of 2 * WINDOW bytes or less is
 ---read whole and its last `aiTitle` anywhere wins. cwd and branch come from the first WINDOW bytes.
+---Activity rule (same in the helper): the `timestamp` of the last user/assistant record with a
+---valid UTC ISO 8601 timestamp, in the same windows as the title (tail, then head, or the whole
+---small file), else `mtime`.
 ---@param path string
 ---@param mtime integer seconds
 ---@param size integer bytes
@@ -74,7 +116,7 @@ end
 function M.meta(path, mtime, size)
   local meta = {
     id = vim.fn.fnamemodify(path, ':t'):gsub('%.jsonl$', ''),
-    path = path, title = '(untitled)', mtime = mtime, size = size,
+    path = path, title = '(untitled)', mtime = mtime, activity = mtime, size = size,
   }
   local w = read_windows(path)
   if not w then return meta end
@@ -99,13 +141,15 @@ function M.meta(path, mtime, size)
     if meta.cwd and first_prompt then break end
   end
 
-  local ai_title
+  local ai_title, activity
   if w.whole then
-    ai_title = last_ai_title(w.whole, 1)
+    ai_title, activity = last_ai_title(w.whole, 1), last_activity(w.whole, 1)
   else
     local nl = w.tail:find('\n', 1, true)
     ai_title = (nl and last_ai_title(w.tail, nl + 1)) or last_ai_title(w.head, 1)
+    activity = (nl and last_activity(w.tail, nl + 1)) or last_activity(w.head, 1)
   end
+  meta.activity = activity or mtime
 
   if ai_title then
     meta.title = ai_title

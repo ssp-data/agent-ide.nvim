@@ -108,6 +108,33 @@ T['helper scan equals lua scan on generated big transcripts (titles included)'] 
     utf8 = 'bad \239\191\189 prompt', quoted = 'quoted' })
 end
 
+T['helper scan equals lua scan on activity (all window cases)'] = function()
+  need_helper()
+  local root = temp_dir()
+  local function rec(ty, ts) return vim.json.encode({ type = ty, timestamp = ts, message = { content = 'x' } }) .. '\n' end
+  local progress = '{"type":"progress","timestamp":"2030-01-01T00:00:00Z"}\n'
+  local pad = synth.filler(256 * 1024):sub(1, 256 * 1024 - 1) .. '\n'
+  local files = {
+    ['-a/small.jsonl'] = rec('user', '2026-01-01T00:00:00Z') .. rec('assistant', '2026-01-02T03:04:05.123Z') .. progress,
+    ['-a/bad.jsonl'] = rec('user', '2026-01-02T03:04:05Z') .. rec('assistant', 'nope') .. rec('assistant', '2026-02-30T00:00:00Z'),
+    ['-a/none.jsonl'] = progress,
+    ['-b/tail.jsonl'] = rec('user', '2026-01-01T00:00:00Z') .. synth.filler(300 * 1024) .. rec('assistant', '2026-03-04T05:06:07Z') .. synth.filler(10 * 1024),
+    ['-b/head.jsonl'] = rec('assistant', '2026-01-02T03:04:05Z') .. progress:rep(14000),
+    ['-b/neither.jsonl'] = progress:rep(12000),
+    ['-c/partial.jsonl'] = rec('user', '2026-01-01T00:00:00Z') .. synth.filler(300 * 1024) .. rec('assistant', '2026-03-04T05:06:07Z') .. pad,
+  }
+  for name, text in pairs(files) do synth.write(root .. '/' .. name, text) end
+  local h = by_id(scan(root))
+  eq(index.backend(), 'helper')
+  local l = by_id(lua_only(function() return scan(root) end))
+  eq(#h, 7)
+  eq(h, l)
+  for _, m in ipairs(h) do
+    if m.id == 'small' then eq(m.activity, 1767323045) end
+    if m.id == 'none' then eq(m.activity, m.mtime) end
+  end
+end
+
 T['helper history equals lua history on fixtures'] = function()
   need_helper()
   local paths = { vim.fn.fnamemodify('tests/fixtures/edge/edge-cases.jsonl', ':p'), fixture_path }

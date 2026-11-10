@@ -89,6 +89,44 @@ T['toggle creates Agents tab with drawer on the right at width 44'] = function()
   eq(s, { nr = 2, last = 2, width = 44, ft = 'agent-ide', fix = true, number = false, bt = 'nofile', modifiable = false })
 end
 
+T['drawer window has list off even when listchars is set'] = function()
+  start()
+  child.lua('vim.o.list = true; vim.o.listchars = "eol:$"')
+  child.lua('require("agent-ide").toggle()')
+  eq(child.lua_get('vim.wo[require("agent-ide.ui.drawer").state().win].list'), false)
+end
+
+T['? opens the shortcut help, q closes it, / is not mapped'] = function()
+  start()
+  child.lua('require("agent-ide").toggle()')
+  local drawer_win = child.lua_get('require("agent-ide.ui.drawer").state().win')
+  eq(child.lua_get('vim.fn.maparg("/", "n")'), '')
+  child.type_keys('?')
+  wait_for(function() return child.lua_get('vim.api.nvim_win_get_config(0).relative') ~= '' end, 'help float')
+  local text = table.concat(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), '\n')
+  for _, key in ipairs({ '<CR>', 'za', 'R', 'gp', 'q', '?' }) do
+    eq(text:find(key, 1, true) ~= nil, true)
+  end
+  eq(child.lua_get('vim.bo.modifiable'), false)
+  child.type_keys('?') -- opening again from the float's own key closes; no stacking
+  wait_for(function() return child.lua_get('vim.api.nvim_win_get_config(0).relative') == '' end, 'help closed by ?')
+  child.type_keys('?')
+  wait_for(function() return child.lua_get('vim.api.nvim_win_get_config(0).relative') ~= '' end, 'help float again')
+  child.type_keys('q')
+  wait_for(function() return child.lua_get('vim.api.nvim_get_current_win()') == drawer_win end, 'help closed by q')
+  child.type_keys('?')
+  wait_for(function() return child.lua_get('vim.api.nvim_win_get_config(0).relative') ~= '' end, 'help float 3')
+  child.type_keys('<Esc>')
+  wait_for(function() return child.lua_get('vim.api.nvim_get_current_win()') == drawer_win end, 'help closed by Esc')
+  eq(child.lua_get('#vim.tbl_filter(function(w) return vim.api.nvim_win_get_config(w).relative ~= "" end, vim.api.nvim_list_wins())'), 0)
+end
+
+T['help.open twice does not stack floats'] = function()
+  start()
+  child.lua([[local h = require('agent-ide.ui.help'); h.open('t', { { key = 'a', desc = 'b' } }); h.open('t', { { key = 'a', desc = 'b' } })]])
+  eq(child.lua_get('#vim.tbl_filter(function(w) return vim.api.nvim_win_get_config(w).relative ~= "" end, vim.api.nvim_list_wins())'), 1)
+end
+
 T['drawer on the left when configured'] = function()
   start()
   child.lua('require("agent-ide").setup({ drawer = { side = "left", width = 30 } })')
@@ -298,7 +336,7 @@ T['ages are re-rendered on every live poll'] = function()
   ]])
   local want = child.lua_get([[(function()
     for _, p in ipairs(require('agent-ide.ui.drawer').state().projects) do
-      if p.name == 'alpha' then return require('agent-ide.ui.tree').ago(p.mtime, _G.fake_now) end
+      if p.name == 'alpha' then return require('agent-ide.ui.tree').ago(p.activity, _G.fake_now) end
     end
   end)()]])
   wait_drawer_line('> P alpha  W ' .. want, true)

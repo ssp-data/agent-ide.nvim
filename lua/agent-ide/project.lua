@@ -94,12 +94,12 @@ function M.group(sessions, opts)
     local p = by_key[key]
     if not p then
       if is_git then missing = stat(root) == nil end
-      p = { key = key, name = basename(key), root = root, is_git = is_git, missing = missing, mtime = 0, sessions = {} }
+      p = { key = key, name = basename(key), root = root, is_git = is_git, missing = missing, activity = 0, sessions = {} }
       by_key[key] = p
       projects[#projects + 1] = p
     end
     p.sessions[#p.sessions + 1] = s
-    p.mtime = math.max(p.mtime, s.mtime or 0)
+    p.activity = math.max(p.activity, s.activity or 0)
   end
 
   local counts = {}
@@ -111,13 +111,13 @@ function M.group(sessions, opts)
     end
     -- ties are broken by path, then id, so the order never depends on the backend's file order
     table.sort(p.sessions, function(a, b)
-      if (a.mtime or 0) ~= (b.mtime or 0) then return (a.mtime or 0) > (b.mtime or 0) end
+      if (a.activity or 0) ~= (b.activity or 0) then return (a.activity or 0) > (b.activity or 0) end
       if (a.path or '') ~= (b.path or '') then return bytes_lt(a.path or '', b.path or '') end
       return bytes_lt(tostring(a.id), tostring(b.id))
     end)
   end
   table.sort(projects, function(a, b)
-    if a.mtime ~= b.mtime then return a.mtime > b.mtime end
+    if a.activity ~= b.activity then return a.activity > b.activity end
     return bytes_lt(a.key, b.key)
   end)
   return projects

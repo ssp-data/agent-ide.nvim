@@ -10,11 +10,11 @@ local STATE_GROUP = {
   parked = 'AgentIdeParked',
 }
 
----@param mtime integer
+---@param activity integer
 ---@param now integer
 ---@return string
-function M.ago(mtime, now)
-  local d = now - mtime
+function M.ago(activity, now)
+  local d = now - activity
   if d < 90 then return 'now' end
   if d < 3600 then return math.floor(d / 60) .. 'm' end
   if d < 86400 then return math.floor(d / 3600) .. 'h' end
@@ -59,7 +59,7 @@ function M.build(projects, live_map, expanded, now, icons, projects_dir)
       { '  ' },
       { icons[rolled], STATE_GROUP[rolled] },
       { ' ' },
-      { M.ago(project.mtime, now), 'AgentIdeAge' },
+      { M.ago(project.activity, now), 'AgentIdeAge' },
     }
     if project.missing then pieces[#pieces + 1] = { ' (gone)', 'AgentIdeMissing' } end
     add(pieces, { type = 'project', project = project })
@@ -80,7 +80,7 @@ function M.build(projects, live_map, expanded, now, icons, projects_dir)
           }
           if s.subpath and s.subpath ~= '' then sp[#sp + 1] = { '  [' .. s.subpath .. ']' } end
           sp[#sp + 1] = { '  ' }
-          sp[#sp + 1] = { M.ago(s.mtime, now), 'AgentIdeAge' }
+          sp[#sp + 1] = { M.ago(s.activity, now), 'AgentIdeAge' }
           add(sp, { type = 'session', project = project, session = s, state = state })
         end
       end

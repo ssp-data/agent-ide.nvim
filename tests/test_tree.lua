@@ -5,10 +5,10 @@ local T = MiniTest.new_set()
 
 local icons = { open = 'v', closed = '>', project = 'P', waiting = 'W', busy = 'B', idle = 'I', parked = '.' }
 local projects = {
-  { key = '/r/alpha', name = 'alpha', is_git = true, missing = false, mtime = 1000, sessions = {
-    { id = 's1', title = 'Fix login', mtime = 1000 },
-    { id = 's2', title = 'Docs', mtime = 400, subpath = 'docs' } } },
-  { key = '/r/old', name = 'old', is_git = false, missing = true, mtime = 100, sessions = { { id = 's3', title = 'X', mtime = 100 } } },
+  { key = '/r/alpha', name = 'alpha', is_git = true, missing = false, activity = 1000, sessions = {
+    { id = 's1', title = 'Fix login', activity = 1000 },
+    { id = 's2', title = 'Docs', activity = 400, subpath = 'docs' } } },
+  { key = '/r/old', name = 'old', is_git = false, missing = true, activity = 100, sessions = { { id = 's3', title = 'X', activity = 100 } } },
 }
 
 local function find(t, line, group)
@@ -75,8 +75,8 @@ end
 
 T['session title is one line, not truncated'] = function()
   local long = string.rep('x', 300)
-  local p = { { key = '/r/a', name = 'a', is_git = true, missing = false, mtime = 1000, sessions = {
-    { id = 's', title = 'one\ntwo\r\nthree ' .. long, mtime = 1000 } } } }
+  local p = { { key = '/r/a', name = 'a', is_git = true, missing = false, activity = 1000, sessions = {
+    { id = 's', title = 'one\ntwo\r\nthree ' .. long, activity = 1000 } } } }
   local t = tree.build(p, {}, { ['/r/a'] = true }, 1000, icons)
   eq(#t.lines, 3)
   eq(t.lines[3], '      . one two  three ' .. long .. '  now')
