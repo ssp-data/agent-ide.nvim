@@ -470,6 +470,7 @@ function actions.help()
     { key = 'gL', desc = 'show or hide the legend of the state marks' },
   }
   for _, k in ipairs(provider_keys()) do rows[#rows + 1] = { key = k.lhs, desc = k.desc } end
+  vim.list_extend(rows, require('agent-ide.ui.drawer_session_keys').help_rows(OWN))
   require('agent-ide.ui.help').open('Agent-IDE drawer', rows)
 end
 
@@ -485,6 +486,7 @@ local function ensure_buf()
   -- provider row keys (the drawer's own keys below win a clash)
   for _, k in ipairs(provider_keys()) do map(k.lhs, function() actions.row_key(k.lhs) end) end
   for _, k in ipairs(KEYS) do map(k[1], actions[k[2]]) end
+  require('agent-ide.ui.drawer_session_keys').map(buf, OWN, current_node) -- the chat's keys on session rows
   api.nvim_create_autocmd('BufEnter', { buffer = buf, callback = function() sections.focus() end })
   S.buf = buf
   return buf

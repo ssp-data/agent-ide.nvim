@@ -228,6 +228,7 @@ In the drawer:
 | `x` | Park the session: stop the Claude process this Neovim runs for it |
 | `H` | Hide the session into its project's `Hidden (n)` group; on a hidden session: show it again (Vim's `H` motion is not available in the drawer) |
 | `D` | Delete an inactive session: move it to the plugin's trash after a confirm (see [Deleting sessions](#deleting-sessions)) |
+| `<leader>aM`, `<S-Tab>`, `<C-c>`, `<leader>at`, `gr` | On a session row, what they do in its chat, for that session and without opening it: pick the model, next permission mode, interrupt (only while Claude works), continue in native Claude in a tmux pane, raw view in the main window. A session without a process takes the mode or model when it starts; one running in another Claude is refused (the raw view still opens). On other rows `<S-Tab>` and `<C-c>` keep their Vim meaning |
 | `q` | Close the drawer |
 | `gL` | Show or hide the legend of the state marks |
 | `glg` | Open lazygit for the row's repository (a worktree row or session: that worktree) |
@@ -238,7 +239,7 @@ In the drawer:
 | `y` | Prompt row: yank its text (unnamed and `+` registers) |
 | `L` | Saved prompt row: copy it into the library (asks for a name) |
 
-The prompt row keys are under `keys.prompts`; elsewhere in the drawer they keep their Vim meaning, and a drawer key above always wins over one of them. The other drawer keys are fixed.
+The prompt row keys are under `keys.prompts`; elsewhere in the drawer they keep their Vim meaning, and a drawer key above always wins over one of them. The session row keys are the chat's (`keys.chat`), so a remap applies to both. The other drawer keys are fixed.
 
 In the chat (transcript and prompt buffer, unless noted):
 

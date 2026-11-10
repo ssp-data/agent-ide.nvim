@@ -497,6 +497,23 @@ function M.refresh_winbars()
   end
 end
 
+---Interrupt the running turn of `s` as its chat's interrupt key does (queued prompts go back to
+---its prompt buffer).
+---@param s table Session
+function M.interrupt(s)
+  if chats[s.id] then return interrupt(chats[s.id]) end
+  s:interrupt()
+end
+
+---Continue `s` in native Claude in a tmux pane as its chat's key does (again: take it back),
+---without showing its chat.
+---@param s table Session
+---@param project table Project
+function M.native(s, project)
+  subscribe()
+  ACT.native((get_chat(s, project)))
+end
+
 ---Park `s`: stop the Claude process this Neovim runs for it (asking first when it works). Queued
 ---prompts it drops go back to its prompt buffer, as after an interrupt. The transcript stays;
 ---the next send resumes the session. A session without a process here gets a notice.
