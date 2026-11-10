@@ -2,7 +2,8 @@
 -- Read-only: never signals or stops any process.
 local M = {}
 
-local RANK = { waiting = 4, busy = 3, idle = 2, parked = 1 }
+-- `done`/`failed` come from Sessions of this Neovim (a result waits to be read), never from the live map.
+local RANK = { waiting = 6, failed = 5, done = 4, busy = 3, idle = 2, parked = 1 }
 local PASSTHROUGH = { busy = true, waiting = true, idle = true }
 
 local map = {}

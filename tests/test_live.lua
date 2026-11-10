@@ -20,6 +20,9 @@ T['state_of and rollup'] = function()
   eq(live.rollup({ 'idle', 'busy', 'parked' }), 'busy')
   eq(live.rollup({ 'busy', 'waiting' }), 'waiting')
   eq(live.rollup({}), 'parked')
+  eq(live.rollup({ 'busy', 'done', 'idle' }), 'done')
+  eq(live.rollup({ 'done', 'failed' }), 'failed')
+  eq(live.rollup({ 'failed', 'waiting' }), 'waiting')
 end
 
 T['start: missing command gives empty map and one notice'] = function()

@@ -58,7 +58,18 @@ local function drawer_cursor_to(text)
   child.lua('local s = require("agent-ide.ui.drawer").state(); vim.api.nvim_set_current_win(s.win); vim.api.nvim_win_set_cursor(s.win, { ..., 0 })', { row })
 end
 
-local function buf_lines() return child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)') end
+-- Lines of the chat transcript (the chat view focuses its prompt buffer).
+local function buf_lines()
+  return child.lua_get([[(function()
+    local w = require('agent-ide.ui.chat')._windows().transcript
+    return w and vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(w), 0, -1, false) or {}
+  end)()]])
+end
+
+-- Evaluate `expr` with the chat transcript window current.
+local function in_transcript(expr)
+  return child.lua_get('vim.api.nvim_win_call(require("agent-ide.ui.chat")._windows().transcript, function() return ' .. expr .. ' end)')
+end
 
 -- Toggle, expand `project`, open the session titled `title`; waits for the history to load.
 local function open_session(project, title)
@@ -147,7 +158,7 @@ T['drawer lists fixture projects with live state'] = function()
   eq(lines[has_line(lines, '-nocwd', true)]:find('(gone)', 1, true) ~= nil, true)
 end
 
-T['enter on project expands; enter on session opens history'] = function()
+T['enter on project expands; enter on session opens its history in the chat view'] = function()
   start()
   child.lua('require("agent-ide").toggle()')
   drawer_cursor_to('> P alpha  ')
@@ -156,16 +167,16 @@ T['enter on project expands; enter on session opens history'] = function()
   drawer_cursor_to('Alpha basics')
   child.type_keys('<CR>')
   wait_for(function() return has_line(buf_lines(), '## You', true) ~= nil end, 'history loaded')
-  local name = child.lua_get('vim.api.nvim_buf_get_name(0)')
-  eq(vim.endswith(name, 'agent-ide://history/' .. ALPHA_ID), true)
+  eq(in_transcript('vim.api.nvim_buf_get_name(0)'), 'agent-ide://chat/' .. ALPHA_ID)
   local lines = buf_lines()
   local bash = has_line(lines, '▸ Bash:', true)
   eq(bash ~= nil, true)
-  eq(child.lua_get('vim.fn.foldclosed(...)', { bash }), bash)
-  eq(child.lua_get('vim.bo.modifiable'), false)
-  eq(child.lua_get('vim.bo.filetype'), 'markdown')
-  eq(child.lua_get('vim.fn.line(".") == vim.fn.line("$")'), true)
-  eq(child.lua_get('vim.wo.winbar'):find('history (read-only)', 1, true) ~= nil, true)
+  eq(in_transcript('vim.fn.foldclosed(' .. bash .. ')'), bash)
+  eq(in_transcript('vim.bo.modifiable'), false)
+  eq(in_transcript('vim.bo.filetype'), 'markdown')
+  eq(in_transcript('vim.fn.line(".") == vim.fn.line("$")'), true)
+  -- running in another Claude (live: waiting): the history shows, the winbar says so
+  eq(in_transcript('vim.wo.winbar'), 'alpha · Alpha basics · model ? · mode:? · waiting')
 end
 
 T['history of a session with unknown records shows an unknown fold'] = function()
@@ -254,6 +265,7 @@ T['history of a vanished transcript says so'] = function()
   drawer_cursor_to('Alpha basics')
   vim.fn.delete(copy)
   child.type_keys('<CR>')
+  wait_for(function() return buf_lines()[1] == 'Transcript not found: ' .. copy end, 'notice')
   eq(buf_lines(), { 'Transcript not found: ' .. copy })
   vim.fn.delete(tmp, 'rf')
 end
@@ -404,8 +416,8 @@ T['a relative project key never changes the tab cwd'] = function()
   child.cmd('cd ' .. vim.fn.fnameescape(tmp))
   child.lua('require("agent-ide").toggle()')
   local before = child.lua_get('vim.fn.getcwd(-1, 0)')
-  child.lua([[require('agent-ide.ui.history').open(
-    { id = '44444444-4444-4444-8444-444444444444', path = ..., title = '(untitled)' },
+  child.lua([[require('agent-ide.ui.chat').open(require('agent-ide.session').open(
+    { id = '44444444-4444-4444-8444-444444444444', cwd = '-nocwd', path = ..., title = '(untitled)' }),
     { key = '-nocwd', name = '-nocwd' })]], { FIXTURES .. '/-nocwd/44444444-4444-4444-8444-444444444444.jsonl' })
   eq(child.lua_get('vim.fn.getcwd(-1, 0)'), before)
   vim.fn.delete(tmp, 'rf')

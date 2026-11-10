@@ -1,4 +1,4 @@
--- Highlight groups for the drawer. `default = true` lets colorschemes override.
+-- Highlight groups for the drawer and the chat view. `default = true` lets colorschemes override.
 local M = {}
 
 local GROUPS = {
@@ -7,6 +7,8 @@ local GROUPS = {
   AgentIdeBusy = { link = 'DiagnosticWarn' }, -- yellow
   AgentIdeIdle = { link = 'DiagnosticOk' }, -- green
   AgentIdeParked = { link = 'Comment' }, -- dimmed
+  AgentIdeDone = { fg = '#ff9e64', ctermfg = 215 }, -- orange: the result waits to be read
+  AgentIdeFailed = { fg = '#ff9e64', ctermfg = 215 },
   AgentIdeMissing = { link = 'Comment' },
   AgentIdeAge = { link = 'Comment' },
   AgentIdeSection = { link = 'Directory' },

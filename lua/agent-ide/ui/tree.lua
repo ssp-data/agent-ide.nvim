@@ -1,4 +1,4 @@
--- Pure drawer model: projects + live state -> lines, one node per line, highlight ranges.
+-- Pure drawer model: projects + session states -> lines, one node per line, highlight ranges.
 local live = require('agent-ide.live')
 
 local M = {}
@@ -8,6 +8,8 @@ local STATE_GROUP = {
   busy = 'AgentIdeBusy',
   idle = 'AgentIdeIdle',
   parked = 'AgentIdeParked',
+  done = 'AgentIdeDone',
+  failed = 'AgentIdeFailed',
 }
 
 ---@param activity integer
@@ -22,12 +24,12 @@ function M.ago(activity, now)
 end
 
 ---@param projects table[]
----@param live_map table
+---@param state_of fun(session_id: string): string State of one session
 ---@param expanded table<string, boolean>
 ---@param now integer
 ---@param icons table
 ---@param projects_dir string|nil
-function M.build(projects, live_map, expanded, now, icons, projects_dir)
+function M.build(projects, state_of, expanded, now, icons, projects_dir)
   local lines, nodes, hl = {}, {}, {}
 
   -- Append a line made of { text, group|nil } pieces; records byte ranges of grouped pieces.
@@ -51,7 +53,7 @@ function M.build(projects, live_map, expanded, now, icons, projects_dir)
   for _, project in ipairs(projects) do
     local is_open = expanded[project.key] == true
     local states = {}
-    for i, s in ipairs(project.sessions) do states[i] = live.state_of(live_map, s.id) end
+    for i, s in ipairs(project.sessions) do states[i] = state_of(s.id) end
     local rolled = live.rollup(states)
     local pieces = {
       { (is_open and icons.open or icons.closed) .. ' ' .. icons.project .. ' ' },
@@ -65,6 +67,7 @@ function M.build(projects, live_map, expanded, now, icons, projects_dir)
     add(pieces, { type = 'project', project = project })
 
     if is_open then
+      add({ { '    ' .. (icons.new or '+') .. ' New session' } }, { type = 'new', project = project })
       local key = project.key .. '/sessions'
       local sec_open = expanded[key] ~= false
       add({ { '  ' .. (sec_open and icons.open or icons.closed) .. ' Sessions (' .. #project.sessions .. ')', 'AgentIdeSection' } },

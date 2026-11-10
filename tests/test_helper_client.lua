@@ -191,7 +191,7 @@ T['drawer and history lines are byte-identical between backends'] = function()
     local expanded = {}
     for _, p in ipairs(projects) do expanded[p.key] = true end
     local icons = { open = 'v', closed = '>', project = 'P', waiting = 'W', busy = 'B', idle = 'I', parked = '.' }
-    local drawer = tree.build(projects, {}, expanded, 1700000000 + 7200, icons, root).lines
+    local drawer = tree.build(projects, function() return 'parked' end, expanded, 1700000000 + 7200, icons, root).lines
     local paths = vim.tbl_map(function(m) return m.path end, sessions)
     table.sort(paths)
     local hist = {}

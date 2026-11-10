@@ -9,8 +9,14 @@ local function defaults()
     helper = { enabled = true, path = nil }, -- nil: <plugin root>/helper/target/release/agent-ide-helper
     claude = { cmd = { 'claude' }, strip_api_key = true, model = nil },
     tcd = true,
-    keys = { toggle = '<leader>aa' }, -- false disables the mapping
-    icons = { open = '▾', closed = '▸', project = '', waiting = '◐', busy = '●', idle = '○', parked = '·' },
+    -- false disables a mapping
+    keys = {
+      toggle = '<leader>aa',
+      -- chat view, buffer-local in the transcript and the prompt
+      chat = { send = '<C-CR>', send_alt = '<leader><CR>', interrupt = '<C-c>', prompt = '<leader>ap', help = '?' },
+    },
+    icons = { open = '▾', closed = '▸', project = '', waiting = '◐', busy = '●', idle = '○', parked = '·',
+      done = '✔', failed = '✖', new = '+' },
   }
 end
 
