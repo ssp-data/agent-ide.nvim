@@ -12,17 +12,21 @@ local M = {}
 local View = {}
 View.__index = View
 
-local function render_range(events, first, last, lines, levels)
+-- `marks`: the answer-start lines (1-based, relative to `lines`) of what was rendered.
+local function render_range(events, first, last, lines, levels, marks)
   if last < first then return end
   local out = render.render(vim.list_slice(events, first, last))
   local lv = render.fold_levels(out.folds, #out.lines)
+  local base = #lines
   vim.list_extend(lines, out.lines)
   vim.list_extend(levels, lv)
+  for _, a in ipairs(out.answers) do marks[#marks + 1] = base + a end
 end
 
 ---Replace the buffer lines from `row` (0-based) on, where the view last wrote `old`/`old_lv`,
----with `new`/`new_lv`; only lines from the first difference in text or level are written.
-function View:write(row, old, old_lv, new, new_lv)
+---with `new`/`new_lv`; only lines from the first difference in text or level are written, and
+---the answer marks (`new_marks`, 1-based in `new`) of the rewritten part are set again.
+function View:write(row, old, old_lv, new, new_lv, new_marks)
   local k = 1
   while k <= #old and k <= #new and old[k] == new[k] and old_lv[k] == new_lv[k] do k = k + 1 end
   if k > #old and k > #new then return end
@@ -35,6 +39,9 @@ function View:write(row, old, old_lv, new, new_lv)
   local empty = start == 0 and k > #new
   api.nvim_buf_set_lines(buf, start, -1, false, empty and { '' } or vim.list_slice(new, k))
   vim.bo[buf].modifiable = false
+  local abs = {}
+  for _, m in ipairs(new_marks or {}) do abs[#abs + 1] = row + m end
+  history.mark_answers(buf, start + 1, abs)
 end
 
 ---Windows showing the buffer whose cursor is on its last line, or on a closed fold that
@@ -61,10 +68,12 @@ function View:follow(wins)
 end
 
 ---Lines of the streaming answer as they will read once it is a `text` event, without the
----trailing blank line `render` adds after it.
+---trailing blank line `render` adds after it, and the index of its first text line (the
+---answer mark; nil while nothing streams).
+---@return string[] lines, integer|nil mark
 function View:stream_lines()
   local s = self.s
-  if s.streaming == '' then return {} end
+  if s.streaming == '' then return {}, nil end
   if self.header == nil then
     -- the lines `render` puts between the turn and an answer appended to it (the `## Claude`
     -- header after a prompt): render the turn with an empty text appended and take what lies
@@ -78,7 +87,8 @@ function View:stream_lines()
   local lines = vim.list_slice(self.header)
   local body = render.render({ { kind = 'text', text = s.streaming } }).lines
   body[#body] = nil
-  return vim.list_extend(lines, body)
+  local mark = #body > 0 and #lines + 1 or nil
+  return vim.list_extend(lines, body), mark
 end
 
 local function zeros(n)
@@ -96,21 +106,24 @@ function View:sync_events()
   end
   self.seen = #events
   -- completed turns (rendered for the last time) then the current one
-  local lines, levels = {}, {}
-  render_range(events, self.start, start - 1, lines, levels)
+  local lines, levels, marks = {}, {}, {}
+  render_range(events, self.start, start - 1, lines, levels, marks)
   local done = #lines
-  render_range(events, start, #events, lines, levels)
+  render_range(events, start, #events, lines, levels, marks)
   local below = vim.list_extend(vim.list_slice(self.stream), self.tail)
   local old = vim.list_extend(vim.list_slice(self.turn), below)
   local old_lv = vim.list_extend(vim.list_slice(self.turn_lv), zeros(#below))
   self.start, self.header = start, nil
   self.turn, self.turn_lv = vim.list_slice(lines, done + 1), vim.list_slice(levels, done + 1)
-  self.stream, self.tail = self:stream_lines(), ask.lines(self.s)
+  local stream_mark
+  self.stream, stream_mark = self:stream_lines()
+  self.tail = ask.lines(self.s)
+  if stream_mark then marks[#marks + 1] = #lines + stream_mark end
   below = vim.list_extend(vim.list_slice(self.stream), self.tail)
   vim.list_extend(lines, below)
   vim.list_extend(levels, zeros(#below))
   local follow = self:followers()
-  self:write(self.offset, old, old_lv, lines, levels)
+  self:write(self.offset, old, old_lv, lines, levels, marks)
   self:close_new_folds(self.offset, old_lv, levels)
   self:follow(follow)
   self.offset = self.offset + done
@@ -143,11 +156,12 @@ end
 
 -- Rewrite what lies below the current turn: the streaming lines and the ask lines.
 function View:sync_below()
-  local stream, tail = self:stream_lines(), ask.lines(self.s)
+  local stream, mark = self:stream_lines()
+  local tail = ask.lines(self.s)
   local old = vim.list_extend(vim.list_slice(self.stream), self.tail)
   local new = vim.list_extend(vim.list_slice(stream), tail)
   local follow = self:followers()
-  self:write(self.offset + #self.turn, old, zeros(#old), new, zeros(#new))
+  self:write(self.offset + #self.turn, old, zeros(#old), new, zeros(#new), mark and { mark } or {})
   self:follow(follow)
   self.stream, self.tail = stream, tail
 end

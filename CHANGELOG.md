@@ -40,6 +40,7 @@ First public version.
 - Every drawer key is configurable under `keys.drawer` (a key, a list of keys, or `false`).
 - The legend toggle (`gL`, `<leader>aL`) is remembered across restarts (`prefs.json`).
 - The prompt window wraps long lines (`wrap`, `linebreak`).
+- Claude's own text in a transcript starts with a `●` (`AgentIdeAnswerMark`, virtual text), so what it tells you stands out from the tool folds, also while it streams and in the search preview.
 
 ### Changed
 

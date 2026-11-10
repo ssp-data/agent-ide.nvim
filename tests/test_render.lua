@@ -205,4 +205,25 @@ T['answer and prompt lines are cut only above 20000 bytes'] = function()
   eq(#r.lines, 9)
 end
 
+
+T['answers: the first line of every main-thread text event; a subagent text is not one'] = function()
+  local out = render.render({
+    { kind = 'prompt', text = 'hi' },
+    { kind = 'text', text = 'I will look.\n\nTwo paragraphs.' },
+    { kind = 'tool_call', id = 'a', name = 'Bash', input = { command = 'ls' } },
+    { kind = 'tool_result', id = 'a', text = 'x' },
+    { kind = 'text', text = 'Found it.' },
+    { kind = 'text', text = '', sidechain = true },
+    { kind = 'text', text = 'sub', sidechain = true },
+    { kind = 'text', text = '' },
+    { kind = 'prompt', text = 'again' },
+    { kind = 'text', text = 'Sure.' },
+  })
+  local lines = out.lines
+  local starts = {}
+  for _, l in ipairs(out.answers) do starts[#starts + 1] = lines[l] end
+  eq(starts, { 'I will look.', 'Found it.', 'Sure.' })
+  eq(#out.answers, 3)
+end
+
 return T

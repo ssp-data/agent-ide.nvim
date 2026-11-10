@@ -106,12 +106,13 @@ end
 SEQ.turns300 = many_turns(300)
 
 local function concat_turns(events)
-  local lines, folds = {}, {}
+  local lines, folds, answers = {}, {}, {}
   local seg = {}
   local function flush()
     if #seg == 0 then return end
     local r = render.render(seg)
     for _, f in ipairs(r.folds) do folds[#folds + 1] = { first = f.first + #lines, last = f.last + #lines } end
+    for _, a in ipairs(r.answers) do answers[#answers + 1] = a + #lines end
     vim.list_extend(lines, r.lines)
     seg = {}
   end
@@ -120,7 +121,7 @@ local function concat_turns(events)
     seg[#seg + 1] = ev
   end
   flush()
-  return { lines = lines, folds = folds }
+  return { lines = lines, folds = folds, answers = answers }
 end
 
 T['render is compositional over turns'] = function()
@@ -512,6 +513,52 @@ T['300 turns: delta under 2 ms, events under 5 ms'] = function()
   expect_full(buf, s)
   eq(delta < 2, true)
   eq(events < 5, true)
+end
+
+
+T['answer marks: a ● before every text block, the streaming one included; none duplicated by rewrites'] = function()
+  local s, buf = stub(), new_buf()
+  local view = live_render.attach(buf, s)
+  api.nvim_set_current_buf(buf)
+  local history = require('agent-ide.ui.history')
+  local function marked()
+    local out = {}
+    for _, l in ipairs(history.answer_marks(buf)) do out[#out + 1] = api.nvim_buf_get_lines(buf, l - 1, l, false)[1] end
+    return out
+  end
+  push(s, { kind = 'prompt', text = 'one' })
+  push(s, { kind = 'text', text = 'Looking.' })
+  view:sync('events')
+  eq(marked(), { 'Looking.' })
+  s.streaming = 'Str'
+  view:sync('delta')
+  eq(marked(), { 'Looking.', 'Str' })
+  s.streaming = 'Streamed text'
+  view:sync('delta')
+  eq(marked(), { 'Looking.', 'Streamed text' })
+  s.streaming = ''
+  push(s, { kind = 'text', text = 'Streamed text.' })
+  push(s, { kind = 'tool_call', id = 'a', name = 'Bash', input = { command = 'ls' } })
+  view:sync('events')
+  eq(marked(), { 'Looking.', 'Streamed text.' })
+  push(s, { kind = 'tool_result', id = 'a', text = 'r' })
+  push(s, { kind = 'text', text = 'Done.' })
+  view:sync('events')
+  eq(marked(), { 'Looking.', 'Streamed text.', 'Done.' })
+  push(s, { kind = 'prompt', text = 'two' })
+  push(s, { kind = 'text', text = 'Again.' })
+  view:sync('events')
+  eq(marked(), { 'Looking.', 'Streamed text.', 'Done.', 'Again.' })
+  eq(#history.answer_marks(buf), 4)
+  -- a reload from disk: the same marks, once
+  view:sync('reset')
+  eq(marked(), { 'Looking.', 'Streamed text.', 'Done.', 'Again.' })
+  eq(#history.answer_marks(buf), 4)
+  -- the mark is virtual text in the idle colour; the buffer text has no ●
+  local m = api.nvim_buf_get_extmarks(buf, api.nvim_create_namespace('agent-ide.history.answers'), 0, -1, { details = true })[1]
+  eq(m[4].virt_text, { { '● ', 'AgentIdeAnswerMark' } })
+  eq(m[4].virt_text_pos, 'inline')
+  for _, l in ipairs(api.nvim_buf_get_lines(buf, 0, -1, false)) do eq(l:find('●', 1, true), nil) end
 end
 
 return T

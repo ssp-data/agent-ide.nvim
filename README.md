@@ -308,7 +308,7 @@ In the chat (transcript and prompt buffer, unless noted):
 | `:q!` | Prompt: hide the window and discard the draft |
 | `g?` | Help, filterable (`?` stays Vim's backward search) |
 
-The history buffer is markdown with folds for tool calls, results and thinking. Anything the viewer does not understand is shown as a fold marked `unknown`, never dropped, and truncated output says how many lines are hidden.
+The history buffer is markdown with folds for tool calls, results and thinking. Claude's own words, an answer or a remark between two tool calls, start with a `●` in the idle green (`AgentIdeAnswerMark`; virtual text, so yanks and the `ir` / `ar` text objects copy the words only), while it streams too. Anything the viewer does not understand is shown as a fold marked `unknown`, never dropped, and truncated output says how many lines are hidden.
 
 ### Help
 
