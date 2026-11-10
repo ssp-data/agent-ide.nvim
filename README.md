@@ -151,6 +151,7 @@ require('agent-ide').setup({
       -- native: continue in native Claude in a tmux pane; a typed key (gT) works in the transcript
       -- only, since the prompt buffer is where you edit text (gT stays Vim's there)
       native = { 'gT', '<leader>aT' },
+      queue = { 'Q', '<leader>aQ' }, -- the queue panel (Q is Ex mode, which the prompt buffer does not need)
       save_library = '<leader>W', prompts = '<leader>al' },
     -- diff view, on both sides; a one-character key (q, ?, R) only on the left side, since the
     -- right side is your own file, where they stay macro recording, search and Replace mode
@@ -305,6 +306,7 @@ In the chat (transcript and prompt buffer, unless noted):
 | `@` | Prompt, at line start or after a space (not in a code fence): pick a file to attach at that spot |
 | `<leader>al` | Pick a prompt: saved prompts, library, Claude's commands and skills |
 | `<leader>W` | Prompt: save it to the library (asks for a name; `group/name` makes a folder) |
+| `Q`, `<leader>aQ` | Show or hide the queue panel (see [Queue panel](#queue-panel)) |
 | `:w`, `:x`, `ZZ` | Prompt: save it (see [Prompts](#prompts)); `:x` and `ZZ` then hide the window |
 | `za` | Toggle fold |
 | `:q` | Prompt: hide the window; the draft stays |
@@ -326,6 +328,8 @@ Open a session from the drawer, or start one with `+ New session` under a projec
 **Drafts.** What you type in a prompt buffer is also kept on disk, so a prompt closed by accident or a Neovim that dies does not lose it: `stdpath('state')/agent-ide/drafts/<session id>.md` (a small frontmatter with the session id and project folder, then the text as typed), written half a second after a change and when you leave the buffer or Neovim. A successful send, `:q!` (the explicit discard) and deleting the session remove it. When a session's prompt opens again the draft comes back with a notice. `+ New session` takes over the newest draft an earlier Neovim left for an unsent new session of that project, so a draft of a session that never got a prompt is not lost either.
 
 **While Claude works.** Answers stream into the transcript. A prompt sent while a turn runs is queued by the plugin and sent after that turn, in order. `<C-c>` interrupts the turn and puts the queued prompts back into the prompt buffer.
+
+**Queue panel.** `Q` opens a narrow window left of the transcript with the session's prompts as a timeline: the last five you sent (dim, `✓`), the one Claude works on (`◐`, or `●` while it waits for you) and the ones queued behind it, numbered. It never takes the focus, follows the chat when you open another session, and redraws as prompts go out. In the panel, `<CR>` on a sent or running prompt puts the transcript cursor on it and `<CR>` on a queued one focuses the prompt buffer; `x` takes a queued prompt out of the queue, back into the prompt buffer above your draft; `q` closes it, `g?` lists its keys.
 
 **Permissions, questions and plans.** When Claude asks to use a tool, the ask shows at the end of the transcript and in the drawer, and a picker opens with Allow, Deny and the suggestions Claude made (switch the mode for this session, or always allow a rule; offered only where Claude saves it in this project's local settings, and labelled so). The picker opens only when you are in that session's chat in normal mode. Nothing ever interrupts you: an ask from another session never opens a popup, moves the cursor or takes focus; it shows in the drawer and in the footer, and `<leader>an` takes you there. While you type in the same session's prompt, a one-line hint appears instead; `<leader>ay` opens the picker. Questions Claude asks (multiple choice) are answered the same way, one picker per question; a multi-select question takes one option per round until you pick Done choosing. A plan from plan mode can be approved, approved with edits accepted for the rest of the session, or sent back with Keep planning. A soft two-note chime plays when a session of this Neovim starts waiting for you (at most once every two seconds), through `pw-play`, `paplay`, `aplay` or `afplay`, whichever is installed, or the player you set in `sound.cmd`; `sound = { waiting = false }` turns it off. The chime is a small WAV the plugin writes once to `stdpath('cache')/agent-ide/chime.wav`.
 

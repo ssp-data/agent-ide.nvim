@@ -47,6 +47,7 @@ defaults = function()
         park = '<leader>ax', -- park: stop the session's Claude process (the next send resumes)
         diff = { 'gd', '<leader>gd' },
         save_library = '<leader>W', -- prompt: save the prompt to the library (asks for a name)
+        queue = { 'Q', '<leader>aQ' }, -- show or hide the queue panel (Q: Ex mode, which the prompt does not need)
         prompts = '<leader>al' }, -- pick a prompt (skills, commands, library, saved)
       -- diff view, buffer-local on both sides; a one-character key (q, ?, R) only on the plugin's
       -- side, since the right side is your own file (there: macro, search, Replace stay yours).

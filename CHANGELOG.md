@@ -40,6 +40,7 @@ First public version.
 - Every drawer key is configurable under `keys.drawer` (a key, a list of keys, or `false`).
 - The legend toggle (`gL`, `<leader>aL`) is remembered across restarts (`prefs.json`).
 - The prompt window wraps long lines (`wrap`, `linebreak`).
+- **Queue panel** (`Q` in the chat): the session's prompts as a timeline, sent, running and queued; `x` takes a queued prompt back into the prompt buffer, `<CR>` jumps to a sent one in the transcript.
 - A soft two-note chime when a session needs you (`sound = { waiting = true, cmd = nil }`; played through pw-play, paplay, aplay or afplay).
 - Claude's own text in a transcript starts with a `●` (`AgentIdeAnswerMark`, virtual text), so what it tells you stands out from the tool folds, also while it streams and in the search preview.
 

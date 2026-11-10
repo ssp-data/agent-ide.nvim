@@ -475,6 +475,8 @@ function M.open(s, project)
   windows.tcd(twin, c.project)
   load(c, fresh)
   update_visible()
+  local queue = package.loaded['agent-ide.ui.queue']
+  if queue then queue.follow(s) end -- an open queue panel shows this session now
 end
 
 ---Focus the prompt of the chat of `s` (its window reopened when hidden), optionally in insert

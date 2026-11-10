@@ -27,6 +27,7 @@ A Neovim plugin that manages Claude Code sessions from inside Neovim: a drawer w
 | `lua/agent-ide/prompts/` | prompt library, skills and commands, saved prompts |
 | `lua/agent-ide/ui/` | drawer, chat, prompt, permission, diff, graph, search picker, help palette, highlights, icons |
 | `lua/agent-ide/ui/drafts.lua` | the prompt buffer's text kept in `drafts/<session id>.md`, brought back when the prompt opens |
+| `lua/agent-ide/ui/queue.lua` | the queue panel (`Q`): prompts sent, running and queued, left of the transcript |
 | `lua/agent-ide/ui/drawer_legend.lua`, `drawer_session_keys.lua` | the drawer's legend of state marks (`gL`, remembered in `prefs.json`); the chat's keys on a session row |
 | `lua/agent-ide/ui/graph.lua`, `graph_render.lua`, `graph_keys.lua`, `graph_context.lua` | commit graph: window, pure lane layout, keys, which repository |
 | `lua/agent-ide/ui/tmux_close.lua`, `tmux_verify.lua` | closing a Claude in a tmux pane (`X`, `:AgentsCloseIdle`); the checks before any key is typed |
