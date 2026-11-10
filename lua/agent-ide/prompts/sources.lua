@@ -43,7 +43,7 @@ local function fields(block)
   while i <= #lines do
     local line = lines[i]:gsub('\r$', '')
     local key, value = line:match('^([%w_%-]+)%s*:%s*(.-)%s*$')
-    if (key == 'name' or key == 'description') and out[key] == nil then
+    if (key == 'name' or key == 'title' or key == 'description') and out[key] == nil then
       if value:match('^[>|][%+%-]?%d*$') then
         local parts = {}
         while i < #lines and (lines[i + 1]:match('^%s') or lines[i + 1]:gsub('\r$', '') == '') do
@@ -98,7 +98,7 @@ function M.parse(text, opts)
         local stop = nl or #text
         if yaml and not yaml_like(text:sub(from, pos - 1)) then return { body = text } end
         local f = fields(text:sub(from, pos - 1))
-        return { name = f.name, description = f.description, body = text:sub(stop + 1), frontmatter = text:sub(1, stop) }
+        return { name = f.name, title = f.title, description = f.description, body = text:sub(stop + 1), frontmatter = text:sub(1, stop) }
       end
       if not nl then break end
       pos = nl + 1
@@ -136,9 +136,9 @@ local function pretty(file) return (file:gsub('%.md$', ''):gsub('[-_]+', ' ')) e
 
 local function stamp(st) return st and (st.mtime.sec .. '.' .. st.mtime.nsec .. ':' .. st.size) or '' end
 
----Text of a template (without a YAML frontmatter block) or a saved prompt (the whole file:
----the plugin never writes frontmatter, so a leading `---` block is the user's text), byte for
----byte.
+---Text of a template or saved prompt: the whole file, byte for byte. A leading `---` block is
+---part of the prompt (it may be a skill-style definition meant for the agent); its `name` and
+---`description` are only read for display (see `make`).
 ---@param entry table PromptEntry
 ---@param cb fun(text: string|nil, err: string|nil)
 function M.read(entry, cb)
@@ -149,8 +149,7 @@ function M.read(entry, cb)
   if not f then return cb(nil, 'cannot read the file') end
   local text = f:read('a') or ''
   f:close()
-  if entry.kind == 'saved' then return cb(text) end
-  cb(M.parse(text, { yaml = true }).body)
+  cb(text)
 end
 
 -- Scan -------------------------------------------------------------------------------------
@@ -183,12 +182,9 @@ local function make(src, path, rel, known)
   if old and old.stamp == st and old.kind == src.kind and old.scope == src.scope then return old end
   local head = read_head(path)
   if not head then return nil end
-  local p
-  if src.kind == 'saved' then
-    p = { body = head }
-  else
-    p = M.parse(head, { yaml = src.kind == 'template' })
-  end
+  -- templates and saved prompts: a YAML-like block only gives the title and description shown
+  -- in the drawer and picker; the text itself is never cut (see `read`)
+  local p = M.parse(head, { yaml = src.kind == 'template' or src.kind == 'saved' })
   local e = { kind = src.kind, path = path, scope = src.scope, stamp = st, description = p.description }
   if src.kind == 'command' then
     e.name = rel:gsub('%.md$', ''):gsub('/', ':')
@@ -202,7 +198,7 @@ local function make(src, path, rel, known)
     local dir = vim.fs.dirname(rel)
     e.group = (dir ~= '.' and dir ~= '') and dir or nil
     e.name = rel:gsub('%.md$', '')
-    e.title = p.name or first_heading(p.body) or pretty(vim.fs.basename(rel))
+    e.title = p.name or p.title or first_heading(p.body) or pretty(vim.fs.basename(rel))
   end
   return e
 end

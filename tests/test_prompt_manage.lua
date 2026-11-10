@@ -142,8 +142,8 @@ T['y yanks the text to the unnamed and + registers'] = function()
   start()
   on_row('Invoice text')
   child.type_keys('y')
-  eq(child.lua_get('vim.fn.getreg(\'"\')'), 'Please write an invoice text for [client].\n')
-  eq(child.lua_get('_G.clip'), { 'Please write an invoice text for [client].', '' })
+  eq(child.lua_get('vim.fn.getreg(\'"\')'), '---\nname: Invoice text\ndescription: Short invoice text for a client\n---\nPlease write an invoice text for [client].\n')
+  eq(child.lua_get('_G.clip'), { '---', 'name: Invoice text', 'description: Short invoice text for a client', '---', 'Please write an invoice text for [client].', '' })
   eq(last_note(), 'Agent-IDE: yanked Invoice text')
 end
 

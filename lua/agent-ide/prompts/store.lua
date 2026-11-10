@@ -212,17 +212,6 @@ function M.replace(path, text)
   return true
 end
 
----Frontmatter bytes of the file at `path` (kept when its text is updated); '' when none.
----@param path string
----@return string
-function M.frontmatter_of(path)
-  local f = io.open(path, 'rb')
-  if not f then return '' end
-  local text = f:read('a') or ''
-  f:close()
-  return require('agent-ide.prompts.sources').parse(text, { yaml = true }).frontmatter or ''
-end
-
 -- Rename and delete --------------------------------------------------------------------------------
 
 local function claude_owned(e) return e.kind == 'command' or e.kind == 'skill' end

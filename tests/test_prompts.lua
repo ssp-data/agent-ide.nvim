@@ -135,14 +135,14 @@ T['folders given as a string are one folder'] = function()
   eq(by(e, 'insert', '/dataviz-pro') ~= nil, true)
 end
 
-T['read: the body without frontmatter, byte for byte; a gone file'] = function()
+T['read: the whole file, byte for byte; a gone file'] = function()
   local got
   sources.read({ path = FIX .. '/library/writing/linkedin-post.md' }, function(t) got = t end)
   eq(got, '# LinkedIn post\n\nWrite a LinkedIn post about:\n\t- topic\nwith trailing spaces   \n')
   sources.read({ path = FIX .. '/library/writing/social/tweet.md' }, function(t) got = t end)
   eq(got, 'Write a tweet about [topic].')
   sources.read({ path = FIX .. '/library/invoice.md' }, function(t) got = t end)
-  eq(got, 'Please write an invoice text for [client].\n')
+  eq(got, '---\nname: Invoice text\ndescription: Short invoice text for a client\n---\nPlease write an invoice text for [client].\n') -- the whole file: a frontmatter block is part of the prompt
   local err
   sources.read({ path = tmp .. '/gone.md' }, function(t, e) got, err = t, e end)
   eq({ got, err }, { nil, 'file not found' })

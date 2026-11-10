@@ -92,39 +92,54 @@ local function save_fresh(buf, lines)
 end
 
 local CHANGED = '%s changed on disk since it was loaded. Overwrite, save as new, or cancel?'
-local ask
 
-local function save_origin(buf, o, lines)
+-- True when closing the current window ends Neovim (it is the only non-floating window).
+local function last_window()
+  local n = 0
+  for _, w in ipairs(api.nvim_list_wins()) do
+    if api.nvim_win_get_config(w).relative == '' then n = n + 1 end
+  end
+  return n <= 1
+end
+
+local function answer(buf, o, text, write, idx)
+  if not api.nvim_buf_is_valid(buf) then return end
+  if idx == 1 then
+    write()
+  elseif idx == 2 then
+    save_new(buf, o.kind, vim.fs.dirname(o.path), vim.fs.basename(o.path):gsub('%.md$', ''), text)
+  end
+end
+
+-- `closing`: the command hides the prompt (`ZZ`, `:x`, `:wq`).
+local function save_origin(buf, o, lines, closing)
+  -- the file is the buffer text, byte for byte: nothing is kept from the old file or added
   local text = text_of(lines)
   local function write()
-    -- only a library file has frontmatter to keep; a saved prompt is the text, byte for byte
-    local fm = o.kind == 'template' and store.frontmatter_of(o.path) or ''
-    local ok, err = store.replace(o.path, fm .. text)
+    local ok, err = store.replace(o.path, text)
     if not ok then return failed(err) end
     saved(buf, o.kind, o.path)
   end
   if store.stamp(o.path) == o.stamp then return write() end
+  local question = CHANGED:format(M.short(o.kind, o.path))
+  if closing and last_window() then
+    -- Neovim exits right after this command: nothing scheduled would run, so ask now
+    return answer(buf, o, text, write, vim.fn.confirm(question, '&Overwrite\n&Save as new\n&Cancel', 3))
+  end
   -- after the current command: `ZZ` / `:x` / `:wq` hide the prompt first, so an asynchronous
   -- picker's window is not the one they close (the buffer stays valid)
-  vim.schedule(function() ask(buf, o, text, write) end)
-end
-
-function ask(buf, o, text, write)
-  vim.ui.select({ 'Overwrite', 'Save as new', 'Cancel' }, { prompt = CHANGED:format(M.short(o.kind, o.path)) }, function(_, idx)
-    if not api.nvim_buf_is_valid(buf) then return end
-    if idx == 1 then
-      write()
-    elseif idx == 2 then
-      local dir = vim.fs.dirname(o.path)
-      save_new(buf, o.kind, dir, vim.fs.basename(o.path):gsub('%.md$', ''), text)
-    end
+  vim.schedule(function()
+    vim.ui.select({ 'Overwrite', 'Save as new', 'Cancel' }, { prompt = question }, function(_, idx)
+      answer(buf, o, text, write, idx)
+    end)
   end)
 end
 
 ---Save prompt buffer `buf` (`:w` and friends). `quiet`: an empty prompt says nothing (ZZ, :x).
 ---@param buf integer
 ---@param quiet? boolean
-function M.save(buf, quiet)
+---@param closing? boolean the command also hides the prompt (`ZZ`, `:x`, `:wq`)
+function M.save(buf, quiet, closing)
   local lines = lines_of(buf)
   if not has_text(lines) then
     if not quiet then notify('nothing to save') end
@@ -132,7 +147,7 @@ function M.save(buf, quiet)
   end
   local o = store.origin(buf)
   -- a prompt shown from the history is not the loaded file's text
-  if o and not require('agent-ide.ui.prompt').browsing(buf) then return save_origin(buf, o, lines) end
+  if o and not require('agent-ide.ui.prompt').browsing(buf) then return save_origin(buf, o, lines, closing) end
   save_fresh(buf, lines)
 end
 
@@ -172,6 +187,13 @@ local function is_exit(cmd)
   return false
 end
 
+local function is_wq(cmd)
+  for part in (cmd or ''):gmatch('[^|]+') do
+    if part:match("^[%s:%d,;%.%$%%'<>%+%-]*(%a+)") == 'wq' then return true end
+  end
+  return false
+end
+
 local function keys()
   local k = require('agent-ide.config').get().keys
   return type(k) == 'table' and type(k.chat) == 'table' and k.chat or {}
@@ -186,12 +208,12 @@ function M.attach(buf)
     if ev.file ~= '' and ev.file ~= api.nvim_buf_get_name(ev.buf) then
       return notify('the prompt is saved with :w (no file name); see ? for the keys', vim.log.levels.WARN)
     end
-    local ok, err = pcall(M.save, ev.buf, is_exit(last_cmd))
+    local ok, err = pcall(M.save, ev.buf, is_exit(last_cmd), is_exit(last_cmd) or is_wq(last_cmd))
     if not ok then failed(err) end
   end })
   api.nvim_create_autocmd('QuitPre', { buffer = buf, callback = function(ev)
     if not is_exit(last_cmd) or api.nvim_get_current_buf() ~= ev.buf then return end
-    local ok, err = pcall(M.save, ev.buf, true)
+    local ok, err = pcall(M.save, ev.buf, true, true)
     if not ok then failed(err) end
   end })
   -- `:file name` / `:saveas name` would make it a file buffer: the name is put back
@@ -207,7 +229,7 @@ function M.attach(buf)
     notify('the prompt buffer keeps its name; save it with :w', vim.log.levels.WARN)
   end })
   vim.keymap.set('n', 'ZZ', function()
-    local ok, err = pcall(M.save, buf, true)
+    local ok, err = pcall(M.save, buf, true, true)
     if not ok then failed(err) end
     vim.cmd('normal! ZZ')
   end, { buffer = buf, nowait = true, silent = true, desc = 'Agent-IDE: save the prompt and hide it' })

@@ -49,9 +49,13 @@ Where the code (or the brief given at build time) differed from this plan, the c
 - **Review fixes (after merging search).** One function, `prompt.put(buf, lines, how)`, writes
   text into a prompt buffer for the plugin (loading, commands, queued prompts coming back, a
   reused search hit): it leaves history browsing first (`prompt.leave_history`) and forgets the
-  origin. "Already saved" no longer ties the buffer to the existing file. Saved prompts load
-  as the whole file; a library file's leading `---` block counts as frontmatter only when it
-  reads as YAML. The changed-on-disk question is scheduled, so it opens after `ZZ`/`:x` hid
+  origin. "Already saved" no longer ties the buffer to the existing file. Templates and
+  saved prompts are never cut or added to: they load as the whole file and `:w` writes exactly
+  the buffer text (only a missing final newline is added). A leading YAML-like block is read for
+  display only (`name`/`title`, `description` in the drawer and picker); the plan's "text
+  without frontmatter" and "frontmatter kept on update" are dropped, since a prompt may itself
+  start with a frontmatter block. A changed-on-disk question when the prompt is the last window
+  (`ZZ`/`:x`/`:wq` would exit) is asked with `vim.fn.confirm` before Neovim exits. The changed-on-disk question is scheduled, so it opens after `ZZ`/`:x` hid
   the prompt. A rename keeps the origin's old stamp. `:file`/`:saveas` put the name back.
   Command names from sub-folders (`folder:name`) were checked against Claude Code 2.1.306
   (see docs/protocol.md). Drawer focus rescans only what is shown open, reading only changed

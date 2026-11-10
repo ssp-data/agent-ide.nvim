@@ -241,13 +241,13 @@ local function load_invoice()
   wait_for(function() return origin() ~= vim.NIL end, 'loaded')
 end
 
-T['a loaded template is updated in place, its frontmatter kept'] = function()
+T['a loaded template is updated in place: the file is the buffer text, nothing kept or added'] = function()
   start()
   load_invoice()
   in_prompt()
   set_prompt({ 'New invoice text', '' })
   child.cmd('write')
-  eq(read(lib .. '/invoice.md'), '---\nname: Invoice text\ndescription: Short invoice text for a client\n---\nNew invoice text\n\n')
+  eq(read(lib .. '/invoice.md'), 'New invoice text\n\n')
   eq(last_note(), 'Agent-IDE: saved → Library/invoice')
   eq(vim.uv.fs_stat(saved), nil)
 end
@@ -272,7 +272,7 @@ T['changed on disk since it was loaded: overwrite, save as new, or cancel'] = fu
       eq(read(lib .. '/invoice.md'), '---\nname: Changed\n---\nchanged elsewhere\n')
       eq(vim.uv.fs_stat(lib .. '/invoice-2.md'), nil)
     elseif answer == 1 then
-      eq(read(lib .. '/invoice.md'), '---\nname: Changed\n---\nmine\n')
+      eq(read(lib .. '/invoice.md'), 'mine\n')
       -- no question for the next :w: the file is as this buffer left it
       child.cmd('write')
       eq(#child.lua_get('_G.asked'), 1)
@@ -394,7 +394,7 @@ T['queued prompts put back (interrupt, park) make a loaded template a new prompt
   in_prompt()
   child.lua('require("agent-ide.ui.prompt").restore(..., { "queued one" })', { pbuf() })
   eq(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'),
-    { 'queued one', '', 'Please write an invoice text for [client].' })
+    { 'queued one', '', '---', 'name: Invoice text', 'description: Short invoice text for a client', '---', 'Please write an invoice text for [client].' })
   eq(origin(), vim.NIL)
   child.cmd('write')
   eq(read(lib .. '/invoice.md'):find('queued', 1, true), nil)
@@ -451,7 +451,7 @@ T['a command inserted above a loaded template, or a reused search hit, makes it 
   load_invoice()
   child.lua('require("agent-ide.ui.search_open").reuse("from search")')
   eq(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'),
-    { 'Please write an invoice text for [client].', '', 'from search' })
+    { '---', 'name: Invoice text', 'description: Short invoice text for a client', '---', 'Please write an invoice text for [client].', '', 'from search' })
   eq(origin(), vim.NIL)
 end
 
@@ -474,10 +474,64 @@ T['a saved prompt or library file that starts with a --- block is loaded whole a
     child.cmd('write')
     eq(read(c.path), c.text)
   end
-  -- real frontmatter in a library file: still left out
+  -- a real name/description block: shown as title and description, but loaded and saved as is
   child.lua('_G.answers = { 1 }')
   load_invoice()
-  eq(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), { 'Please write an invoice text for [client].' })
+  eq(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), { '---', 'name: Invoice text', 'description: Short invoice text for a client', '---', 'Please write an invoice text for [client].' })
+  child.cmd('write')
+  eq(read(lib .. '/invoice.md'), '---\nname: Invoice text\ndescription: Short invoice text for a client\n---\nPlease write an invoice text for [client].\n')
+  local e = child.lua_get([[(function(dir)
+    local got
+    require('agent-ide.prompts.sources').scan({ library_dir = dir }, function(x) got = x end)
+    vim.wait(5000, function() return got ~= nil end, 5)
+    for _, x in ipairs(got) do if x.path:find('invoice.md', 1, true) then return { x.title, x.description } end end
+  end)(...)]], { lib })
+  eq(e, { 'Invoice text', 'Short invoice text for a client' })
+end
+
+T['<leader>W with a leading --- block, then :w twice: the file is the buffer text, the block once'] = function()
+  start()
+  in_prompt()
+  local text = { '---', '- do this', 'key: value', '---', 'body' }
+  set_prompt(text)
+  child.lua('_G.typed = { "blocky" }')
+  child.type_keys('\\W')
+  eq(read(lib .. '/blocky.md'), table.concat(text, '\n') .. '\n')
+  text[5] = 'body edited'
+  set_prompt(text)
+  child.cmd('write')
+  eq(read(lib .. '/blocky.md'), table.concat(text, '\n') .. '\n')
+  child.cmd('write')
+  eq(read(lib .. '/blocky.md'), table.concat(text, '\n') .. '\n')
+  local _, n = read(lib .. '/blocky.md'):gsub('key: value', '')
+  eq(n, 1)
+  -- loading it again gives the same text
+  child.lua('require("agent-ide.ui.prompt").clear(...)', { pbuf() })
+  child.lua([[require('agent-ide.prompts.actions').use({ kind = 'template', path = ..., title = 'b' })]], { lib .. '/blocky.md' })
+  wait_for(function() return origin() ~= vim.NIL end, 'loaded')
+  eq(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), text)
+end
+
+T['changed on disk and the prompt is the last window: ZZ asks before Neovim exits'] = function()
+  start()
+  load_invoice()
+  in_prompt()
+  child.cmd('tabonly')
+  child.cmd('only')
+  eq(child.lua_get('#vim.api.nvim_list_wins()'), 1)
+  vim.uv.sleep(20)
+  vim.fn.writefile({ 'changed elsewhere' }, lib .. '/invoice.md')
+  set_prompt({ 'mine' })
+  child.lua([[local out = ...
+  vim.fn.confirm = function(msg, choices)
+    vim.fn.writefile({ msg, choices }, out)
+    return 1
+  end]], { tmp .. '/asked.txt' })
+  pcall(child.type_keys, 'ZZ')
+  wait_for(function() return not pcall(child.lua_get, '1') end, 'Neovim to exit', 3000)
+  eq(vim.fn.readfile(tmp .. '/asked.txt'), { 'Library/invoice changed on disk since it was loaded. Overwrite, save as new, or cancel?',
+    '&Overwrite\n&Save as new\n&Cancel' })
+  eq(read(lib .. '/invoice.md'), 'mine\n')
 end
 
 local function async_select()

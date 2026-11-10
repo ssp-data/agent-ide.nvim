@@ -135,9 +135,9 @@ T['Enter on a template loads it byte for byte and remembers where it came from']
   child.lua('_G.answers = { 1 }')
   on_row('Invoice text')
   child.type_keys('<CR>')
-  eq(prompt_lines(), { 'Please write an invoice text for [client].' })
+  eq(prompt_lines(), { '---', 'name: Invoice text', 'description: Short invoice text for a client', '---', 'Please write an invoice text for [client].' })
   local sent = child.lua_get('require("agent-ide.ui.prompt").text_to_send(vim.api.nvim_buf_get_lines(..., 0, -1, false))', { prompt_buf() })
-  eq(sent, 'Please write an invoice text for [client].')
+  eq(sent, '---\nname: Invoice text\ndescription: Short invoice text for a client\n---\nPlease write an invoice text for [client].')
 end
 
 T['a draft is never thrown away without asking: replace, insert above, cancel'] = function()
@@ -157,9 +157,9 @@ T['a draft is never thrown away without asking: replace, insert above, cancel'] 
   eq(pick(3), { 'my draft', '  kept  ' })
   eq(origin(), vim.NIL)
   eq(pick(false), { 'my draft', '  kept  ' }) -- <Esc> in the menu
-  eq(pick(2), { 'Please write an invoice text for [client].', '', 'my draft', '  kept  ' })
+  eq(pick(2), { '---', 'name: Invoice text', 'description: Short invoice text for a client', '---', 'Please write an invoice text for [client].', '', 'my draft', '  kept  ' })
   eq(origin(), vim.NIL) -- the mix is not that template: :w saves it as a new prompt
-  eq(pick(1), { 'Please write an invoice text for [client].' })
+  eq(pick(1), { '---', 'name: Invoice text', 'description: Short invoice text for a client', '---', 'Please write an invoice text for [client].' })
   eq(origin().kind, 'template')
   -- a blank-only buffer is no draft
   set_prompt({ '', '   ', '' })
