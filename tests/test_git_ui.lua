@@ -652,4 +652,50 @@ T['R in the diff view reloads the list; opening a diff sets the tab directory to
   wait_for(function() return view().n == 6 end, 'R refresh')
 end
 
+T['gd inside a subagent fold: a nested Edit opens its file, a look-alike in a nested Write body does not'] = function()
+  write_session({
+    vim.json.encode({ type = 'assistant', uuid = 's1', cwd = repo, isSidechain = true, message = { role = 'assistant', content = {
+      { type = 'tool_use', id = 'n1', name = 'Write', input = { file_path = repo .. '/u.txt',
+        content = 'untracked\n▸ Edit: ' .. repo .. '/a.lua' } },
+    } } }),
+    vim.json.encode({ type = 'assistant', uuid = 's2', cwd = repo, isSidechain = true, message = { role = 'assistant', content = {
+      { type = 'tool_use', id = 'n2', name = 'Edit', input = { file_path = repo .. '/a.lua', old_string = 'a', new_string = 'b' } },
+    } } }),
+  })
+  start()
+  child.lua('require("agent-ide").toggle()')
+  press_on('P r  ')
+  press_on('Work on it')
+  local lines
+  wait_for(function()
+    lines = child.lua_get('vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().transcript), 0, -1, false)')
+    return has_line(lines, '▸ subagent (') ~= nil
+  end, 'subagent fold')
+  local function gd_at(row)
+    child.lua([[vim.api.nvim_set_current_win(require("agent-ide.ui.chat")._windows().transcript)
+      vim.cmd('normal! zR')
+      vim.api.nvim_win_set_cursor(0, { ..., 0 })]], { row })
+    child.type_keys('gd')
+  end
+  local function find(text)
+    for i, l in ipairs(lines) do
+      if l == text then return i end
+    end
+    error('no line ' .. text)
+  end
+  -- the look-alike inside the nested Write body resolves to the Write's file, never to a.lua
+  gd_at(find('│ │ ▸ Edit: ' .. repo .. '/a.lua'))
+  wait_for(function() local v = view(); return v ~= vim.NIL and v.path == 'u.txt' end, 'diff of the Write file')
+  child.type_keys('q')
+  wait_for(function() return view() == vim.NIL end, 'closed')
+  -- the nested Edit's own header and a line of its body
+  local edit = find('│ ▸ Edit: ' .. repo .. '/a.lua')
+  gd_at(edit + 1)
+  wait_for(function() local v = view(); return v ~= vim.NIL and v.path == 'a.lua' end, 'diff of the nested Edit')
+  child.type_keys('q')
+  wait_for(function() return view() == vim.NIL end, 'closed again')
+  gd_at(edit)
+  wait_for(function() local v = view(); return v ~= vim.NIL and v.path == 'a.lua' end, 'nested Edit header')
+end
+
 return T

@@ -84,7 +84,6 @@ function M.set_lines(buf, lines)
   vim.bo[buf].modifiable = false
 end
 
----Stored fold levels of `buf` (tests).
 ---Per-line fold levels of transcript `buf` ('>1' starts a fold), or nil for other buffers.
 ---@param buf integer
 ---@return string[]|nil
@@ -92,6 +91,7 @@ function M.levels(buf)
   return bufs[buf] and bufs[buf].levels
 end
 
+---Stored fold levels of `buf` (tests).
 function M._levels(buf)
   return bufs[buf] and bufs[buf].levels
 end
