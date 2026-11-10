@@ -78,16 +78,42 @@ end
 
 -- Choices ----------------------------------------------------------------------------------
 
----Extra choices for Claude's suggestions, by suggestion type. Only `setMode` is offered: allow,
----then `set_permission_mode` (a request shape the protocol notes record). Other types, `addRules`
----("always allow <rule>") among them, are left out until the shape for sending a suggestion
----back with the answer is verified against real Claude; add them to this table then.
+-- Where Claude saves an `addRules` suggestion, by its `destination` (docs/protocol.md). A
+-- destination not listed here is not offered: its label could not say where the rule goes.
+local RULE_DESTINATIONS = {
+  session = ' in this session',
+  localSettings = ' (saved to .claude/settings.local.json in this project)',
+  projectSettings = ' (saved to .claude/settings.json in this project)',
+  userSettings = ' (saved to your user settings, ~/.claude/settings.json)',
+}
+
+local function rule_text(rules)
+  local parts = {}
+  for _, r in ipairs(type(rules) == 'table' and rules or {}) do
+    if type(r) ~= 'table' or type(r.toolName) ~= 'string' then return nil end
+    local content = type(r.ruleContent) == 'string' and r.ruleContent ~= '' and ('(' .. r.ruleContent .. ')') or ''
+    parts[#parts + 1] = first_line(r.toolName .. content)
+  end
+  return #parts > 0 and table.concat(parts, ', ') or nil
+end
+
+---Extra choices for Claude's suggestions, by suggestion type. The suggestion goes back as it
+---came, in the allow answer's `updatedPermissions` (verified against real Claude: a `setMode`
+---switches the mode, an `addRules` rule stops the same ask from coming back). Other types
+---(`addDirectories`, ...) are not offered.
 local SUGGESTION_CHOICES = {
   setMode = function(s, p, sugg)
-    if type(sugg.mode) ~= 'string' then return nil end
+    if type(sugg.mode) ~= 'string' or sugg.destination ~= 'session' then return nil end
     local shown = sugg.mode == 'default' and 'manual' or sugg.mode
     return { label = ('Allow and switch to %s for this session'):format(shown), run = function()
-      if s:answer(p.request_id, true) then s:set_mode(sugg.mode) end
+      s:answer(p.request_id, true, { updated_permissions = { sugg } })
+    end }
+  end,
+  addRules = function(s, p, sugg)
+    local where, rules = RULE_DESTINATIONS[sugg.destination], rule_text(sugg.rules)
+    if sugg.behavior ~= 'allow' or not where or not rules then return nil end
+    return { label = 'Allow and always allow ' .. rules .. where, run = function()
+      s:answer(p.request_id, true, { updated_permissions = { sugg } })
     end }
   end,
 }
@@ -120,14 +146,53 @@ local function ask_permission(s, p, finish)
   select(items, prompt, function(choice) finish(choice == nil, choice) end)
 end
 
+-- Approving a plan can set the mode Claude continues in (sent with the approval).
+local ACCEPT_EDITS = { type = 'setMode', mode = 'acceptEdits', destination = 'session' }
+
 local function ask_plan(s, p, finish)
   select({
     { label = 'Approve plan', run = function() s:answer(p.request_id, true) end },
+    { label = 'Approve plan and accept edits for this session', run = function()
+      s:answer(p.request_id, true, { updated_permissions = { vim.deepcopy(ACCEPT_EDITS) } })
+    end },
     { label = 'Keep planning', run = function() s:answer(p.request_id, false, { message = KEEP_PLANNING }) end },
   }, 'Approve Claude\'s plan?', function(choice) finish(choice == nil, choice) end)
 end
 
----One select per question, in order. Multi-select questions are answered with one choice.
+local DONE = 'Done'
+
+---A multi-select question: one select per round, each offering the options not chosen yet
+---(and Done once something is chosen). `done(labels)` gets the chosen labels in option order,
+---or nil when a round is cancelled.
+local function ask_several(q, items, done)
+  local chosen = {}
+  local prompt = tostring(q.question) .. ' (several: one per round, then Done)'
+  local function picked()
+    local out = {}
+    for _, it in ipairs(items) do
+      if chosen[it.value] then out[#out + 1] = it.value end
+    end
+    return out
+  end
+  local function round()
+    local left, list = {}, picked()
+    if #list > 0 then left[1] = { label = DONE, done = true } end
+    for _, it in ipairs(items) do
+      if not chosen[it.value] then left[#left + 1] = it end
+    end
+    if #left == 1 and left[1].done then return done(list) end -- every option chosen
+    select(left, #list > 0 and (prompt .. ' — chosen: ' .. table.concat(list, ', ')) or prompt, function(choice)
+      if not choice then return done(nil) end
+      if choice.done then return done(picked()) end
+      chosen[choice.value] = true
+      round()
+    end)
+  end
+  round()
+end
+
+---One select per question, in order; a multi-select question takes several rounds. Claude
+---reads a multi-select answer as the chosen labels joined by ", ".
 local function ask_questions(s, p, finish)
   local input = type(p.input) == 'table' and p.input or {}
   local questions = type(input.questions) == 'table' and input.questions or {}
@@ -153,14 +218,17 @@ local function ask_questions(s, p, finish)
       end
     end
     if #items == 0 then return cancel() end
-    local prompt = tostring(q.question) .. (q.multiSelect == true and ' (one choice only)' or '')
-    select(items, prompt, function(choice)
-      if not choice then return cancel() end
+    local function answered(value)
+      if value == nil then return cancel() end
       -- the ask went away while this question was open: say so instead of asking on
       if not is_open(s, p.request_id) then return finish(false, { run = function() end }) end
-      answers[tostring(q.question)] = choice.value
+      answers[tostring(q.question)] = value
       step(i + 1)
-    end)
+    end
+    if q.multiSelect == true then
+      return ask_several(q, items, function(labels) answered(labels and table.concat(labels, ', ')) end)
+    end
+    select(items, tostring(q.question), function(choice) answered(choice and choice.value) end)
   end
   step(1)
 end

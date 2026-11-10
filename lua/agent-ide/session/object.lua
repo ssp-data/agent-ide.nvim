@@ -215,9 +215,12 @@ function Session:set_model(model)
 end
 
 ---Answer an open permission ask (also user questions and plan approvals).
+---`updated_permissions` (with an allow) are permission updates in Claude's suggestion shape
+---(`setMode`, `addRules`, ...) that Claude applies with the answer; a `setMode` among them is
+---pending in `mode_requested` until Claude reports the mode.
 ---@param request_id string
 ---@param allow boolean
----@param opts? { updated_input?: table, message?: string }
+---@param opts? { updated_input?: table, message?: string, updated_permissions?: table[] }
 ---@return boolean answered
 function Session:answer(request_id, allow, opts)
   opts = opts or {}
@@ -229,9 +232,17 @@ function Session:answer(request_id, allow, opts)
   local p = self.pending_permissions[idx]
   local response = allow and { behavior = 'allow', updatedInput = opts.updated_input or p.input }
     or { behavior = 'deny', message = opts.message or DENY_MESSAGE }
+  local updates = allow and opts.updated_permissions or nil
+  if updates and #updates > 0 then response.updatedPermissions = updates end
   if not self:_write({ type = 'control_response',
     response = { subtype = 'success', request_id = request_id, response = response } }) then
     return false
+  end
+  for _, u in ipairs(updates or {}) do
+    if u.type == 'setMode' and type(u.mode) == 'string' then
+      self.mode_requested = u.mode == 'default' and 'manual' or u.mode
+      self:_emit('meta')
+    end
   end
   table.remove(self.pending_permissions, idx)
   self:_emit('permission')
