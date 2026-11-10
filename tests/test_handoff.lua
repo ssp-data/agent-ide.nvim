@@ -11,7 +11,8 @@ local FIXTURE_ID = '11111111-1111-4111-8111-111111111111'
 local FIXTURE = vim.fn.getcwd() .. '/tests/fixtures/projects/-home-u-git-alpha/' .. FIXTURE_ID .. '.jsonl'
 local ICONS = { open = 'v', closed = '>', project = 'P', waiting = 'W', busy = 'B', idle = 'I', parked = '.',
   done = 'D', failed = 'F', new = '+' }
-local AWAY = 'in native Claude (tmux pane)'
+-- the winbar's state word while the session is in native Claude (the drawer's word, dim)
+local AWAY = '%#AgentIdeAge#native%*'
 
 local tmp, repo, projects, log, tmux_dir, transcript_file
 

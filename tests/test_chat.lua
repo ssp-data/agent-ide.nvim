@@ -124,7 +124,12 @@ local function prompt_lines()
   return child.lua_get('vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().prompt), 0, -1, false)')
 end
 
-local function winbar() return child.lua_get('vim.wo[require("agent-ide.ui.chat")._windows().transcript].winbar') end
+-- The transcript's winbar as text: highlight groups dropped, the right-align gap `%=` as two
+-- spaces, `%%` as `%`.
+local function winbar()
+  local bar = child.lua_get('vim.wo[require("agent-ide.ui.chat")._windows().transcript].winbar')
+  return (bar:gsub('%%#[^#]*#', ''):gsub('%%%*', ''):gsub('%%=', '  '):gsub('%%%%', '%%'))
+end
 
 local function current()
   return child.lua_get('(function() local s = require("agent-ide.ui.chat").current(); return s and { id = s.id, state = s.state, owned = s.owned, queue = #s.queue } end)()')
@@ -196,7 +201,7 @@ T['new session row opens a chat: transcript above, prompt below (8 lines), left 
   eq(layout, { above = true, same_col = true, left = true, height = 8, fix = true, current = true,
     tname = 'agent-ide://chat/' .. id, pname = 'agent-ide://prompt/' .. id,
     tbt = 'nofile', tft = 'markdown', tmod = false, pbt = 'acwrite', pft = 'markdown', pmod = true })
-  eq(winbar(), 'repo · new session · model ? · mode:? · idle')
+  eq(winbar(), 'I idle · repo · new session')
 end
 
 T['<C-CR> in insert mode sends; the answer streams into the transcript; prompt is emptied'] = function()
@@ -216,7 +221,8 @@ T['<C-CR> in insert mode sends; the answer streams into the transcript; prompt i
   eq(vim.list_slice(lines, 1, 7), { '', '## You', '', 'Hello there', '', '## Claude', '' })
   eq(has_line(lines, 'Hi, how can I help?') ~= nil, true)
   local bar = winbar()
-  eq(bar, 'repo · new session · haiku-5-5 · mode:manual · idle')
+  -- the window left of the drawer is narrow: no room for the title
+  eq(bar, 'I idle · repo  haiku-5-5 [manual]')
   local ins = fake_ins()
   eq(ins[1], { type = 'user', message = { role = 'user', content = 'Hello there' } })
 end
@@ -425,9 +431,9 @@ T['winbar of a session running elsewhere follows live polls'] = function()
   drawer_cursor_to('B Alpha basics')
   child.type_keys('<CR>')
   wait_for(function() return has_line(transcript(), '## You') ~= nil end, 'history loaded')
-  eq(winbar(), 'repo · Alpha basics · model ? · mode:? · busy')
+  eq(winbar(), 'B elsewhere · repo · Alpha basics')
   live('waiting')
-  wait_for(function() return winbar() == 'repo · Alpha basics · model ? · mode:? · waiting' end, 'winbar after poll')
+  wait_for(function() return winbar() == 'W input · repo · Alpha basics' end, 'winbar after poll')
 end
 
 T['drawer hidden: a session opened in a terminal Claude meanwhile is refused, the text stays'] = function()
@@ -597,10 +603,10 @@ T['a second send while busy shows queued:1; <C-c> interrupts and returns the que
   open_new()
   type_prompt('first')
   child.type_keys('<C-CR>')
-  wait_for(function() return winbar():find('haiku-5-5 · mode:manual · busy', 1, true) ~= nil end, 'busy with init')
+  wait_for(function() return vim.startswith(winbar(), 'B busy · ') and winbar():find('haiku-5-5 [manual]', 1, true) ~= nil end, 'busy with init')
   child.type_keys('second', '<C-CR>')
   wait_for(function() return winbar():find('queued:1', 1, true) ~= nil end, 'queued in winbar')
-  eq(winbar(), 'repo · new session · haiku-5-5 · mode:manual · busy · queued:1')
+  eq(winbar(), 'B busy · queued:1 · repo  [manual]')
   child.type_keys('<Esc>', 'idraft<Esc>')
   child.type_keys('<C-c>')
   wait_for(function()
@@ -638,7 +644,7 @@ T['opening the fixture shows its history; a send resumes it'] = function()
   local bash = has_line(lines, '▸ Bash:')
   eq(bash ~= nil, true)
   eq(child.lua_get('vim.api.nvim_win_call(require("agent-ide.ui.chat")._windows().transcript, function() return vim.fn.foldclosed(' .. bash .. ') end)'), bash)
-  eq(winbar(), 'repo · Alpha basics · model ? · mode:? · parked')
+  eq(winbar(), '. parked · repo · Alpha basics')
   type_prompt('Next question')
   child.type_keys('<C-CR>')
   wait_for(function() return has_line(transcript(), 'Next answer') ~= nil end, 'answer')
@@ -683,7 +689,7 @@ T['a session running elsewhere refuses to send and keeps the text'] = function()
   drawer_cursor_to('B Alpha basics')
   child.type_keys('<CR>')
   wait_for(function() return has_line(transcript(), '## You') ~= nil end, 'history loaded')
-  eq(winbar(), 'repo · Alpha basics · model ? · mode:? · busy')
+  eq(winbar(), 'B elsewhere · repo · Alpha basics')
   type_prompt('Hijack')
   child.type_keys('<C-CR>')
   local notes = child.lua_get('_G.notes')
