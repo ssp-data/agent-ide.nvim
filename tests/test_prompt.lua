@@ -17,6 +17,8 @@ local T = MiniTest.new_set({ hooks = {
     vim.fn.writefile({ 'a' }, repo .. '/a.lua')
     vim.fn.writefile({ 'b' }, repo .. '/sub/b.lua')
     vim.fn.writefile({ 'n' }, repo .. '/node_modules/x/n.js')
+    -- command lists another case left in the runner's temporary state folder
+    vim.fn.delete(vim.env.XDG_STATE_HOME .. '/agent-ide/commands.json')
   end,
   post_case = function()
     child.stop()
@@ -40,7 +42,8 @@ local function start(opts)
     _G.notes = {}
     vim.notify = function(msg) table.insert(_G.notes, msg) end
     opts = vim.tbl_deep_extend('force', { projects_dir = repo .. '/none', helper = { enabled = false },
-      live = { interval_ms = 50, cmd = { 'echo', '[]' } }, claude = { cmd = { 'false' } } }, opts)
+      live = { interval_ms = 50, cmd = { 'echo', '[]' } }, claude = { cmd = { 'false' } },
+      prompts = { command_dirs = {}, skill_dirs = {}, project_dirs = false } }, opts)
     require('agent-ide').setup(opts)
     require('agent-ide').toggle()
     local s = require('agent-ide.session').open({ cwd = repo })
@@ -131,9 +134,175 @@ T['no commands yet: the plugin entries, a one-time hint; a new session offers th
   eq(child.lua_get('_G.notes'), { 'Agent-IDE: commands are known after the first answer in a session' })
   -- a session in the same folder reported its commands: offered here too
   child.type_keys('<Esc>')
-  child.lua([[require('agent-ide.session')._commands_seen[require('agent-ide.session').all()[1].cwd] = { 'compact' }]])
+  child.lua([[require('agent-ide.session.commands').record(require('agent-ide.session').all()[1].cwd, { 'compact' })]])
   child.type_keys('S', '/')
   eq(child.lua_get(WORDS, { '/' }), { '/copy', '/model', '/compact' })
+end
+
+-- The `/` menu before a session's first turn (session/commands.lua) -------------------------------
+
+local function state_file() return child.lua_get("vim.fn.stdpath('state') .. '/agent-ide/commands.json'") end
+
+-- Write commands.json in the child: `lists` maps a folder to { at, commands }.
+local function write_lists(lists)
+  child.lua([[
+    local c = require('agent-ide.session.commands')
+    local projects = {}
+    for cwd, e in pairs(...) do projects[c.key_of(cwd)] = e end
+    require('agent-ide.util.jsonfile').write(vim.fn.stdpath('state') .. '/agent-ide/commands.json', { version = 1, projects = projects })
+  ]], { lists })
+end
+
+local function read_json(path)
+  local f = io.open(path, 'rb')
+  if not f then return nil end
+  local t = f:read('a')
+  f:close()
+  local ok, v = pcall(vim.json.decode, t)
+  return ok and v or nil
+end
+
+local function menu_of(cwd)
+  return child.lua_get([[vim.tbl_map(function(i) return i.word end,
+    require('agent-ide.ui.prompt').matches(require('agent-ide.session').open({ cwd = ... }), '/'))]], { cwd })
+end
+
+local function wait_words(want)
+  wait_for(function() return vim.deep_equal(child.lua_get(WORDS, { '/' }), want) end,
+    'menu ' .. table.concat(want, ' '))
+end
+
+T['menu before the first turn: the persisted list of the project, else the newest of any project'] = function()
+  local other, third = tmp .. '/other', tmp .. '/third'
+  vim.fn.mkdir(other, 'p')
+  vim.fn.mkdir(third, 'p')
+  vim.fn.delete(vim.env.XDG_STATE_HOME .. '/agent-ide/commands.json')
+  start()
+  write_lists({ [repo] = { at = 100, commands = { 'compact', 'context' } }, [other] = { at = 200, commands = { 'review' } } })
+  start() -- read at setup, after a restart
+  child.type_keys('i')
+  wait_words({ '/copy', '/model', '/compact', '/context' })
+  eq(child.lua_get('_G.notes'), {})
+  -- no list for this project: the most recent one of any project
+  eq(menu_of(third), { '/copy', '/model', '/review' })
+  -- the session's own list replaces the fallback
+  child.lua("require('agent-ide.session').all()[1].slash_commands = { 'memory' }")
+  eq(child.lua_get(WORDS, { '/' }), { '/copy', '/model', '/memory' })
+end
+
+T['menu: commands and skills found on disk join, de-duplicated; plugin entries first'] = function()
+  vim.fn.delete(vim.env.XDG_STATE_HOME .. '/agent-ide/commands.json')
+  local cmds, skills = tmp .. '/cmds', tmp .. '/skills'
+  vim.fn.mkdir(cmds .. '/git', 'p')
+  vim.fn.mkdir(skills .. '/deploy', 'p')
+  vim.fn.writefile({ '# Review' }, cmds .. '/review.md')
+  vim.fn.writefile({ 'commit it' }, cmds .. '/git/commit.md')
+  vim.fn.writefile({ '---', 'name: deploy', 'description: ship it', '---', 'x' }, skills .. '/deploy/SKILL.md')
+  start({ prompts = { command_dirs = { cmds }, skill_dirs = { skills } } })
+  child.type_keys('i')
+  -- no list from Claude anywhere: the plugin's entries and what was found
+  wait_words({ '/copy', '/model', '/deploy', '/git:commit', '/review' })
+  local items = child.lua_get("require('agent-ide.ui.prompt').complete(0, '/').words")
+  eq(items[3].kind, '')
+  -- Claude's list and the found ones: each name once
+  child.lua("require('agent-ide.session').all()[1].slash_commands = { 'review', 'compact' }")
+  eq(child.lua_get(WORDS, { '/' }), { '/copy', '/model', '/compact', '/deploy', '/git:commit', '/review' })
+end
+
+T['commands.json: written on a changed list only, 0600 in 0700, at most 50 projects, a corrupt file is ignored'] = function()
+  vim.fn.delete(vim.env.XDG_STATE_HOME .. '/agent-ide/commands.json')
+  start()
+  local file = state_file()
+  -- through Claude's init event
+  child.lua([[
+    local s = require('agent-ide.session').all()[1]
+    require('agent-ide.session.actions').handle(s, { type = 'init', model = 'm', mode = 'default', slash_commands = { 'compact', 'context' } })
+  ]])
+  wait_for(function() return vim.uv.fs_stat(file) ~= nil end, 'file written')
+  local key = child.lua_get("require('agent-ide.session.commands').key_of(...)", { repo })
+  eq(#key, 16)
+  eq(key:find('/', 1, true), nil) -- not a path
+  eq(read_json(file).projects[key].commands, { 'compact', 'context' })
+  eq(vim.uv.fs_stat(file).mode % 512, 384)
+  eq(vim.uv.fs_stat(vim.fs.dirname(file)).mode % 512, 448)
+  local st = vim.uv.fs_stat(file)
+  -- the same list again: not rewritten
+  child.lua([[
+    local s = require('agent-ide.session').all()[1]
+    require('agent-ide.session.actions').handle(s, { type = 'init', model = 'm', mode = 'default', slash_commands = { 'compact', 'context' } })
+  ]])
+  child.lua('vim.wait(50)')
+  local st2 = vim.uv.fs_stat(file)
+  eq({ st2.ino, st2.mtime.sec, st2.mtime.nsec }, { st.ino, st.mtime.sec, st.mtime.nsec })
+
+  -- 50 projects: a new one drops the oldest
+  local lists = {}
+  for i = 1, 50 do lists[tmp .. '/p' .. i] = { at = 1000 + i, commands = { 'c' .. i } } end
+  write_lists(lists)
+  child.lua("require('agent-ide.session.commands')._reset(); require('agent-ide.session.commands').load(function() _G.loaded = true end)")
+  wait_for(function() return child.lua_get('_G.loaded == true') end, 'loaded')
+  child.lua("require('agent-ide.session.commands').record(..., { 'newest' })", { tmp .. '/p51' })
+  wait_for(function()
+    local t = read_json(file)
+    return t and t.projects[child.lua_get("require('agent-ide.session.commands').key_of(...)", { tmp .. '/p51' })] ~= nil
+  end, 'newest written')
+  local t = read_json(file)
+  eq(vim.tbl_count(t.projects), 50)
+  eq(t.projects[child.lua_get("require('agent-ide.session.commands').key_of(...)", { tmp .. '/p1' })], nil)
+  eq(t.projects[child.lua_get("require('agent-ide.session.commands').key_of(...)", { tmp .. '/p2' })].commands, { 'c2' })
+
+  -- corrupt: nothing known, no error, replaced on the next list
+  local f = io.open(file, 'w')
+  f:write('{"version":1,"projects":')
+  f:close()
+  start()
+  child.type_keys('i')
+  child.lua('vim.wait(100)')
+  eq(child.lua_get(WORDS, { '/' }), { '/copy', '/model' })
+  child.lua("require('agent-ide.session.commands').record(..., { 'compact' })", { repo })
+  wait_for(function() local x = read_json(file); return x ~= nil and x.version == 1 end, 'rewritten')
+end
+
+T['menu entries for 1000 commands build within 5 ms'] = function()
+  start()
+  child.lua([[
+    local list = {}
+    for i = 1, 1000 do list[i] = ('command-%04d'):format(i) end
+    require('agent-ide.session').all()[1].slash_commands = list
+  ]])
+  child.type_keys('i')
+  local ms = child.lua_get([[(function()
+    local P, s = require('agent-ide.ui.prompt'), require('agent-ide.session').all()[1]
+    P.matches(s, '/') -- warm
+    collectgarbage('collect')
+    local best = math.huge
+    for _ = 1, 5 do
+      local t0 = vim.uv.hrtime()
+      P.matches(s, '/')
+      P.matches(s, '/cmd5')
+      best = math.min(best, (vim.uv.hrtime() - t0) / 1e6 / 2)
+    end
+    return best
+  end)()]])
+  eq(ms < 5, true)
+end
+
+T['the / menu leaves the global completeopt alone, also with a local value'] = function()
+  start()
+  child.lua("vim.go.completeopt = 'menu,preview'")
+  child.lua("require('agent-ide.session').all()[1].slash_commands = { 'compact' }")
+  child.lua("_G.sets = 0; vim.api.nvim_create_autocmd('OptionSet', { pattern = 'completeopt', callback = function() if vim.v.option_type == 'global' then _G.sets = _G.sets + 1 end end })")
+  child.type_keys('i', '/')
+  eq(child.lua_get('vim.fn.pumvisible()'), 1)
+  child.type_keys('<Esc>')
+  eq(child.lua_get('vim.go.completeopt'), 'menu,preview')
+  child.lua("vim.bo.completeopt = 'menuone'")
+  child.type_keys('cc', '/')
+  eq(child.lua_get('vim.fn.pumvisible()'), 1)
+  child.type_keys('<Esc>')
+  eq(child.lua_get('vim.go.completeopt'), 'menu,preview')
+  eq(child.lua_get('vim.bo.completeopt'), 'menuone')
+  eq(child.lua_get('_G.sets'), 0)
 end
 
 T['/copy and /model: chosen from the menu or sent alone, the plugin acts and nothing is sent'] = function()

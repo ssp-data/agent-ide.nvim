@@ -39,10 +39,6 @@ function M._emit(s, what)
   end
 end
 
----Folder -> the command list Claude last reported for a session there (this Neovim only); a
----new session that has not had a turn yet offers it in the `/` menu.
-M._commands_seen = {}
-
 ---Internal: store the latest quota windows.
 function M._set_quota(windows) last_quota = windows end
 
@@ -90,7 +86,7 @@ function M._reset()
   end
   by_id, order, listeners, broken = {}, {}, {}, {}
   last_quota = nil
-  M._commands_seen = {}
+  require('agent-ide.session.commands')._reset()
   object._reset_ids()
 end
 
