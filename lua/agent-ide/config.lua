@@ -22,7 +22,8 @@ local function defaults()
         history_prev = '<C-p>', history_next = '<C-n>', attach = '<leader>af',
         answer_inner = 'ir', answer_outer = 'ar', mode = '<S-Tab>', model = '<leader>aM', answer = '<leader>ay',
         raw = 'gr', raw_event = 'gR',
-        native = '<leader>at' }, -- continue the session in native Claude in a tmux pane
+        native = '<leader>at', -- continue the session in native Claude in a tmux pane
+        park = '<leader>ax' }, -- park: stop the session's Claude process (the next send resumes)
     },
     -- prompt buffer: `/` opens the command menu, `@` opens the file picker
     chat = { auto_slash = true, at_picker = true },

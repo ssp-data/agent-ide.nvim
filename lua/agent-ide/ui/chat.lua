@@ -325,6 +325,27 @@ function M.refresh_winbars()
   end
 end
 
+---Park `s`: stop the Claude process this Neovim runs for it (asking first when it works). Queued
+---prompts it drops go back to its prompt buffer, as after an interrupt. The transcript stays;
+---the next send resumes the session. A session without a process here gets a notice.
+---@param s table Session
+function M.park(s)
+  if not s.owned then
+    local why = s:_elsewhere() and 'it runs in another Claude' or 'it is not running in this Neovim'
+    return notify('Agent-IDE: nothing to park; ' .. why)
+  end
+  s:park(function(parked, dropped)
+    if not parked then return end
+    local c = chats[s.id]
+    if dropped and #dropped > 0 and c and valid_buf(c.pbuf) then
+      prompt.restore(c.pbuf, dropped)
+      notify(('Agent-IDE: parked; %d queued prompt(s) returned to the prompt buffer'):format(#dropped))
+    end
+    if c then update_winbar(c) end
+    drawer().refresh()
+  end)
+end
+
 ---Session owning a chat buffer (transcript or prompt).
 ---@param buf integer
 ---@return table|nil Session

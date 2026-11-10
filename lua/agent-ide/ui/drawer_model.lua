@@ -20,6 +20,9 @@ function M.add_unsaved(id, key) unsaved[id] = { key = key, activity = os.time() 
 function M.state_of(id)
   local s = session.get(id)
   if s and s.state ~= 'parked' then return s.state end
+  -- the live list may still show the process we just stopped until its next poll
+  local e = live.get()[id]
+  if s and e and s.pid ~= nil and e.pid == s.pid then return 'parked' end
   return live.state_of(live.get(), id)
 end
 

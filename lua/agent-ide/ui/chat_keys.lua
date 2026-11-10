@@ -20,6 +20,7 @@ local HELP = {
   { 'raw', 'transcript: raw view of the wire lines (>> sent, << received), not the rendered answer; q or the same key returns' },
   { 'raw_event', 'transcript: raw view at the line of the unknown fold under the cursor' },
   { 'native', 'continue in native Claude in a tmux pane (parks here; reloads when it exits)' },
+  { 'park', 'park: stop this session\'s Claude process (asks when working); the next send resumes it' },
   { 'help', 'this help' },
   { 'history_prev', 'prompt: older prompt (also <Up>) on the first line' },
   { 'history_next', 'prompt: newer prompt (also <Down>) on the last line' },
@@ -68,6 +69,7 @@ function M.map(c, buf, is_transcript, act)
   map('n', keys.mode, function() require('agent-ide.ui.mode').cycle(c.s) end, 'next permission mode')
   map('n', keys.model, function() require('agent-ide.ui.mode').pick_model(c.s) end, 'pick model')
   map('n', keys.native, function() act.native(c) end, 'continue in native Claude (tmux)')
+  map('n', keys.park, function() require('agent-ide.ui.chat').park(c.s) end, 'park the session')
   if is_transcript then
     map('n', keys.raw, function() require('agent-ide.ui.raw').open(c.s) end, 'raw view')
     map('n', keys.raw_event, function() require('agent-ide.ui.raw').open_at_cursor(c.s, buf) end, 'raw view at event')
