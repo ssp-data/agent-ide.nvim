@@ -37,4 +37,65 @@ function M.jump_to_pid(pid, cb)
   end)
 end
 
+-- Pane labels of processes for the drawer --------------------------------------------------
+
+local labels = {} -- pid -> '<window>.<pane>'
+local pending = false -- a refresh is running
+
+local function in_tmux() return vim.env.TMUX ~= nil and vim.env.TMUX ~= '' end
+
+---`<window>.<pane>` of the tmux pane running `pid`, from the last refresh; nil when unknown.
+---@param pid integer
+---@return string|nil
+function M.pane_label(pid) return labels[pid] end
+
+---@param out string lines of `ps -o pid=,tty=`
+---@return table<integer, string> pid -> tty
+function M.parse_ps(out)
+  local ttys = {}
+  for line in vim.gsplit(out or '', '\n', { plain = true }) do
+    local pid, tty = line:match('^%s*(%d+)%s+(%S+)')
+    if pid and tty ~= '?' and tty ~= '??' then ttys[tonumber(pid)] = tty end
+  end
+  return ttys
+end
+
+---Look up the panes of `pids` asynchronously (one `ps` and one `tmux list-panes`, never
+---blocking); `on_change()` runs when a label changed. Outside tmux there are no labels.
+---@param pids integer[]
+---@param on_change fun()
+function M.refresh_labels(pids, on_change)
+  if not in_tmux() or #pids == 0 then
+    if next(labels) ~= nil then
+      labels = {}
+      on_change()
+    end
+    return
+  end
+  if pending then return end
+  pending = true
+  local function run(cmd, cb)
+    local ok = pcall(vim.system, cmd, { text = true, timeout = 2000 }, function(res) vim.schedule(function() cb(res) end) end)
+    if not ok then vim.schedule(function() cb({ code = 127, stdout = '' }) end) end
+  end
+  local list = vim.tbl_map(tostring, pids)
+  run({ 'ps', '-o', 'pid=,tty=', '-p', table.concat(list, ',') }, function(ps)
+    local ttys = M.parse_ps(ps.stdout)
+    run({ 'tmux', 'list-panes', '-a', '-F', '#{pane_tty} #{window_index}.#{pane_index}' }, function(lp)
+      pending = false
+      local new = {}
+      if lp.code == 0 then
+        for pid, tty in pairs(ttys) do new[pid] = M.match_pane(tty, lp.stdout) end
+      end
+      if not vim.deep_equal(new, labels) then
+        labels = new
+        on_change()
+      end
+    end)
+  end)
+end
+
+---Test only: forget the labels.
+function M._reset_labels() labels, pending = {}, false end
+
 return M

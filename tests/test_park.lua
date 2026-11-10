@@ -65,7 +65,7 @@ local function start(steps, live_json)
     projects_dir = projects,
     helper = { enabled = false },
     live = { interval_ms = 50, cmd = { 'echo', live_json or '[]' } },
-    icons = ICONS,
+    icons_style = 'plain', icons = ICONS,
     claude = { cmd = cmd },
   } })
 end

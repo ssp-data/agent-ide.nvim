@@ -28,7 +28,7 @@ T['extra rows come after Sessions, suffix on the project row, highlights offset'
       { { ' feat', 'AgentIdeBranch' } }
   end
   local t = tree.build(projects, parked, { ['/r/alpha'] = true }, 1000, icons, nil, nil, extra)
-  eq(t.lines, { 'v P alpha  . now feat', '    + New session', '  v Sessions (1)', '      . Fix  now', '  Extra (1)',
+  eq(t.lines, { 'v P alpha feat  . now', '    + New session', '  v Sessions (1)', '      . Fix  now', '  Extra (1)',
     '> P beta  . 1m' })
   eq(t.nodes[5].id, 'x1')
   eq(seen, { { '/r/alpha', true }, { '/r/beta', false } })
@@ -87,7 +87,8 @@ T['top rows come before every project; ctx carries the width'] = function()
     return { { pieces = { { 'v Prompts', 'AgentIdeSection' } }, node = { type = 'p', id = 'prompts', fold = { key = 'prompts', default = true } } } }
   end
   local t = tree.build(projects, parked, {}, 1000, icons, nil, nil, nil, { top = top, width = 44 })
-  eq(t.lines, { 'v Prompts', '> P alpha  . now', '> P beta  . 1m' })
+  -- the project rows are aligned to the width
+  eq(t.lines, { 'v Prompts', '> P alpha' .. string.rep(' ', 44 - 9 - 5) .. '. now', '> P beta' .. string.rep(' ', 44 - 8 - 4) .. '. 1m' })
   eq({ t.nodes[1].id, seen.width }, { 'prompts', 44 })
   t = tree.build({}, parked, {}, 0, icons, nil, nil, nil, { top = top })
   eq(t.lines, { 'v Prompts', 'No Claude sessions found' })

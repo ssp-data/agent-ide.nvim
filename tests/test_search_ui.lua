@@ -58,7 +58,7 @@ local function start(backend)
     projects_dir = projects,
     helper = { enabled = backend == 'helper', path = hpath },
     live = { interval_ms = 600000, cmd = { 'echo', '[]' } },
-    icons = ICONS, tcd = false,
+    icons_style = 'plain', icons = ICONS, tcd = false,
   } })
 end
 

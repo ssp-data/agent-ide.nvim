@@ -37,6 +37,7 @@ local function node_key(node)
   if node.type == 'section' then return 's:' .. node.key end
   if node.type == 'session' then return 'x:' .. node.session.id end
   if node.type == 'new' then return 'n:' .. node.project.key end
+  if node.type == 'header' then return 'h:' end
 end
 
 ---State shown for a session (see `drawer_model.state_of`).
@@ -51,8 +52,9 @@ local function render(focus)
   if not S.buf then return end
   local cfg = config.get()
   local t = tree.build(model.with_unsaved(S.projects), model.state_of, S.expanded, os.time(), cfg.icons, cfg.projects_dir,
-    model.waits_for, sections.collect,
-    { top = sections.collect_top, width = S.win and api.nvim_win_get_width(S.win) or cfg.drawer.width })
+    model.note_of, sections.collect,
+    { top = sections.collect_top, width = S.win and api.nvim_win_get_width(S.win) or cfg.drawer.width,
+      header = { title = 'Agents', hints = M.hints() } })
   local row = S.win and api.nvim_win_get_cursor(S.win)[1]
   focus = focus or (row and node_key(S.nodes[row]))
   vim.bo[S.buf].modifiable = true
@@ -85,6 +87,7 @@ local function start_live()
   local cfg = config.get()
   live.start({ interval_ms = cfg.live.interval_ms, cmd = cfg.live.cmd, on_poll = function()
     require('agent-ide.status').refresh()
+    tmux.refresh_labels(model.elsewhere_pids(), function() render() end)
     render()
     local chat = package.loaded['agent-ide.ui.chat']
     if chat then chat.refresh_winbars() end
@@ -114,6 +117,13 @@ local function on_index_change()
   if not debounce then debounce = vim.uv.new_timer() end
   debounce:stop()
   debounce:start(200, 0, vim.schedule_wrap(function() if S.tab then rescan() end end))
+end
+
+local resize_timer
+local function on_resize()
+  if not resize_timer then resize_timer = vim.uv.new_timer() end
+  resize_timer:stop()
+  resize_timer:start(30, 0, vim.schedule_wrap(function() render() end))
 end
 
 local function notify(msg) vim.notify('Agent-IDE: ' .. msg, vim.log.levels.INFO) end
@@ -203,9 +213,24 @@ end
 
 function actions.close() M.close() end
 
--- The drawer's own keys: a provider row key with the same lhs is neither mapped nor listed.
+-- The drawer's own keys (lhs, action name, header hint); a provider row key with the same lhs
+-- is neither mapped nor listed. The header line shows the hints in this order.
+local KEYS = {
+  { '<CR>', 'open' }, { 'o', 'open' }, { 'za', 'fold' }, { 'R', 'refresh', 'refresh' }, { 'gp', 'jump' },
+  { 'x', 'park' }, { 'glg', 'lazygit', 'lazygit' }, { 'q', 'close' }, { 's', 'search' }, { '?', 'help', 'help' },
+}
 local OWN = {}
-for _, k in ipairs({ '<CR>', 'o', 'za', 'R', 'gp', 'x', 'glg', 'q', 's', '?' }) do OWN[vim.keycode(k)] = true end
+for _, k in ipairs(KEYS) do OWN[vim.keycode(k[1])] = true end
+
+---Key hints of the header line, from the drawer's own keys: `R refresh`, `glg lazygit`, `? help`.
+---@return string[]
+function M.hints()
+  local out = {}
+  for _, k in ipairs(KEYS) do
+    if k[3] then out[#out + 1] = k[1] .. ' ' .. k[3] end
+  end
+  return out
+end
 
 local function provider_keys()
   return vim.tbl_filter(function(k) return not OWN[vim.keycode(k.lhs)] end, sections.keys())
@@ -276,17 +301,8 @@ local function ensure_buf()
   local function map(lhs, fn) vim.keymap.set('n', lhs, fn, { buffer = buf, nowait = true, silent = true }) end
   -- provider row keys (the drawer's own keys below win a clash)
   for _, k in ipairs(provider_keys()) do map(k.lhs, function() actions.row_key(k.lhs) end) end
-  map('<CR>', actions.open)
-  map('o', actions.open)
-  map('za', actions.fold)
-  map('R', actions.refresh)
-  map('gp', actions.jump)
-  map('x', actions.park)
-  map('glg', actions.lazygit)
+  for _, k in ipairs(KEYS) do map(k[1], actions[k[2]]) end
   api.nvim_create_autocmd('BufEnter', { buffer = buf, callback = function() sections.focus() end })
-  map('q', actions.close)
-  map('s', actions.search)
-  map('?', actions.help)
   S.buf = buf
   return buf
 end
@@ -301,6 +317,8 @@ local function open_drawer()
     set_opt(S.win, name, value)
   end
   render()
+  -- the cursor starts below the header line
+  if S.nodes[1] and S.nodes[1].type == 'header' and #S.nodes > 1 then api.nvim_win_set_cursor(S.win, { 2, 0 }) end
   refresh_shown()
 end
 
@@ -308,6 +326,7 @@ local function teardown()
   set_shown(false)
   index.on_change(nil)
   if debounce then debounce:stop() end
+  if resize_timer then resize_timer:stop() end
   S.tab, S.win = nil, nil
 end
 
@@ -329,6 +348,12 @@ local function create_tab()
     end
   end })
   api.nvim_create_autocmd('TabEnter', { group = augroup, callback = refresh_shown })
+  -- the right-aligned columns follow the drawer's width
+  api.nvim_create_autocmd({ 'WinResized', 'VimResized' }, { group = augroup, callback = function(ev)
+    if not S.win then return end
+    if ev.event == 'WinResized' and not vim.tbl_contains(vim.v.event.windows or {}, S.win) then return end
+    on_resize()
+  end })
   open_drawer()
   sections.setup()
   index.on_change(on_index_change)

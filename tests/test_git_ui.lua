@@ -74,7 +74,7 @@ local function start(opts)
     projects_dir = projects,
     helper = { enabled = false },
     live = { interval_ms = 50, cmd = { 'echo', '[]' } },
-    icons = ICONS,
+    icons_style = 'plain', icons = ICONS,
   }, opts or {}) })
 end
 
@@ -92,6 +92,20 @@ end
 local function has_line(lines, text)
   for i, l in ipairs(lines) do
     if l:find(text, 1, true) then return i end
+  end
+end
+
+-- A line holding every one of `parts` in order (a drawer row's right part is padded to the edge).
+local function has_parts(lines, ...)
+  local parts = { ... }
+  for i, l in ipairs(lines) do
+    local at = 1
+    for _, p in ipairs(parts) do
+      local a, b = l:find(p, at, true)
+      if not a then at = nil; break end
+      at = b + 1
+    end
+    if at then return i end
   end
 end
 
@@ -165,13 +179,13 @@ T['drawer: branch suffix, Changes and Commits sections with counts, files with s
   press_on('Changes vs main (5)')
   wait_for(function() return has_line(drawer_lines(), 'M a.lua') ~= nil end, 'files')
   l = drawer_lines()
-  for _, row in ipairs({ '      M a.lua  +3 −3', '      A bin.dat  bin', '      D del.txt  +0 −1', '      A new.lua  +1 −0',
-    '      ? u.txt  +1 −0' }) do
-    eq(has_line(l, row) ~= nil, true)
+  for _, row in ipairs({ { '      M a.lua ', ' +3 −3' }, { '      A bin.dat ', ' bin' }, { '      D del.txt ', ' −1' },
+    { '      A new.lua ', ' +1' }, { '      ? u.txt ', ' +1' } }) do
+    eq({ row, has_parts(l, row[1], row[2]) ~= nil }, { row, true })
   end
   press_on('Commits on branch (2)')
-  press_on('two  4 files')
-  wait_for(function() return has_line(drawer_lines(), '          M a.lua  +1 −1') ~= nil end, 'commit files')
+  press_on(' two ')
+  wait_for(function() return has_parts(drawer_lines(), '          M a.lua ', ' +1 −1') ~= nil end, 'commit files')
   -- za on a file row folds its section; the cursor lands on the section
   press_on('          M a.lua', 'za')
   eq(has_line(drawer_lines(), '          M a.lua'), nil)

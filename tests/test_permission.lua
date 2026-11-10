@@ -125,7 +125,7 @@ local function start(steps, opts)
     projects_dir = projects,
     helper = { enabled = false },
     live = { interval_ms = 50, cmd = { 'echo', '[]' } },
-    icons = ICONS,
+    icons_style = 'plain', icons = ICONS,
     claude = { cmd = cmd },
   }, opts or {}) })
 end
@@ -138,6 +138,20 @@ end
 local function has_line(lines, text)
   for i, l in ipairs(lines) do
     if l:find(text, 1, true) then return i end
+  end
+end
+
+-- A line holding every one of `parts` in order (a drawer row's right part is padded to the edge).
+local function has_parts(lines, ...)
+  local parts = { ... }
+  for i, l in ipairs(lines) do
+    local at = 1
+    for _, p in ipairs(parts) do
+      local a, b = l:find(p, at, true)
+      if not a then at = nil; break end
+      at = b + 1
+    end
+    if at then return i end
   end
 end
 
@@ -249,7 +263,7 @@ T['visible session: the select opens; Allow sends allow, the result renders, the
   eq(vim.list_slice(parts.block, 2, 3), { '│ hello', '│ world' })
   for _, l in ipairs(parts.tail_levels) do eq(l, '0') end -- never folded
   -- the drawer names what the session waits for
-  eq(has_line(drawer_lines(), 'W Write it — Write') ~= nil, true)
+  eq(has_parts(drawer_lines(), 'W Write it ', ' permission: Write ') ~= nil, true)
   pick('Allow')
   wait_for(function() return has_line(transcript(), 'Written.') ~= nil end, 'answer')
   eq(answers()[1], { subtype = 'success', request_id = 'p1', response = { behavior = 'allow', updatedInput = WRITE } })
@@ -298,7 +312,7 @@ T['session B asks while the user types in session A: nothing interrupts; next_wa
   eq(child.lua_get('{ win = vim.api.nvim_get_current_win(), cursor = vim.api.nvim_win_get_cursor(0), buf = vim.api.nvim_get_current_buf() }'), before)
   eq(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), { 'draft text' })
   eq(child.lua_get('vim.fn.execute("messages")'):find('Claude asks', 1, true), nil)
-  wait_for(function() return has_line(drawer_lines(), 'W hello B — Write') ~= nil end, 'drawer waiting row')
+  wait_for(function() return has_parts(drawer_lines(), 'W hello B ', ' permission: Write ') ~= nil end, 'drawer waiting row')
   -- typing goes on undisturbed
   child.type_keys(' more')
   eq(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), { 'draft text more' })

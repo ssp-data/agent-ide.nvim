@@ -45,8 +45,10 @@ local function defaults()
       skill_dirs = { '~/.claude/skills' }, project_dirs = true },
     -- prompt buffer: `/` opens the command menu, `@` opens the file picker
     chat = { auto_slash = true, at_picker = true },
-    icons = { open = '▾', closed = '▸', project = '', waiting = '◐', busy = '●', idle = '○', parked = '·',
-      done = '✔', failed = '✖', new = '+', prompts = '✎' },
+    -- 'nerd' (needs a Nerd Font in the terminal) or 'plain'; `icons` overrides single entries
+    -- of that set (see ui/icons.lua for the keys); an empty string hides an icon
+    icons_style = 'nerd',
+    icons = {},
   }
 end
 
@@ -69,6 +71,7 @@ local current
 ---@return table
 function M.setup(opts)
   current = merge(defaults(), opts or {})
+  current.icons = require('agent-ide.ui.icons').resolve(current.icons_style, current.icons)
   return current
 end
 

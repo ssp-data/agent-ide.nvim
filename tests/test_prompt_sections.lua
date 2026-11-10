@@ -20,7 +20,7 @@ local tmp
 local child = MiniTest.new_child_neovim()
 
 local function setup(prompts)
-  config.setup({ prompts = prompts, icons = ICONS })
+  config.setup({ prompts = prompts, icons_style = 'plain', icons = ICONS })
   cache._reset()
   sections._reset()
   ps.register()
@@ -44,9 +44,10 @@ local T = MiniTest.new_set({ hooks = {
   post_once = function() child.stop() end,
 } })
 
+-- Without a width the rows are not aligned (as the plain builds they are compared with).
 local function build(expanded, width)
   return tree.build(projects, parked, expanded or {}, 1000, ICONS, nil, nil, sections.collect,
-    { top = sections.collect_top, width = width or 80 })
+    { top = sections.collect_top, width = width })
 end
 
 local function loaded()
@@ -107,13 +108,16 @@ T['descriptions are dimmed and cut to the drawer width'] = function()
   loaded()
   local e = { prompts = true }
   local t = build(e, 30)
-  eq(t.lines[4], '      Invoice text  Short in…')
-  eq(vim.fn.strdisplaywidth(t.lines[4]) <= 30, true)
+  eq(t.lines[4], '      Invoice text  Short inv…')
+  eq(vim.fn.strdisplaywidth(t.lines[4]), 30)
   local dim
   for _, h in ipairs(t.hl) do
     if h.line == 4 and h.group == 'AgentIdeAge' then dim = t.lines[4]:sub(h.col_start + 1, h.col_end) end
   end
-  eq(dim, '  Short in…')
+  eq(dim, '  Short inv…')
+  -- no room for a useful part of it: the description goes
+  t = build(e, 22)
+  eq(t.lines[4], '      Invoice text')
 end
 
 T['no entries at all: a one-line hint'] = function()
@@ -204,7 +208,7 @@ T['300 library entries: re-render under 5 ms collapsed and 20 ms expanded'] = fu
     local d = require('agent-ide.ui.drawer')
     local s = d.state()
     vim.api.nvim_set_current_win(s.win)
-    vim.api.nvim_win_set_cursor(s.win, { 1, 0 })
+    vim.api.nvim_win_set_cursor(s.win, { 2, 0 }) -- line 1: the header
     vim.api.nvim_feedkeys(vim.keycode('<CR>'), 'x', false)
     assert(vim.wait(5000, function() return #d.state().nodes > 5 end, 5))
     for i = 0, 9 do
@@ -217,15 +221,15 @@ T['300 library entries: re-render under 5 ms collapsed and 20 ms expanded'] = fu
       end
     end
   ]])
-  eq(child.lua_get('#vim.api.nvim_buf_get_lines(require("agent-ide.ui.drawer").state().buf, 0, -1, false)'), 1 + 1 + 1 + 10 + 300 + 1) -- Prompts, Skills & commands (0), Library, groups, entries, no sessions
+  eq(child.lua_get('#vim.api.nvim_buf_get_lines(require("agent-ide.ui.drawer").state().buf, 0, -1, false)'), 1 + 1 + 1 + 1 + 10 + 300 + 1) -- header, Prompts, Skills & commands (0), Library, groups, entries, no sessions
   local expanded = child.lua_get('_G.best()')
   -- the entries stay loaded; the Prompts node collapsed again
   child.lua([[
     local s = require('agent-ide.ui.drawer').state()
-    vim.api.nvim_win_set_cursor(s.win, { 1, 0 })
+    vim.api.nvim_win_set_cursor(s.win, { 2, 0 })
     vim.api.nvim_feedkeys(vim.keycode('<CR>'), 'x', false)
   ]])
-  eq(child.lua_get('#vim.api.nvim_buf_get_lines(require("agent-ide.ui.drawer").state().buf, 0, -1, false)'), 2)
+  eq(child.lua_get('#vim.api.nvim_buf_get_lines(require("agent-ide.ui.drawer").state().buf, 0, -1, false)'), 3)
   eq(#child.lua_get('require("agent-ide.prompts.cache").global()'), 300)
   local collapsed = child.lua_get('_G.best()')
   if collapsed >= 5 then error(('collapsed re-render %.2f ms, budget < 5 ms'):format(collapsed)) end
@@ -234,31 +238,37 @@ T['300 library entries: re-render under 5 ms collapsed and 20 ms expanded'] = fu
 end
 
 T['the drawer on the session fixtures: Prompts on top, every other line as before'] = function()
-  local fixtures = vim.fn.fnamemodify('tests/fixtures/projects', ':p'):gsub('/$', '')
+  -- a copy with fixed mtimes: the project order never depends on the checkout
+  local fx = dofile(vim.fn.getcwd() .. '/tests/fixture_copy.lua')
+  local fixtures = fx.make()
   child.restart({ '-u', 'tests/minimal_init.lua' })
   child.lua([[
     local fixtures, tmp = ...
     vim.env.TMUX = nil
     require('agent-ide').setup({ projects_dir = fixtures, helper = { enabled = false },
       live = { interval_ms = 100000, cmd = { 'echo', '[]' } },
-      icons = { open = 'v', closed = '>', project = 'P', waiting = 'W', busy = 'B', idle = 'I', parked = '.' },
+      icons_style = 'plain', icons = { open = 'v', closed = '>', project = 'P', waiting = 'W', busy = 'B', idle = 'I', parked = '.' },
       prompts = { command_dirs = {}, skill_dirs = {}, library_dir = tmp .. '/lib', saved_dir = tmp .. '/saved' } })
     require('agent-ide').toggle()
   ]], { fixtures, tmp })
   local function lines() return child.lua_get('vim.api.nvim_buf_get_lines(require("agent-ide.ui.drawer").state().buf, 0, -1, false)') end
-  vim.wait(3000, function() return #lines() > 2 end, 10)
+  vim.wait(3000, function() return #lines() > 3 end, 10)
   local l = lines()
-  eq(l[1], '> ✎ Prompts')
-  -- the same lines the drawer showed before prompts existed (minus the ages, which depend on today)
-  local rest = vim.tbl_map(function(x) return (x:gsub('  %. %d+[mhd]', '  . AGE'):gsub('  %. now', '  . AGE')) end, vim.list_slice(l, 2))
-  eq(rest, { '> P -nocwd  . AGE (gone)', '> P alpha  . AGE (gone)', '> P docs  . AGE (gone)', '> P notes  . AGE (gone)' })
-  -- exactly what the drawer builds without any provider
+  eq(l[1], 'Agents      R refresh · glg lazygit · ? help')
+  eq(l[2], '> ✎ Prompts')
+  -- newest first, as the fixed mtimes say; the ages depend on today
+  local rest = vim.tbl_map(function(x) return x:match('^> P (%S+) %(folder missing%) +%. %S+$') or x end, vim.list_slice(l, 3))
+  eq(rest, { 'alpha', 'docs', 'notes', '-nocwd' })
+  for _, x in ipairs(vim.list_slice(l, 3)) do eq(vim.fn.strdisplaywidth(x), 44) end
+  -- exactly what the drawer builds without any provider (below the header and the Prompts node)
   local plain = child.lua_get([[(function()
     local d, cfg = require('agent-ide.ui.drawer'), require('agent-ide.config').get()
     local m = require('agent-ide.ui.drawer_model')
-    return require('agent-ide.ui.tree').build(d.state().projects, m.state_of, {}, os.time(), cfg.icons, cfg.projects_dir).lines
+    return require('agent-ide.ui.tree').build(d.state().projects, m.state_of, {}, os.time(), cfg.icons, cfg.projects_dir,
+      nil, nil, { width = 44 }).lines
   end)()]])
-  eq(vim.list_slice(lines(), 2), plain)
+  eq(vim.list_slice(lines(), 3), plain)
+  vim.fn.delete(fixtures, 'rf')
 end
 
 return T

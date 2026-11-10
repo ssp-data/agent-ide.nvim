@@ -1,5 +1,9 @@
 -- Pure drawer model: projects + session states -> lines, one node per line, highlight ranges.
+-- Every row has a left part (indent, fold arrow, icon, title) and a right part (state word,
+-- age, git stats) aligned to the drawer's right edge (see ui/layout.lua).
 local live = require('agent-ide.live')
+local layout = require('agent-ide.ui.layout')
+local prefix = require('agent-ide.ui.icons').prefix
 
 local M = {}
 
@@ -11,7 +15,10 @@ local STATE_GROUP = {
   done = 'AgentIdeDone',
   failed = 'AgentIdeFailed',
 }
+M.STATE_GROUP = STATE_GROUP
 
+---Age of `activity` at `now`: now, 5m, 3h, 12d (up to 60 days), 14mo (30-day months, up to
+---24 months), then years.
 ---@param activity integer
 ---@param now integer
 ---@return string
@@ -20,7 +27,37 @@ function M.ago(activity, now)
   if d < 90 then return 'now' end
   if d < 3600 then return math.floor(d / 60) .. 'm' end
   if d < 86400 then return math.floor(d / 3600) .. 'h' end
-  return math.floor(d / 86400) .. 'd'
+  local days = math.floor(d / 86400)
+  if days < 60 then return days .. 'd' end
+  local months = math.floor(days / 30)
+  if months < 24 then return months .. 'mo' end
+  return math.floor(months / 12) .. 'y'
+end
+
+local function one_line(s) return (tostring(s or ''):gsub('[\r\n\t]', ' ')) end
+
+-- Right part of a project row: the rolled-up state icon, a word for the states that want
+-- attention (`input (n)` waiting, `review (n)` done or failed), the age.
+local function project_right(rolled, states, icons, age)
+  local group = STATE_GROUP[rolled]
+  local out = {}
+  local icon = icons[rolled] or ''
+  if icon ~= '' then out[#out + 1] = { icon, group } end
+  local word
+  if rolled == 'waiting' or rolled == 'done' or rolled == 'failed' then
+    local n = 0
+    for _, s in ipairs(states) do
+      if s == rolled or (rolled ~= 'waiting' and (s == 'done' or s == 'failed')) then n = n + 1 end
+    end
+    word = (rolled == 'waiting' and 'input' or 'review') .. ' (' .. n .. ')'
+  end
+  if word then
+    if #out > 0 then out[#out + 1] = { ' ' } end
+    out[#out + 1] = { word, group }
+  end
+  if #out > 0 then out[#out + 1] = { ' ' } end
+  out[#out + 1] = { age, 'AgentIdeAge' }
+  return out
 end
 
 ---@param projects table[]
@@ -29,11 +66,14 @@ end
 ---@param now integer
 ---@param icons table
 ---@param projects_dir string|nil
----@param waits_for? fun(session_id: string): string|nil what a waiting session waits for (a tool name)
+---@param note_of? fun(session_id: string, state: string): table|string|nil the state word of a session row (`{ text, hl_group }`)
 ---@param extra? fun(project: table, ctx: table): table[]|nil, table[]|nil extra rows and a project-row suffix (see ui/sections.lua)
----@param opts? { top?: fun(ctx: table): table[]|nil, width?: integer } top: rows above the projects (see ui/sections.lua)
-function M.build(projects, state_of, expanded, now, icons, projects_dir, waits_for, extra, opts)
+---@param opts? { top?: fun(ctx: table): table[]|nil, width?: integer, header?: { title?: string, hints?: string[] } }
+---  top: rows above the projects (see ui/sections.lua); width: the drawer width (nil: no
+---  alignment, the right part follows after two spaces); header: a first line with key hints
+function M.build(projects, state_of, expanded, now, icons, projects_dir, note_of, extra, opts)
   opts = opts or {}
+  local width = opts.width
   local lines, nodes, hl = {}, {}, {}
 
   -- Append a line made of { text, group|nil } pieces; records byte ranges of grouped pieces.
@@ -41,18 +81,32 @@ function M.build(projects, state_of, expanded, now, icons, projects_dir, waits_f
     local n = #lines + 1
     local col, parts = 0, {}
     for _, p in ipairs(pieces) do
-      parts[#parts + 1] = p[1]
-      if p[2] then hl[#hl + 1] = { line = n, col_start = col, col_end = col + #p[1], group = p[2] } end
-      col = col + #p[1]
+      local text = p[1]
+      parts[#parts + 1] = text
+      if p[2] and text ~= '' then hl[#hl + 1] = { line = n, col_start = col, col_end = col + #text, group = p[2] } end
+      col = col + #text
     end
     lines[n] = table.concat(parts)
     nodes[n] = node
   end
+  local function add_row(left, right, node) add(layout.row(left, right, width), node) end
+  -- a provider row: aligned when it has a `right` part, else as given
+  local function add_provided(r)
+    if r.right then add_row(r.pieces, r.right, r.node) else add(r.pieces, r.node) end
+  end
+
+  if opts.header then
+    local h = opts.header
+    local title = prefix(icons.agents) .. (h.title or 'Agents')
+    local hints = vim.list_slice(h.hints or {}, 1)
+    local tw = layout.width(title)
+    while width and #hints > 0 and tw + 2 + layout.width(table.concat(hints, ' · ')) > width do table.remove(hints) end
+    local right = #hints > 0 and { { table.concat(hints, ' · '), 'AgentIdeAge' } } or {}
+    add_row({ { title, 'AgentIdeSection', fit = true } }, right, { type = 'header' })
+  end
 
   if opts.top then
-    for _, r in ipairs(opts.top({ expanded = expanded, icons = icons, now = now, width = opts.width }) or {}) do
-      add(r.pieces, r.node)
-    end
+    for _, r in ipairs(opts.top({ expanded = expanded, icons = icons, now = now, width = width }) or {}) do add_provided(r) end
   end
 
   if #projects == 0 then
@@ -65,44 +119,47 @@ function M.build(projects, state_of, expanded, now, icons, projects_dir, waits_f
     local states = {}
     for i, s in ipairs(project.sessions) do states[i] = state_of(s.id) end
     local rolled = live.rollup(states)
-    local pieces = {
-      { (is_open and icons.open or icons.closed) .. ' ' .. icons.project .. ' ' },
-      { project.name, 'AgentIdeProject' },
-      { '  ' },
-      { icons[rolled], STATE_GROUP[rolled] },
-      { ' ' },
-      { M.ago(project.activity, now), 'AgentIdeAge' },
+    local left = {
+      { (is_open and icons.open or icons.closed) .. ' ' .. prefix(icons.project) },
+      { one_line(project.name), rolled == 'parked' and 'AgentIdeParked' or 'AgentIdeProject', fit = true },
     }
-    if project.missing then pieces[#pieces + 1] = { ' (gone)', 'AgentIdeMissing' } end
     local rows, suffix
-    if extra then rows, suffix = extra(project, { open = is_open, expanded = expanded, icons = icons, now = now, width = opts.width }) end
-    if suffix then vim.list_extend(pieces, suffix) end
-    add(pieces, { type = 'project', project = project })
+    if extra then rows, suffix = extra(project, { open = is_open, expanded = expanded, icons = icons, now = now, width = width }) end
+    for _, p in ipairs(suffix or {}) do left[#left + 1] = { p[1], p[2], fit = true } end
+    if project.missing then left[#left + 1] = { ' (folder missing)', 'AgentIdeMissing', fit = 'last' } end
+    add_row(left, project_right(rolled, states, icons, M.ago(project.activity, now)), { type = 'project', project = project })
 
     if is_open then
-      add({ { '    ' .. (icons.new or '+') .. ' New session' } }, { type = 'new', project = project })
+      add({ { '    ' .. prefix(icons.new or '+') .. 'New session' } }, { type = 'new', project = project })
       local key = project.key .. '/sessions'
       local sec_open = expanded[key] ~= false
-      add({ { '  ' .. (sec_open and icons.open or icons.closed) .. ' Sessions (' .. #project.sessions .. ')', 'AgentIdeSection' } },
-        { type = 'section', project = project, key = key })
+      add({ { '  ' .. (sec_open and icons.open or icons.closed) .. ' ' .. prefix(icons.sessions)
+        .. 'Sessions (' .. #project.sessions .. ')', 'AgentIdeSection' } }, { type = 'section', project = project, key = key })
       if sec_open then
         for i, s in ipairs(project.sessions) do
           local state = states[i]
-          local title = (s.title or ''):gsub('[\r\n]', ' ')
-          local sp = {
-            { '      ' },
-            { icons[state], STATE_GROUP[state] },
-            { ' ' .. title },
-          }
-          local what = state == 'waiting' and waits_for and waits_for(s.id)
-          if what then sp[#sp + 1] = { ' — ' .. what } end
-          if s.subpath and s.subpath ~= '' then sp[#sp + 1] = { '  [' .. s.subpath .. ']' } end
-          sp[#sp + 1] = { '  ' }
-          sp[#sp + 1] = { M.ago(s.activity, now), 'AgentIdeAge' }
-          add(sp, { type = 'session', project = project, session = s, state = state })
+          local group = STATE_GROUP[state]
+          local title_hl = state == 'parked' and 'AgentIdeParked' or nil
+          local sl = { { '      ' } }
+          local icon = icons[state] or ''
+          if icon ~= '' then
+            sl[#sl + 1] = { icon, group }
+            sl[#sl + 1] = { ' ' }
+          end
+          if s.subpath and s.subpath ~= '' then sl[#sl + 1] = { one_line(s.subpath) .. '/ · ', title_hl } end
+          sl[#sl + 1] = { one_line(s.title), title_hl, fit = true }
+          local sr = {}
+          local note = note_of and note_of(s.id, state)
+          if type(note) == 'string' then note = { note, group } end
+          if note and note[1] and note[1] ~= '' then
+            sr[1] = { one_line(note[1]), note[2] or group }
+            sr[2] = { ' ' }
+          end
+          sr[#sr + 1] = { M.ago(s.activity, now), 'AgentIdeAge' }
+          add_row(sl, sr, { type = 'session', project = project, session = s, state = state })
         end
       end
-      for _, r in ipairs(rows or {}) do add(r.pieces, r.node) end
+      for _, r in ipairs(rows or {}) do add_provided(r) end
     end
   end
 

@@ -93,7 +93,7 @@ local function start(steps, opts)
     projects_dir = projects,
     helper = { enabled = false },
     live = { interval_ms = 50, cmd = opts.live_cmd or { 'echo', '[]' } },
-    icons = ICONS,
+    icons_style = 'plain', icons = ICONS,
     claude = { cmd = cmd },
   }, opts.poll_ms or 60000 })
 end

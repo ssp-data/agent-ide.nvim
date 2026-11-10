@@ -72,7 +72,7 @@ local function open_long_session(dir, id)
     projects_dir = dir,
     helper = { enabled = true },
     live = { interval_ms = 600000, cmd = { 'echo', '[]' } },
-    icons = { open = 'v', closed = '>', project = 'P', waiting = 'W', busy = 'B', idle = 'I', parked = '.' },
+    icons_style = 'plain', icons = { open = 'v', closed = '>', project = 'P', waiting = 'W', busy = 'B', idle = 'I', parked = '.' },
     keys = false,
   })
   if require('agent-ide.index').backend() ~= 'helper' then error('helper unavailable') end
