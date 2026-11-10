@@ -5,7 +5,7 @@ State of Agent-IDE.nvim for whoever picks it up next. Rules, layout and commands
 ## Where things are
 
 - Branch `dev` holds everything. `main` is what is published; merging `dev` into `main`, `make release VERSION=0.1.0` and `make publish VERSION=0.1.0` are the owner's steps.
-- Tests on `dev`, run alone: `make test` 791 cases, 0 fails; `make test-helper` all pass.
+- Tests on `dev`, run alone: `make test` 811 cases, 0 fails; `make test-helper` all pass.
 - Run test suites one at a time. Several suites in parallel make the timing budgets and child-Neovim waits unreliable.
 - `make test-real` (real Claude, uses the subscription) was last run when the chat was built; it has not been run against the features added since.
 
@@ -79,6 +79,12 @@ Owner's feedback, not acted on:
 9. Footer and Omarchy widget while sessions change state; hide the drawer for a minute and look again.
 10. `<leader>at` and back.
 11. Only then: `D` on a throwaway session with restore, and `X` on a spare terminal Claude.
+
+## Added after this file was first written
+
+- Freeze on long transcripts fixed: with `conceallevel >= 2` Neovim asked treesitter about every buffer row; `lua/agent-ide/util/ts_conceal.lua` switches that per-row check off for transcript buffers (see "A trap worth knowing" in `AGENTS.md`). Found with `AGENT_IDE_WATCHDOG=1 nvim`, which logs to `stdpath('state')/agent-ide/stuck.log`.
+- Model picker lists every model Claude Code offers (`lua/agent-ide/claude/models.lua`, `models_fetch.lua`): the plugin sends an `initialize` control request as the first line of every Claude process; the answer also fills the `/` menu before a session's first turn. Not yet checked against real Claude: a prompt right after `initialize`, and the `--resume` case.
+- Parked idea from the owner: show only the last part of a very long transcript and load more on demand.
 
 ## Decisions taken on the owner's behalf
 
