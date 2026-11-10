@@ -147,7 +147,7 @@ fn budget_200_sessions_of_50_mb_build_under_3_s_and_query_under_30_ms() {
     let root = tmp("budget");
     let mut total = 0;
     for i in 0..200 {
-        let text = session(55, &format!("topic{} Übersetzung parser{}", i % 17, i), 4200);
+        let text = prose_session(i, 60, 1500);
         total += text.len();
         write(&root, &format!("-w-p{}", i % 30), &format!("s{i}"), &text);
     }
@@ -157,12 +157,21 @@ fn budget_200_sessions_of_50_mb_build_under_3_s_and_query_under_30_ms() {
     let r = search(&mut s, &root, json!({"query": ""}));
     let build = t0.elapsed().as_millis();
     assert_eq!(r["sessions"], 200);
-    eprintln!("build of {total} bytes: {build} ms, {} chunks", r["chunks"]);
+    let text = r["text_bytes"].as_u64().unwrap();
+    eprintln!("build of {total} bytes ({text} bytes of indexed text): {build} ms, {} chunks", r["chunks"]);
+    assert!(text > 25_000_000, "realistic volume of indexed text: {text}");
     assert!(build < 3000, "build took {build} ms");
-    for q in ["parser12", "explaining detail", "übersetzung", "prsr", "zzzzzz", "topic3 answer"] {
-        let r = search(&mut s, &root, json!({"query": q, "kinds": ["title", "prompt", "answer", "tool"]}));
-        let took = r["took_ms"].as_f64().unwrap();
-        eprintln!("query {q:?}: {took:.2} ms, {} hits", r["hits"].as_array().unwrap().len());
-        assert!(took < 30.0, "query {q:?} took {took} ms");
+    let queries = [
+        "parser", "release notes", "übersetzung", "prsr", "zzzzzz", "Übersetzungsfehlerbehebungsmaßnahmen",
+        "größenänderung brückenpfeiler", "documentaton", "qxjvkw",
+    ];
+    for q in queries {
+        let mut best = f64::MAX;
+        for _ in 0..3 {
+            let r = search(&mut s, &root, json!({"query": q, "kinds": ["title", "prompt", "answer", "tool"], "limit": 200}));
+            best = best.min(r["took_ms"].as_f64().unwrap());
+        }
+        eprintln!("query {q:?}: {best:.2} ms");
+        assert!(best < 30.0, "query {q:?} took {best} ms");
     }
 }

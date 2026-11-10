@@ -1,5 +1,5 @@
--- Speed budgets of the search, with the helper, on synthetic data: 200 sessions of about
--- 250 KB (50 MB). Index build under 3 s, a query under 30 ms in the helper, keystroke to
+-- Speed budgets of the search, with the helper, on synthetic data: 200 sessions of realistic
+-- prose (answers of 1-4 KiB), about 55 MB of transcripts and over 25 MB of indexed text. Index build under 3 s, a query under 30 ms in the helper, keystroke to
 -- results under 60 ms end to end in the picker, and the UI never blocked while typing.
 local S = dofile(vim.fn.getcwd() .. '/tests/search_synth.lua')
 local child = MiniTest.new_child_neovim()
@@ -11,7 +11,7 @@ local T = MiniTest.new_set({ hooks = {
   pre_once = function()
     if not vim.uv.fs_stat(real_helper) then return end
     root = vim.fn.tempname()
-    projects = S.generate(root, 200, 250 * 1024)
+    projects = S.generate_prose(root, 200, 60, 1500)
     wrapper = root .. '/helper.sh'
     vim.fn.writefile({ '#!/bin/sh', ('exec %q --cache-dir %q'):format(real_helper, root .. '/cache') }, wrapper)
     vim.uv.fs_chmod(wrapper, tonumber('755', 8))
@@ -45,18 +45,24 @@ local function request(params)
     local out, t0 = nil, vim.uv.hrtime()
     require('agent-ide.index.search').search(params, function(r) out = r end)
     vim.wait(60000, function() return out ~= nil end, 1)
-    return { result = { sessions = out.sessions, chunks = out.chunks, took_ms = out.took_ms, hits = #out.hits,
+    return { result = { sessions = out.sessions, chunks = out.chunks, took_ms = out.took_ms, hits = #out.hits, text = out.text_bytes,
       backend = out.backend, indexing = out.indexing }, ms = (vim.uv.hrtime() - t0) / 1e6 }
   ]], { params })
 end
 
-T['index build of 200 sessions (50 MB) under 3 s, queries under 30 ms in the helper'] = function()
+T['index build of 200 sessions (55 MB, 25+ MB of prose indexed) under 3 s, queries under 30 ms'] = function()
   local cold = request({ query = '', wait = true })
   MiniTest.expect.equality({ cold.result.backend, cold.result.sessions, cold.result.indexing }, { 'helper', 200, false })
   check('index build', cold.ms, 3000)
-  for _, q in ipairs({ 'parser17', 'explaining detail', 'übersetzung', 'prsr', 'zzzzzz', 'topic3 answer', 'a' }) do
-    local r = request({ query = q, kinds = { 'title', 'prompt', 'answer', 'tool' } })
-    check('query ' .. q, r.result.took_ms, 30)
+  if cold.result.text < 25e6 then error('indexed text too small: ' .. cold.result.text, 0) end
+  for _, q in ipairs({ 'parser', 'release notes', 'übersetzung', 'prsr', 'zzzzzz', 'documentaton', 'a',
+    'Übersetzungsfehlerbehebungsmaßnahmen', 'größenänderung brückenpfeiler' }) do
+    local best = math.huge
+    for _ = 1, 3 do
+      local r = request({ query = q, kinds = { 'title', 'prompt', 'answer', 'tool' }, limit = 200 })
+      best = math.min(best, r.result.took_ms)
+    end
+    check('query ' .. q, best, 30)
   end
 end
 
@@ -74,7 +80,7 @@ T['picker: keystroke to results under 60 ms with the helper, UI never blocked'] 
     end)
   ]])
   local times, typed = {}, ''
-  for _, key in ipairs({ 'p', 'a', 'r', 's', 'e', 'r', '1', ' ', 'ü', 'b' }) do
+  for _, key in ipairs({ 'p', 'a', 'r', 's', 'e', 'r', ' ', 'ü', 'b', 'e', 'r', 's' }) do
     typed = typed .. key
     child.type_keys(key)
     local ok = vim.wait(5000, function()

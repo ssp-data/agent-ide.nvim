@@ -51,6 +51,47 @@ function M.session(cwd, rounds, words, pad, t0)
   return out
 end
 
+local WORDS = { 'the', 'parser', 'index', 'search', 'migrate', 'database', 'umlaut', 'Übersetzung', 'Größe', 'Brücke',
+  'function', 'returns', 'error', 'handling', 'documentation', 'release', 'notes', 'window', 'buffer', 'session',
+  'transcript', 'fold', 'render', 'query', 'result', 'with', 'and', 'for', 'when', 'über', 'test', 'cargo', 'build',
+  'Neovim', 'plugin', 'should', 'because', 'können', 'müssen', 'Straße', 'jazz', 'pizza', 'fuzzy', 'lazy', 'zone',
+  'quick', 'xenon', 'box', 'zip', 'quiz', 'waltz', 'zigzag' }
+
+---Pseudo-random prose of about `bytes` bytes (deterministic per seed).
+function M.prose(seed, bytes)
+  local out, n, size, x = {}, 0, 0, seed * 7919 + 13
+  while size < bytes do
+    x = (x * 1103515245 + 12345) % 2147483648
+    local w = WORDS[x % #WORDS + 1]
+    n = n + 1
+    out[n] = w
+    size = size + #w + 1
+  end
+  local lines = {}
+  for i = 1, n, 14 do lines[#lines + 1] = table.concat(out, ' ', i, math.min(n, i + 13)) end
+  return table.concat(lines, '\n')
+end
+
+---`count` sessions of realistic prose (prompts of 100-400 bytes, answers of 1-4 KiB, a tool call
+---with `pad` bytes of output per round), `rounds` rounds each, in 30 projects.
+function M.generate_prose(root, count, rounds, pad)
+  local projects = root .. '/projects'
+  local blob = string.rep('o', pad)
+  for i = 1, count do
+    local p = ('p%02d'):format(i % 30)
+    local out = {}
+    for n = 1, rounds do
+      local k = i * 1000 + n
+      out[#out + 1] = M.user(M.prose(k, 100 + (k * 37) % 300), i * 1000 + n, '/w/' .. p)
+      out[#out + 1] = M.answer(M.prose(k + 7, 1024 + (k * 997) % 3072), i * 1000 + n)
+      out[#out + 1] = M.tool('Bash', 'ls -la', 't' .. n)
+      out[#out + 1] = M.result('t' .. n, blob)
+    end
+    M.write(projects, '-w-' .. p, ('%08d-0000-4000-8000-000000000000'):format(i), out)
+  end
+  return projects
+end
+
 ---`count` sessions in 30 projects, about `bytes` each; returns the projects dir.
 function M.generate(root, count, bytes)
   local projects = root .. '/projects'

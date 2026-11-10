@@ -19,6 +19,9 @@ pub struct Word {
     chars: Vec<char>,
     ascii: bool,
     case_sensitive: bool,
+    /// First byte of the first letter, lower and upper case (a text letter that compares equal
+    /// to it starts with one of them).
+    leads: (u8, u8),
 }
 
 fn low(c: char) -> char {
@@ -33,7 +36,15 @@ impl Word {
     pub fn new(raw: &str) -> Word {
         let case_sensitive = raw.chars().any(char::is_uppercase);
         let needle: String = if case_sensitive { raw.to_string() } else { raw.chars().map(low).collect() };
-        Word { raw: raw.to_string(), chars: needle.chars().collect(), ascii: raw.is_ascii(), needle, case_sensitive }
+        let first = needle.chars().next().unwrap_or(' ');
+        let lead = |c: char| {
+            let mut buf = [0u8; 4];
+            c.encode_utf8(&mut buf);
+            buf[0]
+        };
+        let upper = if case_sensitive { first } else { first.to_uppercase().next().unwrap_or(first) };
+        let leads = (lead(first), lead(upper));
+        Word { raw: raw.to_string(), chars: needle.chars().collect(), ascii: raw.is_ascii(), needle, case_sensitive, leads }
     }
 
     /// Byte range of the first match in `hay` starting at or after byte `from`.
@@ -58,23 +69,21 @@ impl Word {
             }
             return None;
         }
-        let mut start = from;
-        while !hay.is_char_boundary(start) {
-            start += 1;
-        }
-        for (i, _) in hay[start..].char_indices() {
-            let s = start + i;
-            let mut it = hay[s..].char_indices();
-            let mut ok = true;
-            for want in &self.chars {
-                match it.next() {
-                    Some((_, c)) if (if self.case_sensitive { c } else { low(c) }) == *want => {}
-                    _ => {
-                        ok = false;
-                        break;
-                    }
-                }
+        // candidates: where the first letter's first byte (either case) is; then compare
+        let (a, b) = self.leads;
+        let bytes = hay.as_bytes();
+        let mut at = from;
+        while at < bytes.len() {
+            let Some(p) = memchr::memchr2(a, b, &bytes[at..]) else { return None };
+            let s = at + p;
+            at = s + 1;
+            if !hay.is_char_boundary(s) {
+                continue;
             }
+            let mut it = hay[s..].char_indices();
+            let ok = self.chars.iter().all(|want| {
+                matches!(it.next(), Some((_, c)) if (if self.case_sensitive { c } else { low(c) }) == *want)
+            });
             if ok {
                 let end = it.next().map_or(hay.len(), |(j, _)| s + j);
                 return Some((s, end));
@@ -103,36 +112,59 @@ impl Word {
     }
 }
 
+fn bit(c: char) -> u64 {
+    1u64 << (c as u32 % 64)
+}
+
 fn word_start(hay: &str, at: usize) -> bool {
     hay[..at].chars().next_back().map_or(true, |c| !c.is_alphanumeric())
 }
 
 /// Lines of `text` as byte ranges, long lines cut into pieces of at most `SEGMENT` bytes.
-pub fn segments(text: &str) -> impl Iterator<Item = (usize, usize)> + '_ {
-    let mut out = Vec::new();
-    let mut start = 0;
-    for line in text.split('\n') {
-        let end = start + line.len();
-        let mut s = start;
-        while end - s > SEGMENT {
-            let mut e = s + SEGMENT;
-            while !text.is_char_boundary(e) {
-                e -= 1;
+pub fn segments(text: &str) -> Segments<'_> {
+    Segments { text, at: 0 }
+}
+
+pub struct Segments<'a> {
+    text: &'a str,
+    at: usize,
+}
+
+impl Iterator for Segments<'_> {
+    type Item = (usize, usize);
+    fn next(&mut self) -> Option<(usize, usize)> {
+        let t = self.text.as_bytes();
+        while self.at < t.len() {
+            let s = self.at;
+            let line_end = memchr::memchr(b'\n', &t[s..]).map_or(t.len(), |p| s + p);
+            if line_end == s {
+                self.at = s + 1; // empty line
+                continue;
             }
-            out.push((s, e));
-            s = e;
+            let mut e = line_end;
+            if e - s > SEGMENT {
+                e = s + SEGMENT;
+                while !self.text.is_char_boundary(e) {
+                    e -= 1;
+                }
+            }
+            self.at = if e == line_end { line_end + 1 } else { e };
+            return Some((s, e));
         }
-        if end > s {
-            out.push((s, end));
-        }
-        start = end + 1;
+        None
     }
-    out.into_iter()
 }
 
 pub struct Fuzzy {
     m: Matcher,
     min: u16,
+    /// Letters of the word, one bit each (code point modulo 64), and how many of those bits a
+    /// line must have: a quick test before the Smith-Waterman alignment (each typo can drop
+    /// at most one letter).
+    letters: u64,
+    need: u32,
+    ascii: bool,
+    case_sensitive: bool,
     /// Largest distance in bytes from the first to the last matched letter.
     span: usize,
 }
@@ -154,13 +186,35 @@ impl Fuzzy {
         // A contiguous match scores 12 per character plus bonuses; letters scattered over a
         // line (`f....o....l....d` scores 49 for `fold`) stay below two thirds of that plus 20.
         let min = (n as u16).saturating_mul(8).saturating_add(20);
-        Some(Fuzzy { m, min, span: w.raw.len() + typos as usize + 2 })
+        let letters = w.chars.iter().fold(0u64, |m, c| m | bit(*c));
+        let need = letters.count_ones().saturating_sub(typos as u32);
+        let (ascii, case_sensitive) = (w.ascii, w.case_sensitive);
+        Some(Fuzzy { m, min, span: w.raw.len() + typos as usize + 2, letters, need, ascii, case_sensitive })
+    }
+
+    /// The letters of `seg` (as the word compares them) may hold the word's.
+    fn may_match(&self, seg: &str) -> bool {
+        let mut m = 0u64;
+        if self.ascii {
+            for b in seg.bytes() {
+                let b = if self.case_sensitive { b } else { b.to_ascii_lowercase() };
+                m |= 1u64 << (b % 64);
+            }
+        } else {
+            for c in seg.chars() {
+                m |= bit(if self.case_sensitive { c } else { low(c) });
+            }
+        }
+        (m & self.letters).count_ones() >= self.need
     }
 
     /// Best score over the segments of `text`, with the segment's start.
     pub fn best(&mut self, text: &str) -> Option<(u16, usize)> {
         let mut best: Option<(u16, usize)> = None;
         for (s, e) in segments(text) {
+            if !self.may_match(&text[s..e]) {
+                continue;
+            }
             if let Some(m) = self.m.match_one(&text[s..e], 0) {
                 if m.score >= self.min && best.map_or(true, |b| m.score > b.0) && self.close(&text[s..e]) {
                     best = Some((m.score, s));

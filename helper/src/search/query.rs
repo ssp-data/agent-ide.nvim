@@ -222,7 +222,9 @@ pub fn search<'a>(docs: impl Iterator<Item = &'a Doc>, p: &Params) -> Vec<Hit> {
 /// The hits and how many matched in all (the hits are the best `limit` of them; with fuzzy
 /// matching the count is a lower bound when the exact matches alone filled the limit).
 pub fn search_counted<'a>(docs: impl Iterator<Item = &'a Doc>, p: &Params) -> (Vec<Hit>, usize) {
-    let words: Vec<Word> = p.query.split_whitespace().map(Word::new).collect();
+    let mut words: Vec<Word> = p.query.split_whitespace().map(Word::new).collect();
+    // the longest word first: it fails soonest on texts that do not match
+    words.sort_by_key(|w| std::cmp::Reverse(w.raw.len()));
     let mut kinds = [false; 5];
     for k in &p.kinds {
         kinds[*k as usize] = true;

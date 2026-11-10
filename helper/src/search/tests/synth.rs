@@ -83,6 +83,21 @@ pub fn session(rounds: u32, words: &str, pad: usize) -> String {
     s
 }
 
+/// A session of realistic prose: prompts of 100–400 bytes, answers of 1–4 KiB, and a tool
+/// call with `pad` bytes of output per round.
+pub fn prose_session(seed: u64, rounds: u32, pad: usize) -> String {
+    let mut s = String::new();
+    let out = "x".repeat(pad);
+    for n in 0..rounds {
+        let k = seed * 1000 + n as u64;
+        s += &user(&prose(k, 100 + (k as usize * 37) % 300), n);
+        s += &answer(&prose(k + 7, 1024 + (k as usize * 997) % 3072), n);
+        s += &tool("Bash", "ls -la", &format!("t{n}"));
+        s += &result(&format!("t{n}"), &out);
+    }
+    s
+}
+
 const WORDS: &[&str] = &[
     "the", "parser", "index", "search", "migrate", "database", "umlaut", "Übersetzung", "Größe", "Brücke",
     "function", "returns", "error", "handling", "documentation", "release", "notes", "window", "buffer",
