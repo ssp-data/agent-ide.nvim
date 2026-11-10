@@ -369,8 +369,8 @@ function M.setup_buf(buf, s)
 end
 
 ---Create the prompt buffer of session `s`: `agent-ide://prompt/<id>`, `acwrite`, markdown.
----Nothing is saved yet (part 3), so the buffer is never 'modified': a draft never blocks `:q`,
----`:qa`, `ZZ` or `:wq`, and hiding the window keeps it.
+---The buffer is never 'modified': a draft never blocks `:q`, `:qa`, `ZZ` or `:wq`, and hiding
+---the window keeps it. Saving (`:w`, `ZZ`, `:x`) is prompts/save.lua.
 ---@param s table Session
 ---@return integer buf
 function M.create(s)
@@ -383,6 +383,7 @@ function M.create(s)
   api.nvim_create_autocmd({ 'BufWriteCmd', 'TextChanged', 'TextChangedI', 'TextChangedP', 'InsertLeave' }, {
     buffer = buf, callback = function(ev) vim.bo[ev.buf].modified = false end })
   M.setup_buf(buf, s)
+  require('agent-ide.prompts.save').attach(buf) -- :w, ZZ, :x and <leader>W save the prompt
   return buf
 end
 
@@ -394,10 +395,16 @@ function M.setup_win(win)
   end
 end
 
----Empty the prompt buffer after a send.
+---True while `buf` shows a prompt from the history instead of the draft.
+---@param buf integer
+---@return boolean
+function M.browsing(buf) return bufs[buf] ~= nil and bufs[buf].idx ~= nil end
+
+---Empty the prompt buffer after a send; the text no longer stands for a loaded prompt file.
 ---@param buf integer
 function M.clear(buf)
   reset_history(buf)
+  vim.b[buf].agent_ide_origin = nil
   api.nvim_buf_set_lines(buf, 0, -1, false, {})
   vim.bo[buf].modified = false
 end

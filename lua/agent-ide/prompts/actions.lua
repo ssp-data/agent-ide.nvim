@@ -208,7 +208,6 @@ function M.map_chat(buf, is_transcript, keys)
       end, { buffer = buf, nowait = true, silent = true, desc = 'Agent-IDE: pick a prompt' })
     end
   end
-  if not is_transcript then require('agent-ide.prompts.save').attach(buf, keys) end
 end
 
 ---A drawer row key on a prompt row (see ui/prompt_sections.lua).
