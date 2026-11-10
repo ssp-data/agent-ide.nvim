@@ -81,7 +81,9 @@ end
 local function start()
   if state.proc then return true end
   local cache = vim.fn.stdpath('cache') .. '/agent-ide'
-  pcall(vim.fn.mkdir, cache, 'p')
+  -- private like the transcripts: the helper's files there are derived from them
+  pcall(vim.fn.mkdir, cache, 'p', tonumber('700', 8))
+  pcall(vim.uv.fs_chmod, cache, tonumber('700', 8))
   state.gen = state.gen + 1
   local gen = state.gen
   local cur = { exited = false }

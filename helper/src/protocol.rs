@@ -1,6 +1,6 @@
 //! Line protocol: one JSON object per line on stdin and stdout.
 use crate::cache::Cache;
-use crate::{events, scan, watch};
+use crate::{events, scan, search, watch};
 use serde_json::{json, Value};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -35,6 +35,7 @@ pub struct Server {
     cache: Cache,
     out: Arc<Out>,
     watch: Option<watch::Watch>,
+    search: search::service::Service,
 }
 
 fn error(id: Value, message: impl Into<String>) -> Value {
@@ -47,7 +48,8 @@ fn str_param<'a>(params: &'a Value, key: &str) -> Result<&'a str, String> {
 
 impl Server {
     pub fn new(cache_dir: Option<PathBuf>, out: Arc<Out>) -> Server {
-        Server { cache: Cache::load(cache_dir.as_deref()), out, watch: None }
+        let search = search::service::Service::new(cache_dir.as_deref(), out.clone());
+        Server { cache: Cache::load(cache_dir.as_deref()), out, watch: None, search }
     }
 
     /// Handles one request line. `None` for blank lines; otherwise exactly one response.
@@ -96,6 +98,8 @@ impl Server {
                 self.watch = Some(watch::start(Path::new(dir), self.out.clone())?);
                 Ok(json!({}))
             }
+            "search" => self.search.search(params),
+            "context" => self.search.context(params),
             other => Err(format!("unknown method `{other}`")),
         }
     }

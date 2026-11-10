@@ -215,6 +215,12 @@ function actions.row_key(lhs)
   if not ok then vim.notify('Agent-IDE: ' .. tostring(err), vim.log.levels.ERROR) end
 end
 
+function actions.search()
+  local node = current_node()
+  local p = node and node.project
+  require('agent-ide').search(p and { scope = 'project', project = p } or nil)
+end
+
 function actions.lazygit()
   local node = current_node()
   local p = node and node.project
@@ -230,6 +236,7 @@ function actions.help()
     { key = 'za', desc = 'toggle fold' },
     { key = 'R', desc = 'refresh' },
     { key = 'gp', desc = 'jump to tmux pane' },
+    { key = 's', desc = 'search this project (<Tab> in the picker: all sessions)' },
     { key = 'x', desc = 'park the session: stop its Claude process here' },
     { key = 'glg', desc = 'lazygit for the project (or the row\'s worktree)' },
     { key = 'q', desc = 'close drawer' },
@@ -260,6 +267,7 @@ local function ensure_buf()
   map('glg', actions.lazygit)
   api.nvim_create_autocmd('BufEnter', { buffer = buf, callback = function() sections.focus() end })
   map('q', actions.close)
+  map('s', actions.search)
   map('?', actions.help)
   S.buf = buf
   return buf

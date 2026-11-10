@@ -96,3 +96,33 @@ fn cache_written_by_another_version_is_ignored() {
     let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
     assert_eq!(v["version"], crate::cache::VERSION);
 }
+
+#[test]
+fn cache_with_other_rules_or_format_is_ignored_and_the_file_is_private() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tmp("rules");
+    let cache_dir = root.join("cache");
+    let projects = root.join("projects");
+    let f = project(&projects, "{\"type\":\"user\",\"message\":{\"content\":\"fresh\"}}\n");
+    let reads = AtomicUsize::new(0);
+    let mut c = Cache::load(Some(&cache_dir));
+    scan::scan(&projects, Some(&mut c), &reads);
+    let file = cache_dir.join(crate::cache::FILE_NAME);
+    let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(&file), 0o600);
+    assert_eq!(mode(&cache_dir), 0o700);
+    let key = f.to_string_lossy().into_owned();
+    let changes = [
+        ("rules", serde_json::json!(crate::events::RULES_VERSION + 1)),
+        ("format", serde_json::json!(crate::cache::FORMAT + 1)),
+    ];
+    for (field, value) in changes {
+        let mut v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        v[field] = value;
+        v["entries"][&key]["meta"]["title"] = "stale".into();
+        std::fs::write(&file, v.to_string()).unwrap();
+        let mut c = Cache::load(Some(&cache_dir));
+        assert_eq!(scan::scan(&projects, Some(&mut c), &reads)[0].title, "fresh", "{field}");
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}

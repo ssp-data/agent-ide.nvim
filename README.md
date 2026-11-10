@@ -54,6 +54,11 @@ require('agent-ide').setup({
   keys = { -- false disables a mapping; keys = false disables all of them
     toggle = '<leader>aa',
     next_waiting = '<leader>an',
+    search = '<leader>as', -- search all sessions
+    prompt_history = '<leader>aP', -- every prompt, newest first
+    -- the search picker's query line; close works in normal mode (insert-mode <Esc> leaves insert mode)
+    search_picker = { next = { '<C-n>', '<Down>' }, prev = { '<C-p>', '<Up>' }, open = '<CR>', copy = '<C-y>',
+      reuse = '<C-e>', scope = '<Tab>', kinds = '<C-t>', close = { '<Esc>', 'q' } },
     chat = { send = '<C-CR>', send_alt = '<leader><CR>', interrupt = '<C-c>', prompt = '<leader>ap', help = '?',
       history_prev = '<C-p>', history_next = '<C-n>', attach = '<leader>af',
       answer_inner = 'ir', answer_outer = 'ar', mode = '<S-Tab>', model = '<leader>aM', answer = '<leader>ay',
@@ -87,6 +92,8 @@ Global:
 | Key | Action |
 |---|---|
 | `<leader>aa` | Toggle the Agents tab (same as `:Agents`) |
+| `<leader>as` | Search all sessions (`:AgentsSearch [query]`) |
+| `<leader>aP` | Prompt history: every prompt you sent, newest first |
 | `<leader>an` | Go to the next session that needs you: one waiting for your answer here (oldest ask first), then one waiting in another Claude (jumped to in tmux), then a failed turn, then a finished turn you have not seen; from the first of them, the one after it |
 
 In the drawer:
@@ -97,6 +104,7 @@ In the drawer:
 | `za` | Expand or collapse the node under the cursor |
 | `R` | Rescan sessions and refresh running state |
 | `gp` | Jump to the tmux pane of a session running elsewhere |
+| `s` | Search the sessions of the project under the cursor |
 | `x` | Park the session: stop the Claude process this Neovim runs for it |
 | `q` | Close the drawer |
 | `glg` | Open lazygit for the row's repository (a worktree row or session: that worktree) |
@@ -243,6 +251,29 @@ To keep your library in git, point `library_dir` at a folder of a repository you
 opts = { prompts = { library_dir = '~/notes/prompts' } }
 ```
 
+## Search
+
+`<leader>as` (or `:AgentsSearch [query]`, or `require('agent-ide').search()`) opens a floating picker that searches the titles, your prompts and Claude's answers of every session, live as you type. `<leader>aP` opens the same picker on your prompts only, newest first: the prompt history of all sessions. In the drawer, `s` searches the project under the cursor.
+
+With the Rust helper the search is fuzzy and typo-tolerant ([neo_frizbee](https://crates.io/crates/neo_frizbee)): exact and word-start matches come first, then titles before prompts before answers, then the newest; a fuzzy match must keep its letters close together. Words match in any order; a word with a capital letter matches case-sensitively; umlauts match regardless of case (`über` finds `Über`). A session found only through a word of its project's name is listed last (`proj`). The index is built in the background on first use, kept on disk and updated when a transcript changes. Without the helper the picker says it is limited: titles and prompts only, exact words only.
+
+| Key in the picker | Action |
+|---|---|
+| typing | Search (results update per keystroke) |
+| `<C-n>` / `<C-p>`, `<Down>` / `<Up>` | Move |
+| `<CR>` | Open the session's chat on the hit's line |
+| `<C-y>` | Copy the hit's full text (prompt, answer or title) |
+| `<C-e>` | Put the prompt into the open chat prompt to reuse it |
+| `<Tab>` | Scope: all sessions, the current project, the current session |
+| `<C-t>` | What to search: everything, prompts, answers, titles, or also tool calls |
+| `<Esc>` (normal mode) or `q` | Close; in insert mode `<Esc>` first goes to normal mode |
+
+The keys are under `keys.search_picker`; each is a key, a list of keys, or `false`. Other keys keep their Vim meaning in the query line: `<C-r>` inserts a register, `<C-k>` a digraph (`<C-k>u:` gives `ü`).
+
+The preview shows the hit in its turn, rendered and folded as in the chat, with the hit's fold open. The prompt history lists the newest 500 prompts (the footer says how many there are; type to narrow), and the same prompt sent several times in a row is one row with a count (`×3`).
+
+Tool calls are searched only on request (`<C-t>`), tool output never. The index keeps the first 4 KiB of each prompt and answer; copying and reusing take the full text from the transcript, and refuse with a notice when it cannot be read.
+
 ## How it works
 
 The plugin reads the local Claude Code transcripts (JSONL files), builds an index of projects and sessions, and renders a transcript as markdown on demand. A small Rust helper (`agent-ide-helper`) can do the scanning, parsing and file watching off the Neovim process. When the helper is not built, or fails, a pure Lua implementation takes over and gives identical results. Neither path blocks the editor: the drawer opens in under 50 ms with 60 projects, a 1 MB history in under 150 ms with the helper, and a cold Lua scan never blocks the UI for more than 16 ms at a time.
@@ -254,6 +285,10 @@ Apart from Claude Code itself, everything stays on your machine. The plugin read
 Prompts you save go to `stdpath('data')/agent-ide/prompts/<project folder>-<short hash>/` (and templates to `stdpath('data')/agent-ide/library` unless you set `prompts.library_dir`).
 
 The Rust helper keeps a metadata cache in `stdpath('cache')/agent-ide/index-v3.json` (on Linux usually `~/.cache/nvim/agent-ide/index-v3.json`). It holds the path, title, working directory, branch, size and modification time of each session, so the drawer opens fast. You can delete it at any time; it is rebuilt on the next scan.
+
+The search index is `search-v1.json` in the same folder. It holds the first 4 KiB of every prompt and answer and a one-line summary of every tool call, with the session titles and paths. It is written at most every 30 seconds; changes since the last write are indexed again on the next start (the helper is stopped right after Neovim closes its input, so a final write is not guaranteed). Both files are ignored when a different helper version, other parse rules or another file format wrote them.
+
+Both files are as private as the transcripts they come from: the folder is created (and tightened to) mode 0700, the files are written with mode 0600 through a temporary file that is renamed into place, and temporary files left by a helper that was killed while writing are removed on the next start. You can delete either file at any time; it is rebuilt on the next scan or search.
 
 ## Roadmap
 
@@ -268,7 +303,8 @@ The Rust helper keeps a metadata cache in `stdpath('cache')/agent-ide/index-v3.j
 
 ```sh
 make test          # mini.test suite, includes the speed budgets (clones mini.nvim into deps/)
-make test-helper   # Rust tests for the helper
+make test-helper   # Rust tests for the helper, with the search speed budgets in a release build
+make test-helper-release   # only the release-build search tests and budgets
 make test-real     # drive the real Claude Code (subscription, model haiku) in a temporary git repository
 make helper        # build the helper
 make bench         # print the four speed measurements next to their budgets

@@ -136,7 +136,7 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
 }
 
 /// UNIX seconds of `YYYY-MM-DDTHH:MM:SS[.fff]Z` (UTC); anything else, and dates before 1970, give `None`.
-fn parse_timestamp(s: &str) -> Option<u64> {
+pub fn parse_timestamp(s: &str) -> Option<u64> {
     let b = s.as_bytes();
     if b.len() < 20 || b[b.len() - 1] != b'Z' {
         return None;
