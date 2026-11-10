@@ -4,7 +4,7 @@
 // (test/*.test.js). Inputs are already-read data, so nothing here touches the disk or the clock.
 
 var STALE_SECONDS = 90
-var MAX_ROWS = 100
+var MAX_ROWS = 20
 var NAMES = ["", "ok", "running", "review", "input"]
 var FALLBACK_COLORS = { green: "#9ece6a", yellow: "#e0af68", orange: "#ff9e64", violet: "#a277ff" }
 var STATE_RANK = { waiting: 0, review: 1, busy: 2 }
