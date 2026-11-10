@@ -1,8 +1,16 @@
 -- Renders transcript events into buffer lines plus fold ranges.
 local M = {}
 
-local CAP_INPUT, CAP_RESULT, CAP_UNKNOWN = 60, 200, 20
+local CAP_INPUT, CAP_RESULT, CAP_UNKNOWN, CAP_EDIT_SIDE = 60, 200, 20, 30
 local SUMMARY_FIELDS = { 'command', 'file_path', 'skill', 'pattern', 'description', 'prompt' }
+
+-- Metatables are a decoding detail (`{}` from JSON carries one, a default `{}` does not); leave
+-- them out so the same input always reads the same, whichever backend parsed it.
+local INSPECT_OPTS = {
+  process = function(item, path)
+    if path[#path] ~= vim.inspect.METATABLE then return item end
+  end,
+}
 
 ---Split on \n, \r\n and \r; keeps empty pieces (including a trailing one).
 local function split(s)
@@ -44,13 +52,14 @@ local function call_body(call)
   if call.name == 'Bash' then
     lines = split('$ ' .. tostring(input.command or ''))
   elseif call.name == 'Edit' then
-    lines = {}
-    for _, l in ipairs(split(input.old_string)) do lines[#lines + 1] = '- ' .. l end
-    for _, l in ipairs(split(input.new_string)) do lines[#lines + 1] = '+ ' .. l end
+    -- each side capped on its own, so a long removal never hides the added lines
+    lines = cap(prefixed(split(input.old_string), '- '), CAP_EDIT_SIDE)
+    vim.list_extend(lines, cap(prefixed(split(input.new_string), '+ '), CAP_EDIT_SIDE))
+    return lines
   elseif call.name == 'Write' then
     lines = split(input.content)
   else
-    lines = split(vim.inspect(call.input))
+    lines = split(vim.inspect(call.input, INSPECT_OPTS))
   end
   return cap(lines, CAP_INPUT)
 end

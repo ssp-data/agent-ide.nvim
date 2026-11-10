@@ -80,6 +80,29 @@ T['tool input cap is 60 lines'] = function()
   eq(#r.lines, 1 + 60 + 1)
   eq(r.lines[#r.lines], '│ … 40 more lines')
 end
+T['edit caps removed and added lines separately at 30 each'] = function()
+  local r = render.render({ { kind = 'tool_call', id = 'e', name = 'Edit',
+    input = { file_path = '/f', old_string = string.rep('o\n', 69) .. 'o', new_string = 'n1\nn2' } } })
+  local minus, plus = 0, 0
+  for _, l in ipairs(r.lines) do
+    if l == '│ - o' then minus = minus + 1 end
+    if vim.startswith(l, '│ + ') then plus = plus + 1 end
+  end
+  eq({ minus, plus }, { 30, 2 })
+  eq(r.lines[32], '│ … 40 more lines')
+  eq({ r.lines[33], r.lines[34] }, { '│ + n1', '│ + n2' })
+  local both = render.render({ { kind = 'tool_call', id = 'e', name = 'Edit',
+    input = { file_path = '/f', old_string = string.rep('o\n', 34) .. 'o', new_string = string.rep('n\n', 31) .. 'n' } } })
+  eq(#both.lines, 1 + 30 + 1 + 30 + 1)
+  eq(both.lines[32], '│ … 5 more lines')
+  eq(both.lines[#both.lines], '│ … 2 more lines')
+end
+T['tool input shows empty objects as {} however they were decoded'] = function()
+  local a = render.render({ { kind = 'tool_call', id = 'a', name = 'Foo', input = vim.json.decode('{"x":{}}') } })
+  local b = render.render({ { kind = 'tool_call', id = 'a', name = 'Foo', input = { x = {} } } })
+  eq(a.lines, b.lines)
+  eq(vim.tbl_contains(a.lines, '│   x = {}'), true)
+end
 T['summary is cut to 80 characters'] = function()
   local r = render.render({ { kind = 'tool_call', id = 'a', name = 'Bash', input = { command = string.rep('z', 100) .. '\nsecond' } } })
   eq(r.lines[1], '▸ Bash: ' .. string.rep('z', 80))
