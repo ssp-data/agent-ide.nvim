@@ -5,9 +5,9 @@ local M = {}
 local on_change_cb
 
 ---@param cb fun(sessions: table[])
----@param projects_dir? string defaults to ~/.claude/projects (config arrives later)
+---@param projects_dir? string defaults to the `projects_dir` setting
 function M.scan(cb, projects_dir)
-  lua_scan.scan(projects_dir or vim.fn.expand('~/.claude/projects'), cb)
+  lua_scan.scan(projects_dir or require('agent-ide.config').get().projects_dir, cb)
 end
 
 ---@param path string

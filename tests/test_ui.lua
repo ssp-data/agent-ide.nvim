@@ -1,0 +1,289 @@
+-- UI integration tests: each case drives a fresh child Neovim.
+local eq = MiniTest.expect.equality
+local child = MiniTest.new_child_neovim()
+
+local FIXTURES = vim.fn.fnamemodify('tests/fixtures/projects', ':p'):gsub('/$', '')
+local ALPHA = FIXTURES .. '/-home-u-git-alpha/11111111-1111-4111-8111-111111111111.jsonl'
+local ALPHA_ID = '11111111-1111-4111-8111-111111111111'
+local ICONS = { open = 'v', closed = '>', project = 'P', waiting = 'W', busy = 'B', idle = 'I', parked = '.' }
+local LIVE_JSON = '[{"sessionId":"' .. ALPHA_ID .. '","status":"waiting","pid":1,"cwd":"/home/u/git/alpha"}]'
+
+local T = MiniTest.new_set({ hooks = {
+  post_case = function() child.stop() end,
+  post_once = function() child.stop() end,
+} })
+
+-- Start a child with the plugin set up against `projects_dir` (fixtures by default).
+local function start(projects_dir)
+  child.restart({ '-u', 'tests/minimal_init.lua' })
+  child.lua([[
+    vim.env.TMUX = nil
+    _G.notes = {}
+    vim.notify = function(msg) table.insert(_G.notes, msg) end
+    require('agent-ide').setup(...)
+  ]], { {
+    projects_dir = projects_dir or FIXTURES,
+    helper = { enabled = false },
+    live = { interval_ms = 50, cmd = { 'echo', LIVE_JSON } },
+    icons = ICONS,
+  } })
+end
+
+local function wait_for(cond, what)
+  local ok = vim.wait(2000, cond, 20)
+  if not ok then error('timed out waiting for ' .. what, 2) end
+end
+
+local function drawer_lines()
+  return child.lua_get([[(function()
+    local s = require('agent-ide.ui.drawer').state()
+    return s.buf and vim.api.nvim_buf_get_lines(s.buf, 0, -1, false) or {}
+  end)()]])
+end
+
+local function has_line(lines, pattern, plain)
+  for i, l in ipairs(lines) do
+    if l:find(pattern, 1, plain) then return i end
+  end
+end
+
+local function wait_drawer_line(pattern, plain)
+  wait_for(function() return has_line(drawer_lines(), pattern, plain) ~= nil end, 'drawer line ' .. pattern)
+end
+
+-- Focus the drawer and put the cursor on the first line containing `text`.
+local function drawer_cursor_to(text)
+  wait_drawer_line(text, true)
+  local row = has_line(drawer_lines(), text, true)
+  child.lua('local s = require("agent-ide.ui.drawer").state(); vim.api.nvim_set_current_win(s.win); vim.api.nvim_win_set_cursor(s.win, { ..., 0 })', { row })
+end
+
+local function buf_lines() return child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)') end
+
+-- Toggle, expand `project`, open the session titled `title`; waits for the history to load.
+local function open_session(project, title)
+  child.lua('require("agent-ide").toggle()')
+  drawer_cursor_to('> P ' .. project .. '  ')
+  child.type_keys('<CR>')
+  drawer_cursor_to(title)
+  child.type_keys('<CR>')
+  wait_for(function() return has_line(buf_lines(), '## You', true) ~= nil end, 'history loaded')
+end
+
+local function write_session(dir, cwd, id, prompt)
+  vim.fn.mkdir(dir, 'p')
+  local rec = vim.json.encode({ type = 'user', uuid = 'z1', cwd = cwd, message = { role = 'user', content = prompt } })
+  vim.fn.writefile({ rec }, dir .. '/' .. id .. '.jsonl')
+end
+
+T['toggle creates Agents tab with drawer on the right at width 44'] = function()
+  start()
+  child.lua('require("agent-ide").toggle()')
+  eq(child.lua_get('vim.fn.tabpagenr("$")'), 2)
+  local s = child.lua_get([[(function()
+    local s = require('agent-ide.ui.drawer').state()
+    return { nr = vim.fn.win_id2win(s.win), last = vim.fn.winnr('$'), width = vim.api.nvim_win_get_width(s.win),
+      ft = vim.bo[s.buf].filetype, fix = vim.wo[s.win].winfixwidth, number = vim.wo[s.win].number,
+      bt = vim.bo[s.buf].buftype, modifiable = vim.bo[s.buf].modifiable }
+  end)()]])
+  eq(s, { nr = 2, last = 2, width = 44, ft = 'agent-ide', fix = true, number = false, bt = 'nofile', modifiable = false })
+end
+
+T['drawer on the left when configured'] = function()
+  start()
+  child.lua('require("agent-ide").setup({ drawer = { side = "left", width = 30 } })')
+  child.lua('require("agent-ide").toggle()')
+  local s = child.lua_get([[(function()
+    local s = require('agent-ide.ui.drawer').state()
+    return { nr = vim.fn.win_id2win(s.win), width = vim.api.nvim_win_get_width(s.win) }
+  end)()]])
+  eq(s, { nr = 1, width = 30 })
+end
+
+T['drawer lists fixture projects with live state'] = function()
+  start()
+  child.lua('require("agent-ide").toggle()')
+  wait_drawer_line('^> P alpha  W ')
+  local lines = drawer_lines()
+  eq(has_line(lines, '-nocwd', true) ~= nil, true)
+  eq(lines[has_line(lines, '-nocwd', true)]:find('(gone)', 1, true) ~= nil, true)
+end
+
+T['enter on project expands; enter on session opens history'] = function()
+  start()
+  child.lua('require("agent-ide").toggle()')
+  drawer_cursor_to('> P alpha  ')
+  child.type_keys('<CR>')
+  wait_drawer_line('Sessions (', true)
+  drawer_cursor_to('Alpha basics')
+  child.type_keys('<CR>')
+  wait_for(function() return has_line(buf_lines(), '## You', true) ~= nil end, 'history loaded')
+  local name = child.lua_get('vim.api.nvim_buf_get_name(0)')
+  eq(vim.endswith(name, 'agent-ide://history/' .. ALPHA_ID), true)
+  local lines = buf_lines()
+  local bash = has_line(lines, '▸ Bash:', true)
+  eq(bash ~= nil, true)
+  eq(child.lua_get('vim.fn.foldclosed(...)', { bash }), bash)
+  eq(child.lua_get('vim.bo.modifiable'), false)
+  eq(child.lua_get('vim.bo.filetype'), 'markdown')
+  eq(child.lua_get('vim.fn.line(".") == vim.fn.line("$")'), true)
+  eq(child.lua_get('vim.wo.winbar'):find('history (read-only)', 1, true) ~= nil, true)
+end
+
+T['history of a session with unknown records shows an unknown fold'] = function()
+  start()
+  open_session('alpha', 'Alpha basics')
+  eq(has_line(buf_lines(), '▸ unknown: future-thing', true) ~= nil, true)
+end
+
+T['global cwd unchanged, tab cwd set only when project folder exists'] = function()
+  local tmp = vim.fn.tempname()
+  local repo = tmp .. '/repo'
+  vim.fn.mkdir(repo, 'p')
+  vim.fn.system({ 'git', 'init', '-q', repo })
+  write_session(tmp .. '/projects/-repo', repo, '55555555-5555-4555-8555-555555555555', 'Hello repo')
+  start(tmp .. '/projects')
+  local before = child.lua_get('vim.fn.getcwd(-1, -1)')
+  open_session('repo', 'Hello repo')
+  eq(child.lua_get('vim.fn.getcwd(-1, -1)'), before)
+  eq(child.lua_get('vim.fn.getcwd(-1, 0)'), repo)
+  -- a project whose folder is gone leaves the tab cwd alone
+  start()
+  local tab_before = child.lua_get('vim.fn.getcwd(-1, -1)')
+  open_session('alpha', 'Alpha basics')
+  eq(child.lua_get('vim.fn.getcwd(-1, 0)'), tab_before)
+  eq(child.lua_get('vim.fn.getcwd(-1, -1)'), tab_before)
+  vim.fn.delete(tmp, 'rf')
+end
+
+T['toggle twice closes and reopens drawer; from another tab jumps back'] = function()
+  start()
+  child.lua('require("agent-ide").toggle()')
+  local tab = child.lua_get('require("agent-ide.ui.drawer").state().tab')
+  child.lua('require("agent-ide").toggle()')
+  eq(child.lua_get('require("agent-ide.ui.drawer").state().win'), vim.NIL)
+  eq(child.lua_get('vim.fn.tabpagenr("$")'), 2)
+  child.lua('require("agent-ide").toggle()')
+  eq(child.lua_get('vim.api.nvim_win_is_valid(require("agent-ide.ui.drawer").state().win)'), true)
+  child.cmd('tabprevious')
+  eq(child.lua_get('vim.api.nvim_get_current_tabpage()') ~= tab, true)
+  child.cmd('Agents')
+  eq(child.lua_get('vim.api.nvim_get_current_tabpage()'), tab)
+  eq(child.lua_get('vim.fn.tabpagenr("$")'), 2)
+end
+
+T['closing the Agents tab resets state; next toggle makes a fresh tab'] = function()
+  start()
+  child.lua('require("agent-ide").toggle()')
+  local tab = child.lua_get('require("agent-ide.ui.drawer").state().tab')
+  child.cmd('tabclose')
+  eq(child.lua_get('vim.fn.tabpagenr("$")'), 1)
+  eq(child.lua_get('require("agent-ide.ui.drawer").state().tab'), vim.NIL)
+  child.lua('require("agent-ide").toggle()')
+  eq(child.lua_get('vim.fn.tabpagenr("$")'), 2)
+  local s = child.lua_get('require("agent-ide.ui.drawer").state()')
+  eq(s.tab ~= tab, true)
+  eq(child.lua_get('vim.api.nvim_win_is_valid(...)', { s.win }), true)
+end
+
+T['history reloads after the transcript file changes'] = function()
+  local tmp = vim.fn.tempname()
+  local dir = tmp .. '/-home-u-git-alpha'
+  vim.fn.mkdir(dir, 'p')
+  local copy = dir .. '/' .. ALPHA_ID .. '.jsonl'
+  vim.fn.writefile(vim.fn.readfile(ALPHA), copy)
+  start(tmp)
+  open_session('alpha', 'Alpha basics')
+  eq(has_line(buf_lines(), 'Brand new question', true), nil)
+  local rec = vim.json.encode({ type = 'user', uuid = 'z9', cwd = '/home/u/git/alpha', message = { role = 'user', content = 'Brand new question' } })
+  vim.fn.writefile({ rec }, copy, 'a')
+  drawer_cursor_to('Alpha basics')
+  child.type_keys('<CR>')
+  wait_for(function() return has_line(buf_lines(), 'Brand new question', true) ~= nil end, 'reloaded history')
+  vim.fn.delete(tmp, 'rf')
+end
+
+T['history of a vanished transcript says so'] = function()
+  local tmp = vim.fn.tempname()
+  local dir = tmp .. '/-home-u-git-alpha'
+  vim.fn.mkdir(dir, 'p')
+  local copy = dir .. '/' .. ALPHA_ID .. '.jsonl'
+  vim.fn.writefile(vim.fn.readfile(ALPHA), copy)
+  start(tmp)
+  child.lua('require("agent-ide").toggle()')
+  drawer_cursor_to('> P alpha  ')
+  child.type_keys('<CR>')
+  drawer_cursor_to('Alpha basics')
+  vim.fn.delete(copy)
+  child.type_keys('<CR>')
+  eq(buf_lines(), { 'Transcript not found: ' .. copy })
+  vim.fn.delete(tmp, 'rf')
+end
+
+T['gp outside tmux reports a reason'] = function()
+  start()
+  child.lua('require("agent-ide").toggle()')
+  drawer_cursor_to('> P alpha  W ')
+  child.type_keys('<CR>')
+  drawer_cursor_to('Alpha basics')
+  child.type_keys('gp')
+  wait_for(function() return #child.lua_get('_G.notes') > 0 end, 'notification')
+  local notes = child.lua_get('_G.notes')
+  eq(notes[#notes], 'Agent-IDE: cannot jump (not in tmux)')
+end
+
+T['gp on a session without live state says it is not running'] = function()
+  start()
+  child.lua('require("agent-ide").toggle()')
+  drawer_cursor_to('> P notes  ')
+  child.type_keys('<CR>')
+  drawer_cursor_to('Meeting notes summary')
+  child.type_keys('gp')
+  local notes = child.lua_get('_G.notes')
+  eq(notes[#notes], 'Agent-IDE: session is not running')
+end
+
+T['q closes the drawer window, tab stays'] = function()
+  start()
+  child.lua('require("agent-ide").toggle()')
+  local s = child.lua_get('require("agent-ide.ui.drawer").state()')
+  child.type_keys('q')
+  eq(child.lua_get('vim.api.nvim_win_is_valid(...)', { s.win }), false)
+  eq(child.lua_get('vim.api.nvim_tabpage_is_valid(...)', { s.tab }), true)
+  eq(child.lua_get('vim.fn.tabpagenr("$")'), 2)
+end
+
+T['index change rescans without moving focus or the main cursor'] = function()
+  start()
+  child.lua([[
+    local index = require('agent-ide.index')
+    local orig = index.on_change
+    index.on_change = function(fn) _G.index_changed = fn; orig(fn) end
+    local lua_scan = require('agent-ide.index.lua_scan')
+    local scan = lua_scan.scan
+    _G.scans = 0
+    lua_scan.scan = function(...) _G.scans = _G.scans + 1; return scan(...) end
+  ]])
+  open_session('alpha', 'Alpha basics')
+  local before = child.lua_get('{ vim.api.nvim_get_current_win(), vim.api.nvim_win_get_cursor(0) }')
+  local scans = child.lua_get('_G.scans')
+  child.lua('_G.index_changed(); _G.index_changed(); _G.index_changed()')
+  wait_for(function() return child.lua_get('_G.scans') > scans end, 'debounced rescan')
+  vim.wait(300)
+  eq(child.lua_get('_G.scans'), scans + 1)
+  eq(child.lua_get('{ vim.api.nvim_get_current_win(), vim.api.nvim_win_get_cursor(0) }'), before)
+end
+
+T['foldexpr tolerates unknown buffers'] = function()
+  start()
+  eq(child.lua_get('require("agent-ide.ui.history").foldexpr(1)'), '0')
+end
+
+T['setup maps the toggle key; false disables it'] = function()
+  start()
+  eq(child.lua_get('vim.fn.maparg("<leader>aa", "n") ~= ""'), true)
+  child.lua('require("agent-ide").setup({ keys = { toggle = false } })')
+  eq(child.lua_get('vim.fn.maparg("<leader>aa", "n")'), '')
+end
+
+return T
