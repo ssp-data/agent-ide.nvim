@@ -21,7 +21,7 @@ T['both sets have the same keys; no value is wider than 2 cells'] = function()
   for k in pairs(icons.nerd) do eq({ k, icons.plain[k] ~= nil }, { k, true }) end
 end
 
-T['the nerd set differs from the plain set in the notebook and the one git glyph only'] = function()
+T['the nerd set differs from the plain set in the pencil and the one git glyph only'] = function()
   local diff = {}
   for k, v in pairs(icons.nerd) do
     if v ~= icons.plain[k] then diff[#diff + 1] = k end
@@ -39,7 +39,7 @@ T['the plain set uses no private-use (nerd font) characters'] = function()
 end
 
 T['nerd glyphs are the code points named in the comments'] = function()
-  eq(vim.fn.char2nr(icons.nerd.prompts), 0xF0EB5) -- nf-md-notebook_outline
+  eq(vim.fn.char2nr(icons.nerd.prompts), 0xF0CB6) -- nf-md-pencil_outline
   eq(vim.fn.char2nr(icons.nerd.changes), 0xF47F) -- nf-oct-git_compare
 end
 

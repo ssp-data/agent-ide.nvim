@@ -13,7 +13,7 @@ local function g(cp)
 end
 
 -- The two sets share the fold arrows, the worktree mark and the six state marks (plain
--- characters whose colour tells them apart). Only these differ: the Prompts notebook and the one
+-- characters whose colour tells them apart). Only these differ: the Prompts pencil and the one
 -- git glyph of the Changes and Commits rows; the plain set has no icon there.
 local SHARED = {
   open = '▾', closed = '▸',
@@ -23,7 +23,7 @@ local SHARED = {
 }
 
 M.nerd = vim.tbl_extend('force', SHARED, {
-  prompts = g(0xF0EB5), -- nf-md-notebook_outline
+  prompts = g(0xF0CB6), -- nf-md-pencil_outline
   changes = g(0xF47F), -- nf-oct-git_compare (the same glyph for both git rows)
   commits = g(0xF47F), -- nf-oct-git_compare
 })

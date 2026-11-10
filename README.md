@@ -1,6 +1,6 @@
 # Agent-IDE.nvim (Agents Drawer)
 
-A Neovim plugin that lists your Claude Code sessions in a drawer, grouped by git repository, and opens any session's history as a read-only markdown buffer. Sessions that are running show their state (waiting, busy, idle) next to their name.
+A Neovim plugin to run and review all your Claude Code sessions from one place: a drawer lists every session grouped by git repository, you chat in native buffers (a prompt buffer to write, a markdown buffer to read), and you review what the agent changed with git diffs, without leaving Neovim.
 
 
 ## Why I built Agent-IDE?
@@ -16,13 +16,21 @@ The features and focus are on managing all agent sessions in a single drawer, as
 
 ### Why not a Terminal TUI, why Neovim?
 You might ask why not a terminal-based TUI, now that Herdr, Rex, and others are built in the terminal for agents, or even apps nowadays. The reason is that nvim is doing most of the things I like to improve anyway, and I have a 5+ year history of dotfiles for nvim, where I optimized these aspects over the years already - things like: 
-- beautiful markdwon rendering
+- beautiful markdown rendering
 - modal typing and fast moving around
 - git integration with lazygit and other shortcuts
 - the place to navigate and being an IDE for agents, as it has so many functionalities and is super extensible and composable
 
 ## Features
-- TODO: List all key veatures here
+- **One drawer for all sessions**, grouped by git repository, with live state: input required, running, done, idle
+- **Chat in native buffers**: write prompts with your own Vim setup, read answers as rendered markdown, tool calls folded
+- **Never interrupts typing**: permission requests and finished sessions wait; one key jumps to the next one
+- **Git review built in**: changes and commits per project, side-by-side diffs, jump from an edit to its diff
+- **Fuzzy search** across all sessions and every prompt you ever sent
+- **Reusable prompts**: a prompt library, skills and commands, saved prompts per project
+- **Status in your statusline** (and an Omarchy bar widget): state, model, quota
+- **Uses your Claude subscription** through the Claude Code CLI; no API key
+- **Fast**: Rust helper for scanning, search and file watching, with a Lua fallback
 
 
 ## Status
@@ -128,7 +136,7 @@ require('agent-ide').setup({
 })
 ```
 
-Icon keys: `open`, `closed` (fold arrows), `prompts`, `changes`, `commits`, `worktree`, and the session states `waiting`, `busy`, `idle`, `parked`, `done`, `failed`. Both sets use `▾ ▸` for folds, `⎇` for a worktree and the characters `● ◐ ● ○ ✓ ✗` for waiting, busy, idle, parked, done and failed (waiting and idle differ by colour). The nerd set differs in two places only: a notebook glyph (nf-md-notebook_outline) on the Prompts row and one git glyph (nf-oct-git_compare) on both the `Changes` and `Commits` rows. Nothing else carries an icon: no project icon, no section icons, no per-kind prompt icons.
+Icon keys: `open`, `closed` (fold arrows), `prompts`, `changes`, `commits`, `worktree`, and the session states `waiting`, `busy`, `idle`, `parked`, `done`, `failed`. Both sets use `▾ ▸` for folds, `⎇` for a worktree and the characters `● ◐ ● ○ ✓ ✗` for waiting, busy, idle, parked, done and failed (waiting and idle differ by colour). The nerd set differs in two places only: a pencil glyph (nf-md-pencil_outline) on the Prompts row and one git glyph (nf-oct-git_compare) on both the `Changes` and `Commits` rows. Nothing else carries an icon: no project icon, no section icons, no per-kind prompt icons.
 
 `:Agents` (or the toggle key) opens the Agents tab with the drawer. Inside the Agents tab it closes or reopens the drawer; from any other tab it switches to the Agents tab.
 
