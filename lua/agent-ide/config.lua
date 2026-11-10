@@ -24,16 +24,24 @@ local function defaults()
         raw = 'gr', raw_event = 'gR',
         native = '<leader>at', -- continue the session in native Claude in a tmux pane
         park = '<leader>ax', -- park: stop the session's Claude process (the next send resumes)
-        diff = { 'gd', '<leader>gd' } },
+        diff = { 'gd', '<leader>gd' },
+        save_library = '<leader>W', -- prompt: save the prompt to the library (asks for a name)
+        prompts = '<leader>al' }, -- pick a prompt (skills, commands, library, saved)
       -- diff view, buffer-local on both sides (]c / [c stay Neovim's hunk motions); each value is a
       -- key, a list of keys, or false
       diff = { next_file = { ']f', '<leader>gj' }, prev_file = { '[f', '<leader>gk' }, flip = { 'gb', '<leader>gt' },
         branch = { 'gB', '<leader>gB' }, close = { 'q', '<leader>gq' }, help = { '?' }, refresh = { 'R' }, lazygit = 'glg' },
+      -- drawer, on prompt rows (elsewhere these keys keep their normal meaning)
+      prompts = { edit = 'e', rename = 'r', delete = 'd', yank = 'y', to_library = 'L' },
     },
+    -- Prompts: Claude's commands and skills (read only), the library of templates and per-project
+    -- saved prompts. nil dirs: stdpath('data') .. '/agent-ide/library' and '/agent-ide/prompts'
+    prompts = { library_dir = nil, saved_dir = nil, command_dirs = { '~/.claude/commands' },
+      skill_dirs = { '~/.claude/skills' }, project_dirs = true },
     -- prompt buffer: `/` opens the command menu, `@` opens the file picker
     chat = { auto_slash = true, at_picker = true },
     icons = { open = '▾', closed = '▸', project = '', waiting = '◐', busy = '●', idle = '○', parked = '·',
-      done = '✔', failed = '✖', new = '+' },
+      done = '✔', failed = '✖', new = '+', prompts = '✎' },
   }
 end
 

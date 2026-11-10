@@ -203,6 +203,18 @@ end
 
 function actions.close() M.close() end
 
+-- A provider's row key (ui/sections.lua `keys`): the row's handler, else the key's own meaning.
+function actions.row_key(lhs)
+  local node = current_node()
+  local fn = node and node.keys and node.keys[lhs]
+  if not fn then
+    local count = vim.v.count > 0 and tostring(vim.v.count) or ''
+    return api.nvim_feedkeys(count .. vim.keycode(lhs), 'n', false)
+  end
+  local ok, err = pcall(fn, node)
+  if not ok then vim.notify('Agent-IDE: ' .. tostring(err), vim.log.levels.ERROR) end
+end
+
 function actions.lazygit()
   local node = current_node()
   local p = node and node.project
@@ -213,7 +225,7 @@ function actions.lazygit()
 end
 
 function actions.help()
-  require('agent-ide.ui.help').open('Agent-IDE drawer', {
+  local rows = {
     { key = '<CR> / o', desc = 'open session, start a new one, or toggle project' },
     { key = 'za', desc = 'toggle fold' },
     { key = 'R', desc = 'refresh' },
@@ -223,7 +235,9 @@ function actions.help()
     { key = 'q', desc = 'close drawer' },
     { key = '?', desc = 'this help' },
     { key = '/', desc = 'search (built-in)' },
-  })
+  }
+  for _, k in ipairs(sections.keys()) do rows[#rows + 1] = { key = k.lhs, desc = k.desc } end
+  require('agent-ide.ui.help').open('Agent-IDE drawer', rows)
 end
 
 local function ensure_buf()
@@ -235,6 +249,8 @@ local function ensure_buf()
   vim.bo[buf].filetype = 'agent-ide'
   vim.bo[buf].modifiable = false
   local function map(lhs, fn) vim.keymap.set('n', lhs, fn, { buffer = buf, nowait = true, silent = true }) end
+  -- provider row keys first: the drawer's own keys below win a clash
+  for _, k in ipairs(sections.keys()) do map(k.lhs, function() actions.row_key(k.lhs) end) end
   map('<CR>', actions.open)
   map('o', actions.open)
   map('za', actions.fold)

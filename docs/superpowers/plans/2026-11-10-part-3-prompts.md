@@ -1,5 +1,33 @@
 # Agent-IDE.nvim Part 3: Prompts — Implementation Plan
 
+## Adjustments made while building
+
+Where the code (or the brief given at build time) differed from this plan, the code won:
+
+- **Drawer hook.** `ui/sections.lua` already had `top(ctx)` for rows above the projects, so `tree.lua`
+  needed no change. The Prompts node is a `top` row; Saved prompts are `rows(project, ctx)`. The
+  provider is registered before the git provider, so `Saved prompts` sits right after `Sessions`.
+- **Hook extension (row keys).** Drawer keys on prompt rows (`e`, `r`, `d`, `y`, `L`) needed one
+  generic addition: a provider may return `keys() -> { { lhs, desc }, ... }`; the drawer maps each
+  lhs once (before its own keys, which win a clash), lists it in its help, and on a row whose node
+  has `keys = { [lhs] = fn(node) }` calls that function; on any other row the key keeps its native
+  meaning (fed with `nvim_feedkeys`, count kept).
+- **Config keys.** Row keys live in `keys.prompts = { edit, rename, delete, yank, to_library }`;
+  every key value is a string, a list of strings or `false` (`diff_buf.keys`).
+- **Saved prompts folder.** `<saved_dir>/<folder>/` where folder = the project folder's name plus
+  8 hex digits of the sha256 of the project key (`alpha-1a2b3c4d`): drawer names change when two
+  projects share a name (`parent/name`), and two projects called `api` must not share prompts.
+  `sources.scan` still takes `project_name` (the folder) as planned.
+- **Saved prompts section** is shown only when the project has at least one saved prompt (not
+  with `(0)`): the drawer's existing lines stay unchanged when nothing was saved.
+- **Defaults of the folds:** Prompts collapsed (nothing is scanned until it is opened), Skills &
+  commands collapsed, Library open, library groups collapsed, Saved prompts collapsed.
+- **Project commands and skills** in the top node are those of the project of the chat shown in
+  the Agents tab's transcript window (rescanned when that changes).
+- **Existing tests** that counted drawer lines from the top (`tests/test_chat.lua`,
+  `tests/test_git_budget.lua`) now skip the Prompts row; `tests/run.lua` gives every test Neovim a
+  temporary `XDG_DATA_HOME`, so no test reads or writes the user's data folder.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Reusable prompts one keypress away: a top-level Prompts node in the drawer listing the user's Claude skills and commands and a library of prompt templates, per-project saved prompts, and dadbod-style saving from the prompt buffer.

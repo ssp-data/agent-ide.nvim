@@ -3,6 +3,10 @@
 -- The stock stdout reporter quits on `exec.fails` alone, which misses cases whose
 -- error handler itself fails (e.g. a Lua stack overflow). So we do not let it quit
 -- and judge each case ourselves: it must have run and ended in a pass state.
+-- Isolation: every test Neovim (this one and its children) gets a temporary data folder, so the
+-- plugin's own data (saved prompts, the default library) is never the user's.
+vim.env.XDG_DATA_HOME = vim.fn.tempname() .. '-data'
+
 local reporter = MiniTest.gen_reporter.stdout({ quit_on_finish = false })
 local finish = reporter.finish
 reporter.finish = function()

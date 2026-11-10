@@ -598,13 +598,13 @@ T['drawer: busy while Claude works, done when the turn ends in another tab, idle
   child.type_keys('<C-CR>', '<Esc>')
   -- the new session is listed (once) in its project while it is busy
   wait_for(function() return has_line(drawer_lines(), 'B Slow one') ~= nil end, 'busy icon')
-  eq(drawer_lines()[1]:match('^v P repo  B '), 'v P repo  B ')
+  eq(drawer_lines()[2]:match('^v P repo  B '), 'v P repo  B ') -- line 1: the Prompts node
   local focus = child.lua_get('{ vim.api.nvim_get_current_win(), vim.api.nvim_win_get_cursor(0) }')
   child.cmd('tabprevious')
   eq(child.lua_get('require("agent-ide.session").all()[1].visible'), false)
   wait_for(function() return child.lua_get('require("agent-ide.session").all()[1].state') == 'done' end, 'done')
   eq(has_line(drawer_lines(), 'D Slow one') ~= nil, true)
-  eq(drawer_lines()[1]:match('^v P repo  D '), 'v P repo  D ')
+  eq(drawer_lines()[2]:match('^v P repo  D '), 'v P repo  D ') -- line 1: the Prompts node
   child.cmd('tabnext')
   eq(child.lua_get('{ vim.api.nvim_get_current_win(), vim.api.nvim_win_get_cursor(0) }'), focus)
   eq(child.lua_get('require("agent-ide.session").all()[1].visible'), true)

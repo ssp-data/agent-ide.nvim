@@ -72,7 +72,7 @@ T['library groups and titles; saved prompts of the project'] = function()
   local sv = by(e, 'kind', 'saved')
   eq({ sv.scope, sv.title, sv.path }, { 'saved', 'add idle support', FIX .. '/saved/alpha/add-idle-support.md' })
   -- sorted by group, then title, case-insensitive
-  local order = vim.tbl_map(function(x) return (x.group or '') .. '\0' .. x.title end, e)
+  local order = vim.tbl_map(function(x) return (x.group or ''):gsub('/', '\1') .. '\0' .. x.title end, e)
   local sorted = vim.deepcopy(order)
   table.sort(sorted, function(a, b) return a:lower() < b:lower() end)
   eq(order, sorted)

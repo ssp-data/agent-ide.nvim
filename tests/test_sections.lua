@@ -104,4 +104,16 @@ T['top rows come before every project; ctx carries the width'] = function()
   eq(#notes, 1)
 end
 
+T['row keys: collected in registration order, first lhs wins, a failing provider is skipped'] = function()
+  sections.register('a', { keys = function() return { { lhs = 'e', desc = 'edit' }, { lhs = '' }, { lhs = 'd', desc = 'del' } } end })
+  sections.register('b', { keys = function() return { { lhs = 'e', desc = 'other' }, { lhs = 'y' } } end })
+  sections.register('c', { keys = function() error('boom') end })
+  local orig, notes = vim.notify, {}
+  vim.notify = function(m) notes[#notes + 1] = m end
+  eq(sections.keys(), { { lhs = 'e', desc = 'edit' }, { lhs = 'd', desc = 'del' }, { lhs = 'y', desc = '' } })
+  vim.wait(200, function() return #notes > 0 end, 5)
+  vim.notify = orig
+  eq(#notes, 1)
+end
+
 return T

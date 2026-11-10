@@ -169,7 +169,9 @@ local function make(src, path, rel)
   return e
 end
 
-local function sort_key(e) return ((e.group or '') .. '\0' .. e.title):lower() end
+-- Group then title, case-insensitive; '/' sorts before every other character, so a folder's
+-- sub-folders follow its own entries and never interleave with a sibling (`a/b` before `a-c`).
+local function sort_key(e) return ((e.group or ''):gsub('/', '\1') .. '\0' .. e.title):lower() end
 
 ---Scan every source asynchronously; `cb(entries)` runs on the main loop. Missing folders give
 ---no entries, unreadable files are skipped, symlinked folders are followed (once each).

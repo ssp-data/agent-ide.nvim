@@ -10,6 +10,7 @@ function M.setup(opts)
   require('agent-ide.ui.highlights').setup()
   require('agent-ide.status').setup()
   require('agent-ide.ui.quit_guard').setup()
+  require('agent-ide.ui.prompt_sections').register() -- before git: Saved prompts follow Sessions
   require('agent-ide.ui.git_sections').register()
   for name, lhs in pairs(mapped) do
     pcall(vim.keymap.del, 'n', lhs)

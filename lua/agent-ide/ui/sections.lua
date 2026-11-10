@@ -2,7 +2,7 @@
 -- later the Prompts node). `tree.build` stays pure: it calls `collect` for each project.
 --
 -- sections.register(name, provider): provider is `rows(project, ctx)` or a table
--- { rows = fn?, top = fn?, setup = fn?, refresh = fn?, focus = fn? }.
+-- { rows = fn?, top = fn?, setup = fn?, refresh = fn?, focus = fn?, keys = fn? }.
 --   top(ctx) -> rows|nil: rows above all projects (e.g. a Prompts node); ctx as below without
 --     `open`. Nodes as for project rows (`id`, `fold`, `open`).
 --   rows(project, ctx) -> rows|nil, suffix|nil
@@ -16,6 +16,10 @@
 --     as `default`, then the cursor lands on node id `focus`) and `open = function(node)` (<CR>).
 --   setup(): the Agents tab was created; refresh(): `R` in the drawer; focus(): the drawer
 --   window was entered.
+--   keys() -> { { lhs = string, desc = string }, ... }: extra drawer keys for the provider's rows.
+--     The drawer maps each lhs (read when its buffer is made) and lists it in its help; on a row
+--     whose node has `keys = { [lhs] = function(node) }` the key calls that function, on any
+--     other row it does what it does natively (a count is kept).
 local M = {}
 
 local order, by_name = {}, {}
@@ -90,6 +94,29 @@ local function each(field, ...)
       if not ok then report(name, err) end
     end
   end
+end
+
+---Extra row keys of every provider, in registration order (the first one of an lhs wins).
+---@return { lhs: string, desc: string }[]
+function M.keys()
+  local out, seen = {}, {}
+  for _, name in ipairs(order) do
+    local fn = by_name[name].keys
+    if fn then
+      local ok, list = pcall(fn)
+      if not ok then
+        report(name, list)
+      else
+        for _, k in ipairs(list or {}) do
+          if type(k.lhs) == 'string' and k.lhs ~= '' and not seen[k.lhs] then
+            seen[k.lhs] = true
+            out[#out + 1] = { lhs = k.lhs, desc = k.desc or '' }
+          end
+        end
+      end
+    end
+  end
+  return out
 end
 
 function M.setup() each('setup') end
