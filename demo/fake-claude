@@ -1,0 +1,12 @@
+#!/bin/sh
+# Stands in for `claude` in the demo (scripts/demo.sh): replays demo/scenarios/<session id>.jsonl.
+dir=$(cd "$(dirname "$0")" && pwd)
+sid=""
+prev=""
+for a in "$@"; do
+  case "$prev" in --resume|--session-id) sid="$a";; esac
+  prev="$a"
+done
+f="$dir/scenarios/$sid.jsonl"
+[ -f "$f" ] || f="$dir/scenarios/empty.jsonl"
+exec nvim -l "$dir/../tests/fake_claude.lua" "$f" "$@"

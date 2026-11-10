@@ -41,6 +41,7 @@ A Neovim plugin that manages Claude Code sessions from inside Neovim: a drawer w
 | `lua/agent-ide/claude/models.lua`, `models_fetch.lua` | the models Claude lists in its `initialize` answer, kept in `models.json`; the one-off fetch for the picker |
 | `lua/agent-ide/util/jsonfile.lua` | private JSON files, read leniently and written atomically |
 | `lua/agent-ide/status.lua`, `live.lua`, `tmux.lua` | footer and status files, sessions running elsewhere, tmux |
+| `demo/`, `scripts/demo.sh`, `scripts/demo-screenshot.sh` | synthetic demo data and fake `claude` for `make demo`, and the README screenshots (no real data; the screenshot script needs Hyprland, foot and grim) |
 | `helper/` | Rust helper `agent-ide-helper` (scan, history, watch, search) |
 | `omarchy/` | Omarchy bar widget |
 | `tests/` | mini.test suite, fixtures, fakes; `tests/real/` talks to real Claude |
@@ -54,6 +55,7 @@ make helper        # build the helper after changing helper/ or pulling
 make test-omarchy  # widget tests (node)
 make test-real     # real Claude on the subscription; not part of `make test`, run on purpose only
 make release-notes # print the changelog section that would be released
+make demo          # Neovim on the synthetic demo (demo/): sessions, repos, prompts under /tmp/agent-ide-demo; for screenshots
 make release VERSION=x.y.z   # see "Releasing"
 ```
 

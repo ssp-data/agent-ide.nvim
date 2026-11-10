@@ -1,0 +1,5 @@
+{"expect": "\"user\""}
+{"emit": {"type": "system", "subtype": "init", "session_id": "x", "model": "claude-opus-5-5", "permissionMode": "acceptEdits", "slash_commands": ["compact", "review"], "claude_code_version": "2.1.306"}}
+{"sleep_ms": 4000}
+{"emit": {"type": "assistant", "message": {"id": "m", "type": "message", "role": "assistant", "content": [{"type": "text", "text": "The upstream export writes customers before emails are backfilled; I added a freshness check."}]}}}
+{"emit": {"type": "result", "subtype": "success", "is_error": false, "result": "ok"}}

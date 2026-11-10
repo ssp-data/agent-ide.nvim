@@ -1,0 +1,1 @@
+[{"pid": 1, "cwd": "/tmp/agent-ide-demo/git/ssp-blog", "kind": "interactive", "sessionId": "30656a7e-dd17-4b91-b8ad-ae0a75538c6f", "name": "blog", "status": "busy"}, {"pid": 1, "cwd": "/tmp/agent-ide-demo/git/ssp-blog", "kind": "interactive", "sessionId": "d5eb79cc-d089-4fa1-ab75-40ee8c82fd32", "name": "blog", "status": "idle"}]
