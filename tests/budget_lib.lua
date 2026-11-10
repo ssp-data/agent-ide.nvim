@@ -64,7 +64,7 @@ local function project_lines()
   local n = 0
   if s.buf then
     for _, l in ipairs(vim.api.nvim_buf_get_lines(s.buf, 0, -1, false)) do
-      if l:find('^[v>] P ') then n = n + 1 end
+      if l:find('^[v>] ') and not l:find('Prompts$') then n = n + 1 end
     end
   end
   return n
@@ -153,8 +153,10 @@ function M.run_open(dir, backend, expected)
   t0 = vim.uv.hrtime()
   press_enter(srow)
   local ok = vim.wait(120000, function()
-    return vim.api.nvim_buf_get_name(0):find('agent-ide://history/', 1, true) ~= nil
-      and vim.api.nvim_buf_get_lines(0, 0, 1, false)[1] ~= 'Loading…'
+    local w = require('agent-ide.ui.chat')._windows().transcript
+    local buf = w and vim.api.nvim_win_get_buf(w)
+    return buf ~= nil and vim.api.nvim_buf_get_name(buf) == 'agent-ide://chat/' .. best.id
+      and vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] ~= 'Loading…'
   end, 1)
   r.history = ms(t0)
   r.history_block = stop()

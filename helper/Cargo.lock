@@ -6,6 +6,8 @@ version = 4
 name = "agent-ide-helper"
 version = "0.1.0"
 dependencies = [
+ "memchr",
+ "neo_frizbee",
  "notify",
  "rayon",
  "serde",
@@ -191,6 +193,15 @@ dependencies = [
  "log",
  "wasi",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "neo_frizbee"
+version = "0.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb0dd0e69b342eaddb657120a21a56f3e887ddc505fac780cf430dbbbb3aed26"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

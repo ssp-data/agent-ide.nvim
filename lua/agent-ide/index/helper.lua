@@ -4,10 +4,15 @@
 local M = {}
 
 M._timeout_ms = 5000 -- tests shorten it
+-- Error given to requests when the helper follows other parse/scan rules than this plugin
+-- (`hello` reports another `rules_version`, or does not exist in an old binary).
+M.OUT_OF_DATE = 'out of date'
+local OUTDATED_NOTICE = 'Agent-IDE: the helper is out of date; run `make helper`'
 M._grace_ms = 500 -- after closing stdin, wait this long before SIGTERM
 
--- `parts` holds the chunks of an incomplete line; joined once when its newline arrives.
-local state = { proc = nil, cur = nil, exit_fns = {}, gen = 0, next_id = 1, pending = {}, parts = {}, handlers = {} }
+local lines = require('agent-ide.util.lines')
+local state = { proc = nil, cur = nil, exit_fns = {}, gen = 0, next_id = 1, pending = {}, lines = lines.splitter(), handlers = {},
+  outdated = false }
 local augroup
 
 local DECODE_OPTS = require('agent-ide.transcript.parse').DECODE_OPTS
@@ -22,6 +27,7 @@ end
 
 ---@return boolean
 function M.available()
+  if state.outdated then return false end
   local p = M.path()
   local st = vim.uv.fs_stat(p)
   return st ~= nil and st.type == 'file' and vim.uv.fs_access(p, 'X') == true
@@ -64,22 +70,10 @@ end
 local function on_stdout(gen)
   return vim.schedule_wrap(function(err, data)
     if gen ~= state.gen or err or not data then return end
-    -- Only the new chunk is searched, and a long line is joined once: linear in its size.
-    local s = 1
-    while true do
-      local nl = data:find('\n', s, true)
-      if not nl then break end
-      local line = data:sub(s, nl - 1)
-      if #state.parts > 0 then
-        state.parts[#state.parts + 1] = line
-        line = table.concat(state.parts)
-        state.parts = {}
-      end
+    state.lines:push(data, function(line)
       handle_line(line)
-      if gen ~= state.gen then return end -- a handler stopped the helper
-      s = nl + 1
-    end
-    if s <= #data then state.parts[#state.parts + 1] = data:sub(s) end
+      return gen ~= state.gen -- a handler stopped the helper
+    end)
   end)
 end
 
@@ -87,12 +81,14 @@ end
 local function start()
   if state.proc then return true end
   local cache = vim.fn.stdpath('cache') .. '/agent-ide'
-  pcall(vim.fn.mkdir, cache, 'p')
+  -- private like the transcripts: the helper's files there are derived from them
+  pcall(vim.fn.mkdir, cache, 'p', tonumber('700', 8))
+  pcall(vim.uv.fs_chmod, cache, tonumber('700', 8))
   state.gen = state.gen + 1
   local gen = state.gen
   local cur = { exited = false }
   state.cur = cur
-  state.parts = {}
+  state.lines:reset()
   local ok, proc = pcall(vim.system, { M.path(), '--cache-dir', cache }, {
     stdin = true, stdout = on_stdout(gen), stderr = false,
   }, vim.schedule_wrap(function(obj)
@@ -108,6 +104,7 @@ local function start()
     return false, tostring(proc)
   end
   state.proc = proc
+  M._hello(gen)
   if not augroup then
     augroup = vim.api.nvim_create_augroup('agent-ide.helper', { clear = true })
     vim.api.nvim_create_autocmd('VimLeavePre', { group = augroup, callback = function() M.stop(true) end })
@@ -115,15 +112,40 @@ local function start()
   return true
 end
 
+local send
+
+---First request of every helper process: its rules must be this plugin's. A helper that answers
+---with another `rules_version`, or with an error (an old binary without `hello`), is out of date:
+---it is stopped and not used again in this Neovim, and requests get `M.OUT_OF_DATE`. No answer
+---(timeout, exit) is left to the requests' own failure handling.
+function M._hello(gen)
+  send('hello', {}, function(err, result)
+    if gen ~= state.gen then return end
+    if err == 'timeout' or err == 'stopped' or (err and err:match('^process exited')) then return end
+    local want = require('agent-ide.transcript.parse').RULES_VERSION
+    if not err and type(result) == 'table' and result.rules_version == want then return end
+    state.outdated = true
+    vim.notify(OUTDATED_NOTICE, vim.log.levels.WARN)
+    fail_all(M.OUT_OF_DATE)
+    M.stop(true)
+  end)
+end
+
 ---@param method string
 ---@param params table
 ---@param cb fun(err: string|nil, result: table|nil)
 function M.request(method, params, cb)
+  if state.outdated then return vim.schedule(function() cb(M.OUT_OF_DATE) end) end
   local ok, why = start()
   if not ok then
     vim.schedule(function() cb('cannot start helper: ' .. tostring(why)) end)
     return
   end
+  send(method, params, cb)
+end
+
+-- Write one request to the running process.
+function send(method, params, cb)
   local id = state.next_id
   state.next_id = id + 1
   local entry = { cb = cb, timer = vim.uv.new_timer() }
@@ -173,7 +195,7 @@ function M.stop(now)
   state.proc = nil
   state.cur = nil
   state.gen = state.gen + 1
-  state.parts = {}
+  state.lines:reset()
   pcall(proc.write, proc, nil)
   local function terminate() if not cur.exited then pcall(proc.kill, proc, 15) end end
   if now then
@@ -193,6 +215,7 @@ function M._reset()
   state.exit_fns = {}
   state.pending = {}
   state.next_id = 1
+  state.outdated = false
   M._timeout_ms = 5000
   M._grace_ms = 500
 end

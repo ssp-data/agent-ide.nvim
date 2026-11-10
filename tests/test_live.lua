@@ -20,6 +20,9 @@ T['state_of and rollup'] = function()
   eq(live.rollup({ 'idle', 'busy', 'parked' }), 'busy')
   eq(live.rollup({ 'busy', 'waiting' }), 'waiting')
   eq(live.rollup({}), 'parked')
+  eq(live.rollup({ 'busy', 'done', 'idle' }), 'done')
+  eq(live.rollup({ 'done', 'failed' }), 'failed')
+  eq(live.rollup({ 'failed', 'waiting' }), 'waiting')
 end
 
 T['start: missing command gives empty map and one notice'] = function()
@@ -66,6 +69,47 @@ T['stop: result arriving after stop does not call on_change'] = function()
   vim.wait(400)
   eq(n, 0)
   eq(live.get(), {})
+end
+
+T['entries not refreshed for two poll intervals do not count for the footer or next waiting'] = function()
+  local status = require('agent-ide.status')
+  local waiting = require('agent-ide.ui.waiting')
+  local orig_live = status._src.live
+  status._src.live = function() return live.fresh() end -- the default source (another file may replace it)
+  local ok, err = pcall(function()
+    live.start({ interval_ms = 40, cmd = { 'echo', '[{"sessionId":"t","status":"waiting","pid":3,"cwd":"/"}]' } })
+    assert(vim.wait(1000, function() return live.get().t ~= nil end, 5))
+    eq(status.level({}).waiting, 1)
+    eq(#waiting.needing(), 1)
+    live.stop()
+    -- within two intervals the map still counts
+    eq(live.fresh().t ~= nil, true)
+    vim.wait(150)
+    eq(live.get().t.status, 'waiting') -- kept, but no longer counted
+    eq(live.fresh(), {})
+    eq(status.level({}).waiting, 0)
+    eq(#waiting.needing(), 0)
+  end)
+  status._src.live = orig_live
+  if not ok then error(err, 0) end
+end
+
+T['query asks once, now, and stores the answer'] = function()
+  local got
+  live.query({ cmd = { 'echo', '[{"sessionId":"q","status":"idle","pid":4,"cwd":"/"}]' }, interval_ms = 50 },
+    function(ok) got = ok end)
+  assert(vim.wait(1000, function() return got ~= nil end, 5))
+  eq(got, true)
+  eq(live.fresh().q.pid, 4)
+  eq(live.active(), false)
+  got = nil
+  live.query({ cmd = { 'false' }, interval_ms = 50 }, function(ok, reason) got = { ok, reason } end)
+  assert(vim.wait(1000, function() return got ~= nil end, 5))
+  eq(got, { false, 'exit code 1' })
+  got = nil
+  live.query({ cmd = { 'agent-ide-no-such-binary' }, interval_ms = 50 }, function(ok, reason) got = { ok, reason } end)
+  assert(vim.wait(1000, function() return got ~= nil end, 5))
+  eq(got, { false, 'command not found' })
 end
 
 T['match_pane'] = function()
@@ -120,6 +164,44 @@ T['start: on_poll runs after every poll, on_change only on change'] = function()
   eq(polls >= 3, true)
   eq(changes, 0)
   eq(live.active(), false)
+end
+
+T['pane labels: one ps and one list-panes, cached per pid; nothing outside tmux'] = function()
+  local saved_env, saved_system = vim.env.TMUX, vim.system
+  tmux._reset_labels()
+  vim.env.TMUX = '/tmp/fake,1,0'
+  local cmds = {}
+  vim.system = function(cmd, _, cb)
+    cmds[#cmds + 1] = cmd
+    if cmd[1] == 'ps' then
+      cb({ code = 1, stdout = '  42 pts/9\n  43 ?\n' }) -- 44 is gone: ps says nothing about it
+    else
+      cb({ code = 0, stdout = '/dev/pts/3 1.0\n/dev/pts/9 2.1\n' })
+    end
+    return {}
+  end
+  local changes = 0
+  local ok, err = pcall(function()
+    tmux.refresh_labels({ 42, 43, 44 }, function() changes = changes + 1 end)
+    vim.wait(500, function() return changes > 0 end)
+    eq(cmds[1], { 'ps', '-o', 'pid=,tty=', '-p', '42,43,44' })
+    eq(cmds[2], { 'tmux', 'list-panes', '-a', '-F', '#{pane_tty} #{window_index}.#{pane_index}' })
+    eq({ tmux.pane_label(42), tmux.pane_label(43), tmux.pane_label(44) }, { '2.1', nil, nil })
+    -- the same answer again: no change reported
+    tmux.refresh_labels({ 42 }, function() changes = changes + 1 end)
+    vim.wait(100)
+    eq(changes, 1)
+    vim.env.TMUX = nil
+    tmux.refresh_labels({ 42 }, function() changes = changes + 1 end)
+    eq({ changes, tmux.pane_label(42), #cmds }, { 2, nil, 4 })
+  end)
+  vim.system, vim.env.TMUX = saved_system, saved_env
+  tmux._reset_labels()
+  if not ok then error(err, 0) end
+end
+
+T['parse_ps'] = function()
+  eq(tmux.parse_ps('  1 pts/0\n 22 ??\n333 ttys001\n\n'), { [1] = 'pts/0', [333] = 'ttys001' })
 end
 
 T['jump_to_pid: not in tmux'] = function()

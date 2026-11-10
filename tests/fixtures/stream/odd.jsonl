@@ -1,0 +1,6 @@
+{"type":"future_thing","x":1,"session_id":"00000000-0000-4000-8000-000000000001"}
+{"type":"stream_event","event":{"type":"future_event","index":0},"session_id":"00000000-0000-4000-8000-000000000001","parent_tool_use_id":null,"uuid":"u01"}
+{"type":"assistant","message":{"model":"claude-haiku-5-5","id":"msg_05","type":"message","role":"assistant","content":[{"type":"text","text":"Sub"}]},"parent_tool_use_id":"ta","agent_id":"a1","subagent_type":"general-purpose","session_id":"00000000-0000-4000-8000-000000000001","uuid":"u02"}
+{"type":"control_response","response":{"subtype":"error","request_id":"c9","error":"Model 'nope' not found","error_code":"not_found"}}
+{"type":"assistant","message":{"model":"<synthetic>","id":"m6","type":"message","role":"assistant","content":[{"type":"text","text":"There's an issue with the selected model."}]},"parent_tool_use_id":null,"error":"model_not_found","is_api_error_message":true,"api_error_status":404,"session_id":"00000000-0000-4000-8000-000000000001","uuid":"u03"}
+{"type":"result","subtype":"success","is_error":true,"result":"There's an issue with the selected model.","api_error_status":404,"num_turns":1,"terminal_reason":"api_error","session_id":"00000000-0000-4000-8000-000000000001","uuid":"u04"}

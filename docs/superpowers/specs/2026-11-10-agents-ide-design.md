@@ -282,3 +282,21 @@ The spike file is throwaway and is deleted when part 1 lands.
 - Exact keys inside views where not named above.
 - Index cache format and file-watching approach in the Rust helper.
 - How tool-specific folds are formatted beyond Bash, Edit, Write, Skill.
+
+## 14. Changes since approval
+
+Recorded after the build; the approved text above is unchanged.
+
+- The project row shows the branch name (when it is not the default branch).
+- The lazygit key is `glg` (in the drawer and the diff view).
+- An edit's diff opens with `gd` / `<leader>gd` on its fold in the transcript, not with Enter.
+- Hand-off to native Claude outside tmux has no terminal fallback: the session is parked and the command to run is shown.
+- One status file per Neovim (`status-<pid>.json`), combined by the reader, instead of one shared file.
+- Over-long lines are cut for display with a marker that counts what was cut; the raw view keeps every byte.
+- Templates and saved prompts are loaded and saved exactly as the file is (frontmatter included); nothing is kept or added.
+- The saved-prompt folder of a project is `<project>-<hash>`.
+- The footer quota shows percent used, not percent left.
+- Not every key is under `<leader>a`: `<leader>W` (save to the library), `<leader><CR>` (send), and `<leader>g…` in the diff view.
+- No idle-timeout setting exists yet; a session's process runs until it is parked, handed off or Neovim quits.
+- Prebuilt helper binaries are not provided yet; the helper is built with `make helper` (cargo).
+- "Allow for this session" is offered only as far as Claude's own permission suggestions were verified (labelled where Claude saves the rule).

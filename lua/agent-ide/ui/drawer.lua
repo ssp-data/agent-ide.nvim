@@ -4,7 +4,10 @@ local config = require('agent-ide.config')
 local index = require('agent-ide.index')
 local live = require('agent-ide.live')
 local project = require('agent-ide.project')
+local session = require('agent-ide.session')
 local tmux = require('agent-ide.tmux')
+local model = require('agent-ide.ui.drawer_model')
+local sections = require('agent-ide.ui.sections')
 local tree = require('agent-ide.ui.tree')
 
 local M = {}
@@ -29,12 +32,24 @@ end
 
 local function node_key(node)
   if not node then return nil end
+  if node.id then return 'e:' .. node.id end -- rows of ui/sections.lua providers
   if node.type == 'project' then return 'p:' .. node.project.key end
   if node.type == 'section' then return 's:' .. node.key end
   if node.type == 'session' then return 'x:' .. node.session.id end
+  if node.type == 'new' then return 'n:' .. node.project.key end
 end
 
+---State shown for a session (see `drawer_model.state_of`).
+M.state_of = model.state_of
+
 local function set_opt(win, name, value) api.nvim_set_option_value(name, value, { scope = 'local', win = win }) end
+
+-- Text columns of the drawer window (without a fold or sign column the user's options may add).
+local function text_width(cfg)
+  if not S.win then return cfg.drawer.width end
+  local info = vim.fn.getwininfo(S.win)[1]
+  return api.nvim_win_get_width(S.win) - (info and info.textoff or 0)
+end
 
 ---Re-render the drawer buffer; keeps the drawer cursor on the same node (or on `focus`).
 ---@param focus? string node key to place the cursor on
@@ -42,7 +57,9 @@ local function render(focus)
   sync()
   if not S.buf then return end
   local cfg = config.get()
-  local t = tree.build(S.projects, live.get(), S.expanded, os.time(), cfg.icons, cfg.projects_dir)
+  local t = tree.build(model.with_unsaved(S.projects), model.state_of, S.expanded, os.time(), cfg.icons, cfg.projects_dir,
+    model.note_of, sections.collect,
+    { top = sections.collect_top, width = text_width(cfg) })
   local row = S.win and api.nvim_win_get_cursor(S.win)[1]
   focus = focus or (row and node_key(S.nodes[row]))
   vim.bo[S.buf].modifiable = true
@@ -70,10 +87,37 @@ local function rescan()
   end)
 end
 
+local live_policy
+
 -- Every finished poll re-renders (about 0.4 ms), so ages stay current with any backend.
-local function start_live()
+-- `slow`: the drawer is hidden; poll 4x less often (the footer and `send` still use the map).
+local function start_live(slow)
   local cfg = config.get()
-  live.start({ interval_ms = cfg.live.interval_ms, cmd = cfg.live.cmd, on_poll = function() render() end })
+  live.start({ interval_ms = cfg.live.interval_ms * (slow and 4 or 1), cmd = cfg.live.cmd, defer = slow, on_poll = function()
+    if not shown then live_policy() end
+    require('agent-ide.status').refresh()
+    tmux.refresh_labels(model.elsewhere_pids(), function() render() end)
+    render()
+    local chat = package.loaded['agent-ide.ui.chat']
+    if chat then chat.refresh_winbars() end
+  end })
+end
+
+-- While the drawer is hidden: slow polling as long as an Agents tab exists or a session is alive
+-- here, else none.
+live_policy = function()
+  if shown then return end
+  sync()
+  local alive = S.tab ~= nil
+  for _, s in ipairs(session.all()) do
+    if alive then break end
+    alive = s:_alive()
+  end
+  if not alive then
+    live.stop()
+  elseif live.interval() ~= config.get().live.interval_ms * 4 then
+    start_live(true)
+  end
 end
 
 local function set_shown(v)
@@ -84,7 +128,7 @@ local function set_shown(v)
     index.set_visible(true)
     render()
   else
-    live.stop()
+    live_policy()
     index.set_visible(false)
   end
 end
@@ -99,6 +143,13 @@ local function on_index_change()
   if not debounce then debounce = vim.uv.new_timer() end
   debounce:stop()
   debounce:start(200, 0, vim.schedule_wrap(function() if S.tab then rescan() end end))
+end
+
+local resize_timer
+local function on_resize()
+  if not resize_timer then resize_timer = vim.uv.new_timer() end
+  resize_timer:stop()
+  resize_timer:start(30, 0, vim.schedule_wrap(function() render() end))
 end
 
 local function notify(msg) vim.notify('Agent-IDE: ' .. msg, vim.log.levels.INFO) end
@@ -126,6 +177,9 @@ local function toggle_node(node)
     local key = node.project.key .. '/sessions'
     toggle_key(key, true)
     render('s:' .. key)
+  elseif node.fold then
+    toggle_key(node.fold.key, node.fold.default == true)
+    render(node.fold.focus and ('e:' .. node.fold.focus) or node_key(node))
   end
 end
 
@@ -135,7 +189,20 @@ function actions.open()
   local node = current_node()
   if not node then return end
   if node.type == 'session' then
-    require('agent-ide.ui.history').open(node.session, node.project)
+    local m, p = node.session, node.project
+    local s = session.open({ id = m.id, cwd = m.cwd or p.root or p.key, path = m.path, title = m.title })
+    require('agent-ide.ui.chat').open(s, p)
+  elseif node.type == 'new' then
+    local p = node.project
+    local dir = p.root or p.key
+    -- only an absolute key is a folder: a project without cwd is keyed by a bare directory name
+    if dir:sub(1, 1) ~= '/' or vim.fn.isdirectory(dir) ~= 1 then return notify('project folder not found: ' .. dir) end
+    local s = session.open({ cwd = dir })
+    model.add_unsaved(s.id, p.key)
+    require('agent-ide.ui.chat').open(s, p)
+  elseif node.open then
+    local ok, err = pcall(node.open, node)
+    if not ok then vim.notify('Agent-IDE: ' .. tostring(err), vim.log.levels.ERROR) end
   else
     toggle_node(node)
   end
@@ -147,6 +214,7 @@ function actions.fold()
 end
 
 function actions.refresh()
+  sections.refresh()
   rescan()
   if shown then start_live() end
 end
@@ -161,7 +229,83 @@ function actions.jump()
   end)
 end
 
+function actions.park()
+  local node = current_node()
+  if not node or node.type ~= 'session' then return notify('no session under cursor') end
+  local s = session.get(node.session.id)
+  if not s then return notify('nothing to park; it is not running in this Neovim') end
+  require('agent-ide.ui.chat').park(s)
+end
+
 function actions.close() M.close() end
+
+-- The drawer's own keys (lhs, action name); a provider row key with the same lhs is neither
+-- mapped nor listed. `?` (actions.help) lists them all.
+local KEYS = {
+  { '<CR>', 'open' }, { 'o', 'open' }, { 'za', 'fold' }, { 'R', 'refresh' }, { 'gp', 'jump' },
+  { 'x', 'park' }, { 'glg', 'lazygit' }, { 'q', 'close' }, { 's', 'search' }, { '?', 'help' },
+  { 'g?', 'help' },
+}
+local OWN = {}
+for _, k in ipairs(KEYS) do OWN[vim.keycode(k[1])] = true end
+
+local function provider_keys()
+  return vim.tbl_filter(function(k) return not OWN[vim.keycode(k.lhs)] end, sections.keys())
+end
+
+-- The register a plain operator uses ('clipboard' may make it + or *).
+local function default_register()
+  local cb = vim.o.clipboard
+  if cb:find('unnamedplus', 1, true) then return '+' end
+  if cb:find('unnamed', 1, true) then return '*' end
+  return '"'
+end
+
+-- A provider's row key (ui/sections.lua `keys`): the row's handler, else the key's own meaning:
+-- fed back with its count and register, ahead of what was typed after it (`yj` stays `yj`).
+function actions.row_key(lhs)
+  local node = current_node()
+  local fn = node and node.keys and node.keys[lhs]
+  if not fn then
+    local count = vim.v.count > 0 and tostring(vim.v.count) or ''
+    local reg = vim.v.register ~= default_register() and ('"' .. vim.v.register) or ''
+    return api.nvim_feedkeys(reg .. count .. vim.keycode(lhs), 'in', false)
+  end
+  local ok, err = pcall(fn, node)
+  if not ok then vim.notify('Agent-IDE: ' .. tostring(err), vim.log.levels.ERROR) end
+end
+
+function actions.search()
+  local node = current_node()
+  local p = node and node.project
+  require('agent-ide').search(p and { scope = 'project', project = p } or nil)
+end
+
+function actions.lazygit()
+  local node = current_node()
+  local p = node and node.project
+  if not (p and p.is_git and p.root) then return notify('not a git project') end
+  -- the row's own work tree: a git row's, a session's (a linked worktree), else the project's
+  local root = node.root or (node.session and require('agent-ide.ui.git_sections').tree_of(node.session.cwd)) or p.root
+  require('agent-ide.ui.lazygit').open(root)
+end
+
+function actions.help()
+  local rows = {
+    { key = '<CR> / o', desc = 'open session, start a new one, use a prompt, or toggle' },
+    { key = 'za', desc = 'toggle fold' },
+    { key = 'R', desc = 'refresh' },
+    { key = 'gp', desc = 'jump to tmux pane' },
+    { key = 's', desc = 'search this project (<Tab> in the picker: all sessions)' },
+    { key = 'x', desc = 'park the session: stop its Claude process here' },
+    { key = 'glg', desc = 'lazygit for the project (or the row\'s worktree)' },
+    { key = 'q', desc = 'close drawer' },
+    { key = '? / g?', desc = 'this help' },
+    { key = '/', desc = 'search (built-in)' },
+  }
+  for _, k in ipairs(provider_keys()) do rows[#rows + 1] = { key = k.lhs, desc = k.desc } end
+  require('agent-ide.ui.help').open('Agent-IDE drawer', rows)
+end
 
 local function ensure_buf()
   sync()
@@ -172,12 +316,10 @@ local function ensure_buf()
   vim.bo[buf].filetype = 'agent-ide'
   vim.bo[buf].modifiable = false
   local function map(lhs, fn) vim.keymap.set('n', lhs, fn, { buffer = buf, nowait = true, silent = true }) end
-  map('<CR>', actions.open)
-  map('o', actions.open)
-  map('za', actions.fold)
-  map('R', actions.refresh)
-  map('gp', actions.jump)
-  map('q', actions.close)
+  -- provider row keys (the drawer's own keys below win a clash)
+  for _, k in ipairs(provider_keys()) do map(k.lhs, function() actions.row_key(k.lhs) end) end
+  for _, k in ipairs(KEYS) do map(k[1], actions[k[2]]) end
+  api.nvim_create_autocmd('BufEnter', { buffer = buf, callback = function() sections.focus() end })
   S.buf = buf
   return buf
 end
@@ -188,7 +330,7 @@ local function open_drawer()
   local side = cfg.drawer.side == 'left' and 'left' or 'right'
   S.win = api.nvim_open_win(buf, true, { split = side, win = -1, width = cfg.drawer.width })
   for name, value in pairs({ winfixwidth = true, number = false, relativenumber = false, signcolumn = 'no',
-    wrap = false, cursorline = true, foldenable = false }) do
+    wrap = false, list = false, cursorline = true, foldenable = false }) do
     set_opt(S.win, name, value)
   end
   render()
@@ -199,7 +341,9 @@ local function teardown()
   set_shown(false)
   index.on_change(nil)
   if debounce then debounce:stop() end
+  if resize_timer then resize_timer:stop() end
   S.tab, S.win = nil, nil
+  live_policy()
 end
 
 local function create_tab()
@@ -220,7 +364,14 @@ local function create_tab()
     end
   end })
   api.nvim_create_autocmd('TabEnter', { group = augroup, callback = refresh_shown })
+  -- the right-aligned columns follow the drawer's width
+  api.nvim_create_autocmd({ 'WinResized', 'VimResized' }, { group = augroup, callback = function(ev)
+    if not S.win then return end
+    if ev.event == 'WinResized' and not vim.tbl_contains(vim.v.event.windows or {}, S.win) then return end
+    on_resize()
+  end })
   open_drawer()
+  sections.setup()
   index.on_change(on_index_change)
   rescan()
 end
@@ -268,6 +419,12 @@ function M.toggle()
     open_drawer()
   end
 end
+
+---Re-render the drawer (e.g. after a session changed state); keeps focus and other cursors.
+function M.refresh() render() end
+
+---Re-decide live polling while the drawer is hidden (e.g. a session started or ended here).
+function M.live_policy() live_policy() end
 
 ---@return { tab: integer|nil, win: integer|nil, buf: integer|nil, projects: table[], nodes: table[] }
 function M.state()

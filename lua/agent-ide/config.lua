@@ -7,9 +7,54 @@ local function defaults()
     drawer = { width = 44, side = 'right' },
     live = { interval_ms = 5000, cmd = { 'claude', 'agents', '--json' } },
     helper = { enabled = true, path = nil }, -- nil: <plugin root>/helper/target/release/agent-ide-helper
+    -- modes: what <S-Tab> cycles through (plugin names; `manual` is Claude's `default`);
+    -- default_mode: where the cycle starts before Claude reports a mode (nil: as if manual)
+    claude = { cmd = { 'claude' }, strip_api_key = true, model = nil, version_check = true,
+      modes = { 'manual', 'acceptEdits', 'plan', 'auto' }, default_mode = nil,
+      models = { 'fable', 'opus', 'sonnet', 'haiku' } },
     tcd = true,
-    keys = { toggle = '<leader>aa' }, -- false disables the mapping
-    icons = { open = '▾', closed = '▸', project = '', waiting = '◐', busy = '●', idle = '○', parked = '·' },
+    -- false disables a mapping
+    keys = {
+      toggle = '<leader>aa',
+      next_waiting = '<leader>an', -- global: the next session that needs you
+      search = '<leader>as', -- global: search all sessions (titles, prompts, answers)
+      prompt_history = '<leader>aP', -- global: every prompt, newest first
+      -- the search picker's query line; each a key, a list of keys, or false (close: normal mode)
+      search_picker = { next = { '<C-n>', '<Down>' }, prev = { '<C-p>', '<Up>' }, open = '<CR>', copy = '<C-y>',
+        reuse = '<C-e>', scope = '<Tab>', kinds = '<C-t>', close = { '<Esc>', 'q' } },
+      -- chat view, buffer-local in the transcript and the prompt
+      chat = { send = '<C-CR>', send_alt = '<leader><CR>', interrupt = '<C-c>', prompt = '<leader>ap', help = 'g?',
+        history_prev = '<C-p>', history_next = '<C-n>', attach = '<leader>af',
+        answer_inner = 'ir', answer_outer = 'ar', mode = '<S-Tab>', model = '<leader>aM', answer = '<leader>ay',
+        raw = 'gr', raw_event = 'gR',
+        native = '<leader>at', -- continue the session in native Claude in a tmux pane
+        park = '<leader>ax', -- park: stop the session's Claude process (the next send resumes)
+        diff = { 'gd', '<leader>gd' },
+        save_library = '<leader>W', -- prompt: save the prompt to the library (asks for a name)
+        prompts = '<leader>al' }, -- pick a prompt (skills, commands, library, saved)
+      -- diff view, buffer-local on both sides; a one-character key (q, ?, R) only on the plugin's
+      -- side, since the right side is your own file (there: macro, search, Replace stay yours).
+      -- ]c / [c are Neovim's hunk motions. Each value is a key, a list of keys, or false
+      diff = { next_file = { ']f', '<leader>gj' }, prev_file = { '[f', '<leader>gk' }, flip = { 'gb', '<leader>gt' },
+        branch = { 'gB', '<leader>gB' }, close = { 'q', '<leader>gq' }, help = { '?', 'g?' },
+        refresh = { 'R', '<leader>gR' }, lazygit = 'glg' },
+      -- drawer, on prompt rows (elsewhere these keys keep their normal meaning)
+      prompts = { edit = 'e', rename = 'r', delete = 'd', yank = 'y', to_library = 'L' },
+    },
+    -- Prompts: Claude's commands and skills (read only), the library of templates and per-project
+    -- saved prompts. nil dirs: stdpath('data') .. '/agent-ide/library' and '/agent-ide/prompts'
+    prompts = { library_dir = nil, saved_dir = nil, command_dirs = { '~/.claude/commands' },
+      skill_dirs = { '~/.claude/skills' }, project_dirs = true },
+    -- footer quota: `file` (nil: off) is a JSON file another tool writes,
+    -- { "limits": [ { "label", "percent" (fraction used), "resetsAt" } ], "updatedAt" }; when it is
+    -- readable and fresh (30 min) the footer shows those limits instead of its own
+    quota = { file = nil },
+    -- prompt buffer: `/` opens the command menu, `@` opens the file picker
+    chat = { auto_slash = true, at_picker = true },
+    -- 'nerd' (needs a Nerd Font in the terminal) or 'plain'; `icons` overrides single entries
+    -- of that set (see ui/icons.lua for the keys); an empty string hides an icon
+    icons_style = 'nerd',
+    icons = {},
   }
 end
 
@@ -32,6 +77,7 @@ local current
 ---@return table
 function M.setup(opts)
   current = merge(defaults(), opts or {})
+  current.icons = require('agent-ide.ui.icons').resolve(current.icons_style, current.icons)
   return current
 end
 

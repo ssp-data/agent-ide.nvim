@@ -1,13 +1,18 @@
-//! On-disk metadata cache: `<cache-dir>/index-v2.json`, holding the crate version and a map
-//! path -> { mtime, size, meta }. A file written by another version is ignored and rewritten,
-//! so a change to the metadata rules never serves stale titles.
+//! On-disk metadata cache: `<cache-dir>/index-v3.json`, holding the crate version, the parse
+//! rules version (`events::RULES_VERSION`), the file format (`FORMAT`) and a map
+//! path -> { mtime, size, meta }. A file written with another value of any of the three is
+//! ignored and rewritten, so a change to the metadata rules never serves stale titles. The file
+//! is private: 0600 in a 0700 directory (see `private`).
+use crate::events::RULES_VERSION;
 use crate::scan::SessionMeta;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
-pub const FILE_NAME: &str = "index-v2.json";
+pub const FILE_NAME: &str = "index-v3.json";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Bumped whenever the stored shape changes.
+pub const FORMAT: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Entry {
@@ -19,12 +24,16 @@ struct Entry {
 #[derive(Serialize, Deserialize)]
 struct Stored {
     version: String,
+    rules: u64,
+    format: u32,
     entries: BTreeMap<String, Entry>,
 }
 
 #[derive(Serialize)]
 struct StoredRef<'a> {
     version: &'a str,
+    rules: u64,
+    format: u32,
     entries: &'a BTreeMap<String, Entry>,
 }
 
@@ -41,9 +50,10 @@ impl Cache {
     pub fn load(dir: Option<&Path>) -> Cache {
         let Some(dir) = dir else { return Cache::default() };
         let file = dir.join(FILE_NAME);
+        crate::private::tidy(&file);
         let (entries, dirty) = match std::fs::read(&file) {
             Ok(bytes) => match serde_json::from_slice::<Stored>(&bytes) {
-                Ok(st) if st.version == VERSION => (st.entries, false),
+                Ok(st) if st.version == VERSION && st.rules == RULES_VERSION && st.format == FORMAT => (st.entries, false),
                 _ => (BTreeMap::new(), true),
             },
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => (BTreeMap::new(), false),
@@ -82,17 +92,35 @@ impl Cache {
         if !self.dirty {
             return;
         }
-        let Ok(bytes) = serde_json::to_vec(&StoredRef { version: VERSION, entries: &self.entries }) else { return };
-        if let Some(parent) = file.parent() {
-            if std::fs::create_dir_all(parent).is_err() {
-                return;
+        let stored = StoredRef { version: VERSION, rules: RULES_VERSION, format: FORMAT, entries: &self.entries };
+        let Ok(bytes) = serde_json::to_vec(&stored) else { return };
+        if crate::private::write(file, &bytes) {
+            self.dirty = false;
+            if let Some(dir) = file.parent() {
+                remove_old_versions(dir);
             }
         }
-        let tmp = file.with_extension(format!("json.tmp{}", std::process::id()));
-        if std::fs::write(&tmp, bytes).is_ok() && std::fs::rename(&tmp, file).is_ok() {
-            self.dirty = false;
-        } else {
-            let _ = std::fs::remove_file(&tmp);
+    }
+}
+
+/// True for `index-v<digits>.json` of another format version than `FILE_NAME`.
+pub fn is_old_version(name: &str) -> bool {
+    name != FILE_NAME
+        && name
+            .strip_prefix("index-v")
+            .and_then(|r| r.strip_suffix(".json"))
+            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Removes cache files of earlier format versions (`index-v<n>.json`) from `dir`, the helper's
+/// own cache folder; nothing else there and nothing below it is touched. Best effort.
+fn remove_old_versions(dir: &Path) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for entry in rd.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if is_old_version(name) && entry.file_type().is_ok_and(|t| t.is_file()) {
+            let _ = std::fs::remove_file(entry.path());
         }
     }
 }

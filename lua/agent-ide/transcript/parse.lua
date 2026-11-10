@@ -2,6 +2,12 @@
 -- Nothing is dropped silently: anything not understood becomes an `unknown` event.
 local M = {}
 
+-- Version of the rules both index backends must agree on: this parser and lua_scan.lua (title,
+-- activity and session metadata) on the Lua side, events.rs and scan.rs in the Rust helper.
+-- A rule change on EITHER side requires bumping this AND `RULES_VERSION` in
+-- helper/src/events.rs; a helper reporting another number is out of date and not used.
+M.RULES_VERSION = 3
+
 -- JSON null is nil in objects (the key is absent) and vim.NIL in arrays, so arrays keep
 -- their length and a null element is seen, not skipped. The helper client decodes the
 -- same way, so events from both backends compare equal.
@@ -130,6 +136,37 @@ end
 
 local function trim(s) return (s:gsub('^%s+', ''):gsub('%s+$', '')) end
 
+---Decoded size of base64 `data` in bytes: floor(len * 3 / 4) minus the padding.
+local function base64_size(data)
+  local pad = 0
+  if sub(data, -1) == '=' then pad = sub(data, -2, -2) == '=' and 2 or 1 end
+  return math.max(0, math.floor(#data * 3 / 4) - pad)
+end
+
+---`123 B`, `45.6 KB`, `1.2 MB`. One decimal by integer rounding (half up), so the Rust side
+---prints the same text without depending on how a float formatter breaks ties.
+local function format_size(n)
+  if n < 1024 then return ('%d B'):format(n) end
+  local unit, suffix = 1024, 'KB'
+  if n >= 1048576 then unit, suffix = 1048576, 'MB' end
+  local tenths = math.floor((n * 10 + unit / 2) / unit)
+  return ('%d.%d %s'):format(math.floor(tenths / 10), tenths % 10, suffix)
+end
+
+---What an `image` block shows instead of its data: `<media type>, <size>` for a base64 source,
+---the address for a url source, `image` for anything else. The data itself is not kept.
+local function image_text(block)
+  local src = block.source
+  if type(src) ~= 'table' then return 'image' end
+  if src.type == 'base64' then
+    local media = (type(src.media_type) == 'string' and src.media_type ~= '') and src.media_type or 'image'
+    return media .. ', ' .. format_size(base64_size(type(src.data) == 'string' and src.data or ''))
+  elseif src.type == 'url' and type(src.url) == 'string' then
+    return src.url
+  end
+  return 'image'
+end
+
 local function tool_result_text(content)
   if type(content) == 'string' then return content end
   if type(content) ~= 'table' then return '' end
@@ -137,6 +174,9 @@ local function tool_result_text(content)
   for _, item in ipairs(content) do
     if type(item) == 'table' and item.type == 'text' and type(item.text) == 'string' then
       parts[#parts + 1] = item.text
+    elseif type(item) == 'table' and item.type == 'image' then
+      local t = image_text(item)
+      parts[#parts + 1] = t == 'image' and '[image]' or ('[image: ' .. t .. ']')
     elseif item == vim.NIL then
       parts[#parts + 1] = '[null]'
     elseif type(item) == 'table' then
@@ -149,6 +189,9 @@ local function tool_result_text(content)
 end
 
 local function user_string_events(rec, s)
+  -- Claude's note to the model before a local command's records: no conversation content, and
+  -- never part of the live stream (history equals live)
+  if s:match('^%s*<local%-command%-caveat>') then return {} end
   local name = s:match('<command%-name>(.-)</command%-name>')
   if name then
     local args = s:match('<command%-args>(.-)</command%-args>') or ''
@@ -161,6 +204,9 @@ local function user_string_events(rec, s)
   end
   return { { kind = 'prompt', text = s } }
 end
+
+-- `[Request interrupted by user]`, `[Request interrupted by user for tool use]`
+local INTERRUPT = '^%[Request interrupted by user[^%]]*%]$'
 
 local function block_events(rec, block, raw)
   local events = {}
@@ -183,8 +229,10 @@ local function block_events(rec, block, raw)
       is_error = block.is_error == true,
     }
   elseif rec.type == 'user' and bt == 'text' then
-    events[1] = { kind = rec.isMeta == true and 'meta' or 'prompt', text = block.text or '' }
-    if rec.isMeta == true then events[1].label = 'meta' end
+    -- Claude's interrupt marker is not something the person typed (as in the live stream)
+    local meta = rec.isMeta == true or (type(block.text) == 'string' and block.text:match(INTERRUPT) ~= nil)
+    events[1] = { kind = meta and 'meta' or 'prompt', text = block.text or '' }
+    if meta then events[1].label = 'meta' end
   elseif rec.type == 'assistant' and bt == 'text' then
     events[1] = { kind = 'text', text = block.text or '' }
   elseif rec.type == 'assistant' and bt == 'thinking' then
@@ -192,6 +240,8 @@ local function block_events(rec, block, raw)
     if type(t) == 'string' and t ~= '' then events[1] = { kind = 'thinking', text = t } end
   elseif rec.type == 'assistant' and bt == 'tool_use' then
     events[1] = { kind = 'tool_call', id = block.id, name = block.name, input = block.input or {} }
+  elseif bt == 'image' then
+    events[1] = { kind = 'meta', label = 'image', text = image_text(block) }
   else
     unknown(tostring(bt))
   end
@@ -233,6 +283,13 @@ local function conversation_events(rec, line)
   return events
 end
 
+---Events of one `user` or `assistant` message: the same block rules as transcript records.
+---Also used by the stream decoder, whose messages carry the same content blocks.
+---@param rec { type: 'user'|'assistant', isMeta: boolean|nil, message: table|nil }
+---@param line string original JSON text (raw of unknown blocks is cut from it)
+---@return table[] events
+M.message_events = conversation_events
+
 ---Events of one line, and whether the line failed to decode.
 ---@param line string
 ---@return table[] events, boolean invalid
@@ -250,11 +307,18 @@ function M.parse_record(line)
     return {}, false
   elseif rtype == 'system' then
     local sub_t = rec.subtype
-    events = { {
-      kind = 'meta',
-      label = (type(sub_t) == 'string' and sub_t ~= '') and ('system: ' .. sub_t) or 'system',
-      text = type(rec.content) == 'string' and rec.content or line,
-    } }
+    -- a local slash command's output (e.g. /context): what the live stream shows for it
+    local out = sub_t == 'local_command' and type(rec.content) == 'string'
+      and rec.content:match('^%s*<local%-command%-stdout>(.-)</local%-command%-stdout>%s*$')
+    if out then
+      events = { { kind = 'meta', label = 'command output', text = (out:gsub('%s+$', '')) } }
+    else
+      events = { {
+        kind = 'meta',
+        label = (type(sub_t) == 'string' and sub_t ~= '') and ('system: ' .. sub_t) or 'system',
+        text = type(rec.content) == 'string' and rec.content or line,
+      } }
+    end
   elseif rtype == 'user' or rtype == 'assistant' then
     events = conversation_events({ type = rtype, isMeta = rec.isMeta, message = rec.message }, line)
   else

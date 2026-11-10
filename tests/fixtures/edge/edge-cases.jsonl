@@ -20,6 +20,10 @@
 {"type":"user","message":"not an object"}
 {"type":"assistant","message":{"content":[]}}
 {"type":"assistant","message":{"content":["scalar", 7 ,{"type": "odd" , "k":"{[\"x\"]} \\", "n":[[1,{"a":"]"}], 2],"o":{"z":[]}},{"type":100000000000000},{"type":"text","text":"ok"}]}}
+{"type":"user","message":{"content":[{"type":"text","text":"look"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgoAAAANSUhEUg=="}}]}}
+{"type":"user","message":{"content":[{"type":"image","source":{"type":"url","url":"https://example.com/shot.png"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"q4","content":[{"type":"text","text":"shot"},{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":"QUJD"}},{"type":"image","source":{"type":"url","url":"https://example.com/r.png"}}]}]}}
+{"type":"assistant","message":{"content":[{"type":"image"},{"type":"image","source":{"type":"base64","data":"QUJDRA"}},{"type":"text","text":"after images"}]}}
 {"type":"summary","summary":"bookkeeping"}
 {"type":"future-thing","isSidechain":true,"payload":{"k":[1,2]}}
 this line is not json
@@ -37,5 +41,13 @@ not json with bad byte þ
 {"type":"system","level":"error"}
 {"type":"system","subtype":"local_command","content":{"x":1},"isSidechain":true}
 {"type":"attachment","attachment":{"k":"v"}}
+{"type":"user","isMeta":true,"message":{"content":"<local-command-caveat>Caveat: the command below ran locally.</local-command-caveat>"}}
+{"type":"system","subtype":"local_command","content":"<local-command-stdout>## Out\n\nrow\n\n</local-command-stdout>"}
+{"type":"system","subtype":"local_command","content":"<local-command-stdout>x</local-command-stdout> tail"}
+{"type":"user","message":{"content":[{"type":"text","text":"[Request interrupted by user]"}]}}
+{"type":"user","message":{"content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]}}
+{"type":"user","message":{"content":[{"type":"text","text":"[Request interrupted by user] and more"}]}}
+{"type":"user","isMeta":true,"message":{"content":" \n\t<local-command-caveat>Caveat: indented.</local-command-caveat>"}}
+{"type":"user","message":{"content":"<command-name>/model</command-name>\n            <command-message>model</command-message>\n            <command-args>sonnet</command-args>"}}
 {"type":"user","message":{"content":"cut off here
 {"type":"assistant","message":{"content":"still being writ
