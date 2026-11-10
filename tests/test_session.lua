@@ -286,6 +286,20 @@ T['permission allow with updated input (question answers)'] = function()
   eq(ins(log)[2].response.response, { behavior = 'allow', updatedInput = upd })
 end
 
+T['a setMode answer Claude never confirms is no longer pending after the turn'] = function()
+  local log = script(permission_script('p4'))
+  local s = new()
+  s.visible = true
+  s:send('write it')
+  assert(wait(function() return s.state == 'waiting' end))
+  local sugg = { type = 'setMode', mode = 'acceptEdits', destination = 'session' }
+  s:answer('p4', true, { updated_permissions = { sugg } })
+  eq(ins(log)[2].response.response.updatedPermissions, { sugg })
+  eq(s.mode_requested, 'acceptEdits')
+  assert(wait(function() return s.state == 'idle' end))
+  eq(s.mode_requested, nil)
+end
+
 T['crash mid-answer keeps the partial text, then the next send resumes'] = function()
   script(flat({ expect = 'go' }, init(), replay('go'), block_start(), delta('partial '), delta('answer'),
     { sleep_ms = 100 }, { exit = 2 }))

@@ -136,6 +136,14 @@ end
 
 function H.result(s, a)
   s:_flush_streaming()
+  -- a mode sent with a permission answer is reported within the turn; never pending for ever
+  if s.mode_by_answer then
+    if s.mode_requested == s.mode_by_answer then
+      s.mode_requested = nil
+      s:_emit('meta')
+    end
+    s.mode_by_answer = nil
+  end
   s.echo_expected = nil
   if a.is_error then s:_append(live_meta('error', a.text or 'Turn failed')) end
   clear_permissions(s)

@@ -241,6 +241,7 @@ function Session:answer(request_id, allow, opts)
   for _, u in ipairs(updates or {}) do
     if u.type == 'setMode' and type(u.mode) == 'string' then
       self.mode_requested = u.mode == 'default' and 'manual' or u.mode
+      self.mode_by_answer = self.mode_requested -- given up at the end of the turn if unconfirmed
       self:_emit('meta')
     end
   end
