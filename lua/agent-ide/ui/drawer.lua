@@ -60,19 +60,24 @@ local function shown_projects()
   return model.with_hidden(projects, hidden.is, model.state_of)
 end
 
+local function build()
+  local cfg = config.get()
+  return tree.build(shown_projects(), model.state_of, S.expanded, os.time(), cfg.icons, cfg.projects_dir,
+    model.note_of, sections.collect,
+    { top = sections.collect_top, width = text_width(cfg) })
+end
+
 ---Re-render the drawer buffer; keeps the drawer cursor on the same node (or on `focus`).
 ---`focus == false`: keep the cursor on the same screen line instead (a row went away).
----@param focus? string|false node key to place the cursor on
+---@param focus? string|string[]|false node key to place the cursor on (a list: the first shown)
 local function render(focus)
   sync()
   if not S.buf then return end
-  local cfg = config.get()
-  local t = tree.build(shown_projects(), model.state_of, S.expanded, os.time(), cfg.icons, cfg.projects_dir,
-    model.note_of, sections.collect,
-    { top = sections.collect_top, width = text_width(cfg) })
+  local t = build()
   local row = S.win and api.nvim_win_get_cursor(S.win)[1]
   local view = focus == false and S.win and api.nvim_win_call(S.win, vim.fn.winsaveview)
   if focus == false then focus = nil else focus = focus or (row and node_key(S.nodes[row])) end
+  if type(focus) == 'string' then focus = { focus } end
   vim.bo[S.buf].modifiable = true
   api.nvim_buf_set_lines(S.buf, 0, -1, false, t.lines)
   vim.bo[S.buf].modifiable = false
@@ -85,9 +90,14 @@ local function render(focus)
     view.lnum = math.min(view.lnum, #t.lines)
     api.nvim_win_call(S.win, function() vim.fn.winrestview(view) end)
   elseif S.win and focus then
+    local at = {}
     for i, node in ipairs(S.nodes) do
-      if node_key(node) == focus then
-        if i ~= row then api.nvim_win_set_cursor(S.win, { i, 0 }) end
+      local k = node_key(node)
+      if k and not at[k] then at[k] = i end
+    end
+    for _, k in ipairs(focus) do
+      if at[k] then
+        if at[k] ~= row then api.nvim_win_set_cursor(S.win, { at[k], 0 }) end
         break
       end
     end
@@ -273,13 +283,94 @@ function actions.hide()
   if after and after.type == 'session' and after.session.id == id then notify('hidden; listed here while it needs you') end
 end
 
+-- Collapse and expand all ----------------------------------------------------------------------
+
+-- Keys of the row under the cursor and of the rows it sits in (by indent), nearest first.
+local function cursor_and_ancestors()
+  sync()
+  if not S.win or not S.buf then return {} end
+  local row = api.nvim_win_get_cursor(S.win)[1]
+  local lines = api.nvim_buf_get_lines(S.buf, 0, row, false)
+  local out = {}
+  local depth = math.huge
+  for i = row, 1, -1 do
+    local d = #(lines[i] or ''):match('^ *')
+    if d < depth or i == row then
+      depth = d
+      local k = node_key(S.nodes[i])
+      if k then out[#out + 1] = k end
+      if d == 0 then break end
+    end
+  end
+  return out
+end
+
+-- The fold a node toggles, and whether it starts open; nil for rows without one. A commit's own
+-- file list is left out (one git run per commit).
+local function fold_of(node)
+  if node.type == 'project' then return node.project.key, false end
+  if node.type == 'section' then return node.key, true end
+  if node.type == 'hidden' then return node.key, false end
+  if node.fold and node.type ~= 'git_commit' then return node.fold.key, node.fold.default == true end
+end
+
+local function is_open(key, default)
+  local v = S.expanded[key]
+  if v == nil then return default end
+  return v
+end
+
+local expanded_all -- S.expanded as the last `zR` left it
+
+-- `zM`: every project, section and group closed; a project opened again shows its sessions.
+function actions.collapse_all()
+  local keys = cursor_and_ancestors()
+  for _, node in ipairs(S.nodes) do
+    local key = fold_of(node)
+    if key then S.expanded[key] = false end
+  end
+  for key, v in pairs(S.expanded) do
+    if key:sub(-#'/sessions') == '/sessions' then S.expanded[key] = nil elseif v then S.expanded[key] = false end
+  end
+  for _, p in ipairs(S.projects) do S.expanded[p.key] = false end
+  expanded_all = nil
+  render(keys)
+end
+
+-- `zR`: every project open with its Sessions; Changes, Commits, Saved prompts, Hidden and the
+-- Prompts node stay as they are (opening them loads git or prompts everywhere at once). Again
+-- with nothing changed in between: everything opens.
+function actions.expand_all()
+  local keys = cursor_and_ancestors()
+  local again = expanded_all ~= nil and vim.deep_equal(expanded_all, S.expanded)
+  for _, p in ipairs(shown_projects()) do
+    S.expanded[p.key] = true
+    if S.expanded[p.key .. '/sessions'] == false then S.expanded[p.key .. '/sessions'] = nil end
+  end
+  if again then
+    for _ = 1, 8 do -- one level per pass
+      local changed = false
+      for _, node in ipairs(build().nodes) do
+        local key, default = fold_of(node)
+        if key and not is_open(key, default) then
+          S.expanded[key] = true
+          changed = true
+        end
+      end
+      if not changed then break end
+    end
+  end
+  render(keys)
+  expanded_all = vim.deepcopy(S.expanded)
+end
+
 function actions.close() M.close() end
 
 -- The drawer's own keys (lhs, action name); a provider row key with the same lhs is neither
 -- mapped nor listed. `?` (actions.help) lists them all.
 local KEYS = {
   { '<CR>', 'open' }, { 'o', 'open' }, { 'za', 'fold' }, { 'R', 'refresh' }, { 'gp', 'jump' },
-  { 'x', 'park' }, { 'H', 'hide' }, { 'glg', 'lazygit' }, { 'q', 'close' }, { 's', 'search' }, { '?', 'help' },
+  { 'x', 'park' }, { 'H', 'hide' }, { 'zM', 'collapse_all' }, { 'zR', 'expand_all' }, { 'glg', 'lazygit' }, { 'q', 'close' }, { 's', 'search' }, { '?', 'help' },
   { 'g?', 'help' },
 }
 local OWN = {}
@@ -330,6 +421,8 @@ function actions.help()
   local rows = {
     { key = '<CR> / o', desc = 'open session, start a new one, use a prompt, or toggle' },
     { key = 'za', desc = 'toggle fold' },
+    { key = 'zM', desc = 'collapse all' },
+    { key = 'zR', desc = 'expand all projects and their sessions (again: everything)' },
     { key = 'R', desc = 'refresh' },
     { key = 'gp', desc = 'jump to tmux pane' },
     { key = 's', desc = 'search this project (<Tab> in the picker: all sessions)' },

@@ -150,12 +150,42 @@ local function commit_rows(out, w, ctx, commits)
   end
 end
 
+-- The counts of closed sections load for at most COUNT_ROOTS work trees at a time: opening many
+-- projects at once (`zR`) loads the rest as earlier ones finish (each finish re-renders), never
+-- starting git in all of them together. An open section loads at once.
+local COUNT_ROOTS = 4
+local counting, counted = 0, {}
+local function admit(root)
+  if counted[root] then return true end
+  if counting >= COUNT_ROOTS then return false end
+  counted[root], counting = true, counting + 1
+  local left = 2
+  local function one()
+    left = left - 1
+    if left > 0 then return end
+    counting = counting - 1
+    vim.schedule(function() drawer().refresh() end)
+  end
+  cache.when(root, 'changes', one)
+  cache.when(root, 'commits', one)
+  return true
+end
+
+---Test only: work trees whose closed-section counts are loading.
+function M._counting() return counting end
+
 -- Changes and Commits of one work tree `w = { root, project, indent }`.
 local function tree_rows(out, w, ctx)
   local root = w.root
-  local changes, base = cache.changes(root)
-  local commits = cache.commits(root)
-  base = base or cache.base(root)
+  local changes, commits, base
+  if admit(root) or is_open(ctx.expanded, root .. '/git/changes') or is_open(ctx.expanded, root .. '/git/commits') then
+    changes, base = cache.changes(root)
+    commits = cache.commits(root)
+    base = base or cache.base(root)
+  else
+    local e = cache.peek(root)
+    if e then changes, commits, base = e.data.changes, e.data.commits, e.data.base end
+  end
   local label = base and ('Changes vs ' .. base.label) or 'Changes'
   local open, node = section(out, w, ctx, 'changes', label, changes and #changes)
   if open then
