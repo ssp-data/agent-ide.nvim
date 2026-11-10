@@ -5,7 +5,7 @@ A Neovim plugin to run and review all your Claude Code sessions from one place: 
 
 ## Why I built Agent-IDE?
 
-Agents-IDE.nvim is my new plugin for agent handling in Neovim, optimized for [my terminal workflow](https://www.ssp.sh/brain/my-terminal-workflow-with-macos-and-linux/). I saw a tweet, [`Herdr or Rex`](https://x.com/omarmsimon/status/2120013311681130603), and then I thought, why not in Neovim? Below is what came out of that question.
+Agent-IDE.nvim is my new plugin for agent handling in Neovim, optimized for [my terminal workflow](https://www.ssp.sh/brain/my-terminal-workflow-with-macos-and-linux/). I saw a tweet, [`Herdr or Rex`](https://x.com/omarmsimon/status/2120013311681130603), and then I thought, why not in Neovim? Below is what came out of that question.
 
 Coding is changing, from writing to more navigating and viewing changes, etc. So Neovim is great for all of it, I use nvim with lazygit for seeing all the changes and navigating around changes the agents made. So I thought, why not make it the main control center, as I did for email with [Neomd](https://github.com/ssp-data/neomd), where nvim is the composer.
 
@@ -29,7 +29,7 @@ The screenshots use synthetic demo sessions and repositories.
 
 s
 ## Focus
-The features and focus are on managing all agent sessions in a single drawer, as I use [Query databases in vim (vim-dadbod)](https://www.ssp.sh/brain/query-databases-in-vim-vim-dadbod/) to query databases within nvim, that's why it's called the **Agents IDE** because it's my IDE for agents.
+The features and focus are on managing all agent sessions in a single drawer, as I use [Query databases in vim (vim-dadbod)](https://www.ssp.sh/brain/query-databases-in-vim-vim-dadbod/) to query databases within nvim, that's why it's called the **Agent IDE** because it's my IDE for agents.
 
 ### Why not a Terminal TUI, why Neovim?
 You might ask why not a terminal-based TUI, now that Herdr, Rex, and others are built in the terminal for agents, or even apps nowadays. The reason is that nvim is doing most of the things I like to improve anyway, and I have a 5+ year history of dotfiles for nvim, where I optimized these aspects over the years already - things like: 
@@ -89,7 +89,7 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
 
 ```lua
 {
-  'ssp-data/agents-ide.nvim',
+  'ssp-data/agent-ide.nvim',
   build = 'make helper', -- optional; needs cargo
   cmd = 'Agents',
   keys = { { '<leader>aa', '<cmd>Agents<cr>', desc = 'Agent-IDE: toggle drawer' } },
@@ -103,7 +103,7 @@ Lazy-loaded on `cmd = 'Agents'` (or the key above), the plugin starts with the f
 
 ```lua
 {
-  'ssp-data/agents-ide.nvim',
+  'ssp-data/agent-ide.nvim',
   build = 'make helper',
   event = 'VeryLazy',
   opts = {},
