@@ -257,6 +257,11 @@ fn user_string_events(is_meta: bool, s: &str) -> Vec<Event> {
         Some(&s[a..b])
     }
 
+    // Claude's note to the model before a local command's records: no conversation content,
+    // and never part of the live stream (history equals live)
+    if s.trim_start_matches(is_space_char).starts_with("<local-command-caveat>") {
+        return Vec::new();
+    }
     if let Some(name) = between(s, NAME_OPEN, NAME_CLOSE) {
         let args = between(s, ARGS_OPEN, ARGS_CLOSE).unwrap_or("");
         let text = trim(&format!("{name} {args}")).to_string();
@@ -273,6 +278,25 @@ fn user_string_events(is_meta: bool, s: &str) -> Vec<Event> {
         return vec![event("meta", vec![("label", "meta".into()), ("text", s.into())])];
     }
     vec![event("prompt", vec![("text", s.into())])]
+}
+
+/// `[Request interrupted by user]`, `[Request interrupted by user for tool use]`
+/// (Lua: `^%[Request interrupted by user[^%]]*%]$`).
+fn is_interrupt_marker(t: &str) -> bool {
+    t.strip_prefix("[Request interrupted by user")
+        .and_then(|rest| rest.strip_suffix(']'))
+        .map_or(false, |mid| !mid.contains(']'))
+}
+
+/// The output of a local slash command in a `system/local_command` record, trailing whitespace
+/// removed (Lua: `^%s*<local%-command%-stdout>(.-)</local%-command%-stdout>%s*$`).
+fn local_command_output(s: &str) -> Option<&str> {
+    let inner = s
+        .trim_start_matches(is_space_char)
+        .strip_prefix("<local-command-stdout>")?
+        .trim_end_matches(is_space_char)
+        .strip_suffix("</local-command-stdout>")?;
+    Some(inner.trim_end_matches(is_space_char))
 }
 
 fn block_event(rtype: &str, is_meta: bool, block: &Value, raw: &mut dyn FnMut() -> String) -> Option<Event> {
@@ -295,8 +319,10 @@ fn block_event(rtype: &str, is_meta: bool, block: &Value, raw: &mut dyn FnMut() 
             Some(event("tool_result", f))
         }
         ("user", Some("text")) => {
+            // Claude's interrupt marker is not something the person typed (as in the live stream)
+            let meta = is_meta || matches!(field(block, "text"), Some(Value::String(t)) if is_interrupt_marker(t));
             let text = or_empty(field(block, "text"));
-            Some(if is_meta {
+            Some(if meta {
                 event("meta", vec![("text", text), ("label", "meta".into())])
             } else {
                 event("prompt", vec![("text", text)])
@@ -375,15 +401,24 @@ pub fn parse_record(line: &[u8]) -> (Vec<Event>, bool) {
     let mut events = if BOOKKEEPING.contains(&rtype) {
         return (Vec::new(), false);
     } else if rtype == "system" {
-        let label = match field(&rec, "subtype") {
-            Some(Value::String(s)) if !s.is_empty() => format!("system: {s}"),
-            _ => "system".into(),
+        // a local slash command's output (e.g. /context): what the live stream shows for it
+        let out = match (field(&rec, "subtype"), field(&rec, "content")) {
+            (Some(Value::String(st)), Some(Value::String(c))) if st == "local_command" => local_command_output(c),
+            _ => None,
         };
-        let text = match field(&rec, "content") {
-            Some(Value::String(s)) => s.clone(),
-            _ => fixed.clone().into_owned(),
-        };
-        vec![event("meta", vec![("label", label.into()), ("text", text.into())])]
+        if let Some(out) = out {
+            vec![event("meta", vec![("label", "command output".into()), ("text", out.into())])]
+        } else {
+            let label = match field(&rec, "subtype") {
+                Some(Value::String(s)) if !s.is_empty() => format!("system: {s}"),
+                _ => "system".into(),
+            };
+            let text = match field(&rec, "content") {
+                Some(Value::String(s)) => s.clone(),
+                _ => fixed.clone().into_owned(),
+            };
+            vec![event("meta", vec![("label", label.into()), ("text", text.into())])]
+        }
     } else if rtype == "user" || rtype == "assistant" {
         conversation_events(rtype, is_true(field(&rec, "isMeta")), field(&rec, "message"), line)
     } else {

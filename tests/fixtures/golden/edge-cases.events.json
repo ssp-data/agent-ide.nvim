@@ -51,5 +51,10 @@
   {"kind": "meta", "label": "system: compact_boundary", "text": "Conversation compacted"},
   {"kind": "meta", "label": "system", "text": "{\"type\":\"system\",\"level\":\"error\"}"},
   {"kind": "meta", "label": "system: local_command", "text": "{\"type\":\"system\",\"subtype\":\"local_command\",\"content\":{\"x\":1},\"isSidechain\":true}", "sidechain": true},
+  {"kind": "meta", "label": "command output", "text": "## Out\n\nrow"},
+  {"kind": "meta", "label": "system: local_command", "text": "<local-command-stdout>x</local-command-stdout> tail"},
+  {"kind": "meta", "label": "meta", "text": "[Request interrupted by user]"},
+  {"kind": "meta", "label": "meta", "text": "[Request interrupted by user for tool use]"},
+  {"kind": "prompt", "text": "[Request interrupted by user] and more"},
   {"kind": "unknown", "label": "invalid JSON", "raw": "{\"type\":\"user\",\"message\":{\"content\":\"cut off here"}
 ]

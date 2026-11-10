@@ -149,6 +149,9 @@ local function tool_result_text(content)
 end
 
 local function user_string_events(rec, s)
+  -- Claude's note to the model before a local command's records: no conversation content, and
+  -- never part of the live stream (history equals live)
+  if s:match('^%s*<local%-command%-caveat>') then return {} end
   local name = s:match('<command%-name>(.-)</command%-name>')
   if name then
     local args = s:match('<command%-args>(.-)</command%-args>') or ''
@@ -161,6 +164,9 @@ local function user_string_events(rec, s)
   end
   return { { kind = 'prompt', text = s } }
 end
+
+-- `[Request interrupted by user]`, `[Request interrupted by user for tool use]`
+local INTERRUPT = '^%[Request interrupted by user[^%]]*%]$'
 
 local function block_events(rec, block, raw)
   local events = {}
@@ -183,8 +189,10 @@ local function block_events(rec, block, raw)
       is_error = block.is_error == true,
     }
   elseif rec.type == 'user' and bt == 'text' then
-    events[1] = { kind = rec.isMeta == true and 'meta' or 'prompt', text = block.text or '' }
-    if rec.isMeta == true then events[1].label = 'meta' end
+    -- Claude's interrupt marker is not something the person typed (as in the live stream)
+    local meta = rec.isMeta == true or (type(block.text) == 'string' and block.text:match(INTERRUPT) ~= nil)
+    events[1] = { kind = meta and 'meta' or 'prompt', text = block.text or '' }
+    if meta then events[1].label = 'meta' end
   elseif rec.type == 'assistant' and bt == 'text' then
     events[1] = { kind = 'text', text = block.text or '' }
   elseif rec.type == 'assistant' and bt == 'thinking' then
@@ -257,11 +265,18 @@ function M.parse_record(line)
     return {}, false
   elseif rtype == 'system' then
     local sub_t = rec.subtype
-    events = { {
-      kind = 'meta',
-      label = (type(sub_t) == 'string' and sub_t ~= '') and ('system: ' .. sub_t) or 'system',
-      text = type(rec.content) == 'string' and rec.content or line,
-    } }
+    -- a local slash command's output (e.g. /context): what the live stream shows for it
+    local out = sub_t == 'local_command' and type(rec.content) == 'string'
+      and rec.content:match('^%s*<local%-command%-stdout>(.-)</local%-command%-stdout>%s*$')
+    if out then
+      events = { { kind = 'meta', label = 'command output', text = (out:gsub('%s+$', '')) } }
+    else
+      events = { {
+        kind = 'meta',
+        label = (type(sub_t) == 'string' and sub_t ~= '') and ('system: ' .. sub_t) or 'system',
+        text = type(rec.content) == 'string' and rec.content or line,
+      } }
+    end
   elseif rtype == 'user' or rtype == 'assistant' then
     events = conversation_events({ type = rtype, isMeta = rec.isMeta, message = rec.message }, line)
   else
