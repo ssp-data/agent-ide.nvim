@@ -12,12 +12,13 @@ M.RAW_KEEP = RAW_KEEP
 local DENY_MESSAGE = 'Denied by user in Neovim'
 
 local request_n = 0 -- ids of control requests we send: r1, r2, ...
+local init_n = 0 -- ids of the `initialize` requests: i1, i2, ... (apart, so r1 stays the first setting)
 
 local Session = {}
 Session.__index = Session
 M.Session = Session
 
-function M._reset_ids() request_n = 0 end
+function M._reset_ids() request_n, init_n = 0, 0 end
 
 function Session:_emit(what) require('agent-ide.session')._emit(self, what) end
 
@@ -121,6 +122,13 @@ function Session:_start_process()
   if not proc then return false, 'cannot start Claude: ' .. tostring(err) end
   self.proc, self.owned, self.parking, self.interrupted, self.requests = proc, true, false, false, {}
   self.pid = proc.handle and proc.handle.pid
+  -- the very first line of every new process: Claude answers with its models and commands,
+  -- without a turn (docs/protocol.md); the prompt is written after it
+  init_n = init_n + 1
+  local iid = 'i' .. init_n
+  if self:_write({ type = 'control_request', request_id = iid, request = { subtype = 'initialize' } }) then
+    self.requests[iid] = { subtype = 'initialize' }
+  end
   require('agent-ide.claude.version').check() -- first start only; see claude/version.lua
   for _, req in ipairs(self.deferred) do self:_control(req) end
   self.deferred = {}

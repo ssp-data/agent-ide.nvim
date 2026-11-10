@@ -168,7 +168,7 @@ end
 local function fake_ins()
   local out = {}
   for _, l in ipairs(fake.log(log)) do
-    if l['in'] then out[#out + 1] = vim.json.decode(l['in']) end
+    if l['in'] and not fake.is_init(l['in']) then out[#out + 1] = vim.json.decode(l['in']) end
   end
   return out
 end

@@ -42,16 +42,118 @@ function M.cycle(s)
   s:set_mode(M.claude_name(M.next_mode(s.mode_requested or s.mode)))
 end
 
----Pick a model from `config.claude.models` for session `s`; `on_pick(model)` after a request.
+-- Picker opens at the latest this long after a model fetch started (claude/models_fetch.lua).
+M._wait_ms = 1500
+local refreshed = false -- the stale latest list was refreshed in this Neovim
+
+local function models() return require('agent-ide.claude.models') end
+
+-- The list Claude gave: the session's own, else the latest one known (this Neovim or models.json).
+local function known(s) return (s and s.models) or models().latest() end
+
+local function one_line(t) return (t:gsub('%s*\n%s*', ' ')) end
+
+---What the picker offers `s`, in order: `config.claude.models` when set (as given; entries Claude
+---knows get its name and description), else Claude's list, else the four aliases.
+---@param s table|nil Session
+---@return table[] items { value, name?, description?, resolved? }, table[]|nil list Claude's list
+function M.items(s)
+  local list = known(s)
+  local cfg = claude_cfg().models
+  local out = {}
+  if type(cfg) == 'table' and #cfg > 0 then
+    for _, v in ipairs(cfg) do
+      if type(v) == 'string' and v ~= '' then
+        local e = models().match(list, v)
+        if e and e.value == 'default' and v ~= 'default' then e = models().same_as(list, e) or e end
+        out[#out + 1] = e and vim.tbl_extend('force', e, { value = v }) or { value = v }
+      end
+    end
+    if #out > 0 then return out, list end
+  end
+  if list then return list, list end
+  for i, v in ipairs(DEFAULT_MODELS) do out[i] = { value = v } end
+  return out, nil
+end
+
+---Row text of `item`: `Alpha 2 — For hard problems (claude-alpha-2)`, `Default (recommended) —
+---Alpha 2`, or the bare value when Claude did not name it.
+---@param item table
+---@param list table[]|nil Claude's list (for the model `default` stands for)
+---@return string
+function M.row_text(item, list)
+  if not item.name then return item.value end
+  local t = one_line(item.name)
+  if item.value == 'default' then
+    local same = list and models().same_as(list, item)
+    local what = same and same.name or item.resolved
+    return what and (t .. ' — ' .. one_line(what)) or t
+  end
+  if item.description then t = t .. ' — ' .. one_line(item.description) end
+  if item.resolved then t = t .. ' (' .. item.resolved .. ')' end
+  return t
+end
+
+---The item of `items` that is the current model of `s` (nil: none fits). Before Claude reported
+---one, the model the session starts with: the one chosen, `config.claude.model`, else `default`.
+local function current(s, items)
+  local chosen = s.model_chosen or claude_cfg().model
+  return models().match(items, s.model or chosen or 'default', chosen)
+end
+
+---Picker rows of `s` as shown: `● ` before the current model, two spaces before the others.
+---@param s table Session
+---@return string[]
+function M.rows(s)
+  local items, list = M.items(s)
+  local cur = current(s, items)
+  local out = {}
+  for i, it in ipairs(items) do out[i] = (it == cur and '● ' or '  ') .. M.row_text(it, list) end
+  return out
+end
+
+local function open_picker(s, on_pick)
+  local items, list = M.items(s)
+  local cur = current(s, items)
+  vim.ui.select(items, {
+    prompt = 'Model',
+    format_item = function(it) return (it == cur and '● ' or '  ') .. M.row_text(it, list) end,
+  }, function(choice)
+    if choice and s:set_model(choice.value) and on_pick then on_pick(choice.value) end
+  end)
+end
+
+---Pick a model for session `s`; `on_pick(value)` after a request. Without any list from Claude
+---(a fresh install) and none configured, the list is fetched first: the picker opens when it is in or after
+---`_wait_ms`, whichever comes first, with what is known then (unless the user typed meanwhile).
+---A latest list that is stale (claude/models.lua) is refreshed in the background, once per Neovim.
 ---@param s table Session
 ---@param on_pick? fun(model: string)
 function M.pick_model(s, on_pick)
-  local list = claude_cfg().models
-  list = type(list) == 'table' and #list > 0 and list or DEFAULT_MODELS
-  vim.ui.select(list, { prompt = 'Model' }, function(choice)
-    if choice and s:set_model(choice) and on_pick then on_pick(choice) end
-  end)
+  local fetch = require('agent-ide.claude.models_fetch')
+  local cfg = claude_cfg().models
+  if known(s) or (type(cfg) == 'table' and #cfg > 0) then
+    if not refreshed and not fetch.busy() and models().stale(require('agent-ide.claude.version').found()) then
+      refreshed = true
+      fetch.fetch()
+    end
+    return open_picker(s, on_pick)
+  end
+  local buf, win = vim.api.nvim_get_current_buf(), vim.api.nvim_get_current_win()
+  local tick, opened = vim.b[buf].changedtick, false
+  local function open()
+    if opened then return end
+    opened = true
+    -- never pop up over typing: the user moved on or typed meanwhile
+    if vim.api.nvim_get_current_win() ~= win or not vim.api.nvim_buf_is_valid(buf) or vim.b[buf].changedtick ~= tick then return end
+    open_picker(s, on_pick)
+  end
+  fetch.fetch(function() open() end)
+  vim.defer_fn(open, M._wait_ms)
 end
+
+---Test only: allow the background refresh again.
+function M._reset() refreshed = false end
 
 ---Tell the user Claude refused the last mode or model change of `s` (session change
 ---`control_error`); only for the session on screen, the others keep it in their transcript.
@@ -68,12 +170,23 @@ local function short_model(model)
   return (model:gsub('^claude%-', ''):gsub('%-%d%d%d%d%d%d%d%d$', ''))
 end
 
+---How model `model` of `s` reads in the winbar and the footer: Claude's name for it, lowercased
+---(`fable 5.1`), else nil.
+---@param s table Session
+---@param model string|nil
+---@return string|nil
+function M.model_name(s, model)
+  return models().label(known(s), model, s.model_chosen)
+end
+
 ---Winbar parts for the model and the mode of `s`.
 ---@param s table Session
 ---@return string model, string mode
 function M.labels(s)
-  local model = short_model(s.model)
-  if s.model_requested and s.model_requested ~= s.model then model = model .. '→' .. s.model_requested end
+  local model = M.model_name(s, s.model) or short_model(s.model)
+  if s.model_requested and s.model_requested ~= s.model then
+    model = model .. '→' .. (M.model_name(s, s.model_requested) or s.model_requested)
+  end
   local mode = 'mode:' .. (s.mode or '?')
   if s.mode_requested and s.mode_requested ~= s.mode then mode = mode .. '→' .. s.mode_requested end
   return model, mode

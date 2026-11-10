@@ -204,7 +204,7 @@ local function pick(label) child.lua('_G.pick(...)', { label }) end
 local function fake_ins()
   local out = {}
   for _, l in ipairs(fake.log(log)) do
-    if l['in'] then out[#out + 1] = vim.json.decode(l['in']) end
+    if l['in'] and not fake.is_init(l['in']) then out[#out + 1] = vim.json.decode(l['in']) end
   end
   return out
 end
@@ -626,15 +626,16 @@ T['<S-Tab> before the first turn: pending in the winbar, sent right after start'
 end
 
 T['<leader>aM picks a model; the winbar shows it pending until Claude confirms'] = function()
+  -- a configured list opens at once (no list from Claude is fetched for it)
   start(flat({ expect = 'hi' }, init(), status(), say('hey'), result('hey'),
-    { expect = 'set_model' }, { expect = '"go"' }, ok('r1')))
+    { expect = 'set_model' }, { expect = '"go"' }, ok('r1')), { claude = { models = { 'fable', 'opus', 'sonnet', 'haiku' } } })
   local id = open_new()
   send_normal('hi')
   wait_for(function() return winbar():find('haiku-5-5 [', 1, true) ~= nil and current().state == 'idle' end, 'first turn')
   child.type_keys('\\aM')
   wait_for(function() return #selects() == 1 end, 'model select')
-  eq(selects()[1].labels, { 'fable', 'opus', 'sonnet', 'haiku' })
-  pick('sonnet')
+  eq(selects()[1].labels, { '  fable', '  opus', '  sonnet', '  haiku' })
+  pick('  sonnet')
   wait_for(function() return #controls() == 1 end, 'set_model')
   eq(controls()[1], { subtype = 'set_model', model = 'sonnet' })
   eq(winbar():find('haiku-5-5→sonnet [', 1, true) ~= nil, true)
