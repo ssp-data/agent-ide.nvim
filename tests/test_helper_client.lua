@@ -121,6 +121,23 @@ T['helper history equals lua history on fixtures'] = function()
   end
 end
 
+T['a history response of 40 MB arrives quickly and keeps the helper'] = function()
+  need_helper()
+  local path = temp_dir() .. '/-big/big.jsonl'
+  local rec = vim.json.encode({ type = 'user', message = { content = { {
+    type = 'tool_result', tool_use_id = 't', content = string.rep('synthetic output line\n', 200) } } } }) .. '\n'
+  local n = math.ceil(40 * 1024 * 1024 / #rec)
+  synth.write(path, string.rep(rec, n))
+  local t0 = vim.uv.hrtime()
+  local ev = history(path)
+  local ms = (vim.uv.hrtime() - t0) / 1e6
+  eq(#ev, n)
+  eq(index.backend(), 'helper')
+  eq(#notes, 0)
+  -- well under the 5 s request timeout (the old quadratic buffering took over 2 s at 38 MB)
+  if ms >= 1500 then error(('40 MB history took %.0f ms'):format(ms), 0) end
+end
+
 T['history of a missing file is empty under both backends, without fallback'] = function()
   eq(lua_only(function() return history('/nonexistent/x/abc.jsonl') end), {})
   eq(#notes, 0)
