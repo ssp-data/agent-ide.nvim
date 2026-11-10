@@ -70,19 +70,6 @@ pub fn append(p: &Path, text: &str) {
     f.write_all(text.as_bytes()).unwrap();
 }
 
-/// A session of `rounds` prompt/answer/tool rounds of about `size` bytes in total.
-pub fn session(rounds: u32, words: &str, pad: usize) -> String {
-    let mut s = String::new();
-    let out = "x".repeat(pad);
-    for n in 0..rounds {
-        s += &user(&format!("prompt {n} about {words}"), n);
-        s += &answer(&format!("answer {n} explaining {words} in detail"), n);
-        s += &tool("Bash", "ls -la", &format!("t{n}"));
-        s += &result(&format!("t{n}"), &out);
-    }
-    s
-}
-
 /// A session of realistic prose: prompts of 100–400 bytes, answers of 1–4 KiB, and a tool
 /// call with `pad` bytes of output per round.
 pub fn prose_session(seed: u64, rounds: u32, pad: usize) -> String {
