@@ -9,7 +9,7 @@ local function defaults()
     helper = { enabled = true, path = nil }, -- nil: <plugin root>/helper/target/release/agent-ide-helper
     -- modes: what <S-Tab> cycles through (plugin names; `manual` is Claude's `default`);
     -- default_mode: where the cycle starts before Claude reports a mode (nil: as if manual)
-    claude = { cmd = { 'claude' }, strip_api_key = true, model = nil,
+    claude = { cmd = { 'claude' }, strip_api_key = true, model = nil, version_check = true,
       modes = { 'manual', 'acceptEdits', 'plan', 'auto' }, default_mode = nil,
       models = { 'fable', 'opus', 'sonnet', 'haiku' } },
     tcd = true,
@@ -20,7 +20,8 @@ local function defaults()
       -- chat view, buffer-local in the transcript and the prompt
       chat = { send = '<C-CR>', send_alt = '<leader><CR>', interrupt = '<C-c>', prompt = '<leader>ap', help = '?',
         history_prev = '<C-p>', history_next = '<C-n>', attach = '<leader>af',
-        answer_inner = 'ir', answer_outer = 'ar', mode = '<S-Tab>', model = '<leader>aM', answer = '<leader>ay' },
+        answer_inner = 'ir', answer_outer = 'ar', mode = '<S-Tab>', model = '<leader>aM', answer = '<leader>ay',
+        raw = 'gr', raw_event = 'gR' },
     },
     -- prompt buffer: `/` opens the command menu, `@` opens the file picker
     chat = { auto_slash = true, at_picker = true },
