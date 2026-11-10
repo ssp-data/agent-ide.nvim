@@ -78,13 +78,11 @@ end
 
 -- Choices ----------------------------------------------------------------------------------
 
--- Where Claude saves an `addRules` suggestion, by its `destination` (docs/protocol.md). A
--- destination not listed here is not offered: its label could not say where the rule goes.
+-- VERIFIED DESTINATIONS: the `addRules` destinations whose effect was checked against real
+-- Claude (docs/protocol.md, "Applying a suggestion"), with where the rule then lives. Only these
+-- are offered. Add `session`, `projectSettings`, `userSettings` here once verified the same way.
 local RULE_DESTINATIONS = {
-  session = ' in this session',
-  localSettings = ' (saved to .claude/settings.local.json in this project)',
-  projectSettings = ' (saved to .claude/settings.json in this project)',
-  userSettings = ' (saved to your user settings, ~/.claude/settings.json)',
+  localSettings = " (saved in this project's local settings)",
 }
 
 local function rule_text(rules)

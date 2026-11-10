@@ -462,7 +462,7 @@ T['ExitPlanMode: approve and accept edits sends the next mode with the approval'
   eq(controls(), {})
 end
 
-local ALWAYS_LOCAL = 'Allow and always allow Bash(npm test:*) (saved to .claude/settings.local.json in this project)'
+local ALWAYS_LOCAL = "Allow and always allow Bash(npm test:*) (saved in this project's local settings)"
 
 T['suggestions: setMode and addRules are offered (addDirectories is not); setMode goes back with the answer'] = function()
   -- the mode change travels in the answer (updatedPermissions); Claude then reports the mode
@@ -493,24 +493,21 @@ T['suggestions: the mode Claude reports after a setMode answer reaches the winba
   wait_for(function() return winbar():find('mode:acceptEdits ·', 1, true) ~= nil end, 'mode confirmed')
 end
 
-T['suggestions: always allow sends the rule back in updatedPermissions; labels say where it is saved'] = function()
+T['suggestions: always allow only for verified destinations; the rule goes back in updatedPermissions'] = function()
   local function rules(dest, behavior)
     return { type = 'addRules', rules = { { toolName = 'Bash', ruleContent = 'npm test:*' }, { toolName = 'Read' } },
       behavior = behavior or 'allow', destination = dest }
   end
-  local sugg = { rules('session'), ADD_RULES, rules('projectSettings'), rules('userSettings'),
+  local sugg = { rules('session'), ADD_RULES, rules('localSettings'), rules('projectSettings'), rules('userSettings'),
     rules('somewhereElse'), rules('localSettings', 'deny') }
   start(write_turn('Write it', 'p1', { permission_suggestions = sugg }))
   open_new()
   send_normal('Write it')
   wait_for(function() return #selects() == 1 end, 'select')
-  local both = 'Bash(npm test:*), Read'
-  eq(selects()[1].labels, { 'Allow', 'Deny',
-    'Allow and always allow ' .. both .. ' in this session',
-    ALWAYS_LOCAL,
-    'Allow and always allow ' .. both .. ' (saved to .claude/settings.json in this project)',
-    'Allow and always allow ' .. both .. ' (saved to your user settings, ~/.claude/settings.json)',
-  })
+  -- session, projectSettings, userSettings (not verified), an unknown destination and a deny
+  -- rule are left out
+  eq(selects()[1].labels, { 'Allow', 'Deny', ALWAYS_LOCAL,
+    "Allow and always allow Bash(npm test:*), Read (saved in this project's local settings)" })
   pick(ALWAYS_LOCAL)
   wait_for(function() return has_line(transcript(), 'Written.') ~= nil end, 'answer')
   eq(answers()[1], { subtype = 'success', request_id = 'p1',
