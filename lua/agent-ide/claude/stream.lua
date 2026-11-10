@@ -13,6 +13,10 @@ end
 
 local function str(v) return type(v) == 'string' and v or nil end
 
+-- A subagent's objects name the tool call that started it. Tested by type, so a caller that
+-- decodes JSON null as vim.NIL still gets main-thread objects.
+local function is_sidechain(obj) return type(obj.parent_tool_use_id) == 'string' end
+
 -- Stream events that carry nothing the plugin shows: the full message follows anyway.
 local QUIET_STREAM = {
   message_start = true, content_block_stop = true, message_delta = true, message_stop = true,
@@ -91,14 +95,15 @@ function Decoder:stream_event(obj, raw)
   if type(ev) ~= 'table' then return { unknown(label_of(obj), raw) } end
   local et = ev.type
   if et == 'content_block_start' then
-    self.streamed = false
+    -- Only a main-thread block starts a new main text block.
+    if not is_sidechain(obj) then self.streamed = false end
     return {}
   elseif et == 'content_block_delta' then
     local d = ev.delta
     local dt = type(d) == 'table' and d.type or nil
     if dt == 'text_delta' and type(d.text) == 'string' then
       -- Subagent messages arrive whole; their deltas would interleave with the main text.
-      if obj.parent_tool_use_id ~= nil then return {} end
+      if is_sidechain(obj) then return {} end
       self.streamed = true
       return { { type = 'delta', text = d.text } }
     elseif QUIET_DELTA[dt] then
@@ -113,7 +118,7 @@ end
 
 function Decoder:assistant(obj, raw)
   if type(obj.message) ~= 'table' then return { unknown('assistant', raw) } end
-  local sidechain = obj.parent_tool_use_id ~= nil
+  local sidechain = is_sidechain(obj)
   local evs = parse.message_events({ type = 'assistant', message = obj.message }, raw)
   if obj.local_command_run ~= nil then
     -- Output of a local slash command (e.g. /context), sent as a synthetic message.
@@ -159,7 +164,7 @@ function Decoder:user(obj, raw)
   -- Everything else in a user message comes from Claude itself (tool results, command
   -- output, interrupt markers), never from the person typing: no `prompt` events.
   local evs = parse.message_events({ type = 'user', isMeta = true, message = msg }, raw)
-  return event_actions(evs, obj.parent_tool_use_id ~= nil, false)
+  return event_actions(evs, is_sidechain(obj), false)
 end
 
 function Decoder:control_request(obj, raw)

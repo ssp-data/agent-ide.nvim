@@ -23,19 +23,21 @@ Closing stdin after the last `result` makes the process exit with code 0.
 
 ### `--safe-mode`
 
-`--safe-mode` disables the user's CLAUDE.md, personal skills, hooks, MCP servers, custom
-commands and agents. Compared with one run without it:
+`--safe-mode` disables CLAUDE.md, personal skills, hooks, MCP servers, custom commands and
+agents. Compared with one run without it:
 
-- Without it, `system/hook_started` and `system/hook_response` (from a `SessionStart` hook)
-  arrive **before** `system/init`. With it, no hook objects appear at all.
-- `init` gains a `memory_paths` field without safe mode; otherwise the field set is the same.
-- Permissions are **not** reset by safe mode: the configured default mode still applies
-  (here `init.permissionMode` was `acceptEdits` in both runs), and allow rules from the
-  user's settings still auto-approve some tools (a Bash `ls` ran without an ask, its
-  `tool_result_meta.permission_decision.source` was `user_permanent`). Built-in plugins
-  and skills are still listed in `init`.
+- Hooks, if configured, emit `system/hook_started` and `system/hook_response`; hooks that
+  run at session start arrive **before** `system/init`. Under safe mode no hook objects
+  appear.
+- `init` can carry a `memory_paths` field without safe mode; otherwise the field set is the
+  same.
+- Permissions are **not** reset by safe mode: a configured default mode and allow rules
+  still apply, so `init.permissionMode` may differ from `default` and an allowed tool runs
+  without an ask (its `tool_result_meta.permission_decision.source` then names the rule's
+  origin, e.g. `user_permanent` or `config`). Pass `--permission-mode` explicitly when a
+  known mode matters. Built-in plugins and skills are still listed in `init`.
 
-So hook objects must be expected in real use, before `init`.
+So hook objects must be expected in real use, possibly before `init`.
 
 ## Input lines (stdin)
 
@@ -187,8 +189,9 @@ A second prompt on the same process works the same way (a new `init` first).
 
 `... content_block_start(tool_use), input_json_delta…, A(tool_use), content_block_stop,
 message_delta(stop_reason tool_use), message_stop, rate_limit_event, user(tool_result),
-status(requesting), message_start, text…, A(text), ..., result`. No ask (auto-allowed by
-the user's allow rule; a non-allowed Bash command produced an ask in the plan scenario).
+status(requesting), message_start, text…, A(text), ..., result`. No ask in this run,
+because an allow rule covered the command; a command no rule covers produces a
+`can_use_tool` ask (seen in the plan scenario).
 
 ### Write under `manual`, allowed
 
@@ -317,14 +320,14 @@ non-table object gives `unknown`.
 | `system/hook_started`, `system/hook_response` | nothing; if `outcome == "error"`, a non-zero `exit_code` or an `error` field: `event{meta, label "hook", text "<hook_name>: <stderr or output or error>"}` |
 | any other `system/<subtype>` (task_*, background_tasks_changed, ...) | `unknown{label "system/<subtype>", raw}` |
 | `stream_event` text_delta, main thread | `delta{text}`; marks the current content block as streamed |
-| `stream_event` text_delta with non-null `parent_tool_use_id` | nothing (dropped). Not observed: subagent messages came only whole. Main-thread blocks were always followed by their full `assistant` object, so the full message is expected to follow; see Open questions |
-| `stream_event` content_block_start | nothing; resets the streamed mark |
+| `stream_event` text_delta whose `parent_tool_use_id` is a string | nothing (dropped). Not observed: subagent messages came only whole. Main-thread blocks were always followed by their full `assistant` object, so the full message is expected to follow; see Open questions |
+| `stream_event` content_block_start | nothing; a main-thread one resets the streamed mark (a subagent's does not) |
 | `stream_event` message_start, content_block_stop, message_delta, message_stop; deltas input_json, thinking, signature | nothing (the full `assistant` object carries the same content) |
 | `stream_event` other inner type / delta type | `unknown{label "stream_event/<type>" or "stream_event/content_block_delta/<delta type>", raw}` |
-| `assistant` | `event` per content block through `transcript/parse.lua` block rules (`text`, `thinking` if non-empty, `tool_call`, `unknown`). A `text` event whose block was streamed carries `streamed = true` on the action. A `tool_use` id already reported is not reported again. `parent_tool_use_id` non-null → `sidechain = true`. With `local_command_run` (slash command output) the text becomes `event{meta, label "command output"}`. API error messages (`error` field) are plain `text` events; the failure is in `result.is_error` |
+| `assistant` | `event` per content block through `transcript/parse.lua` block rules (`text`, `thinking` if non-empty, `tool_call`, `unknown`). A `text` event whose block was streamed carries `streamed = true` on the action. A `tool_use` id already reported is not reported again. `parent_tool_use_id` a string → `sidechain = true`. With `local_command_run` (slash command output) the text becomes `event{meta, label "command output"}`. API error messages (`error` field) are plain `text` events; the failure is in `result.is_error` |
 | `user` with `isReplay:true`, not command output | `echo{text}` |
 | `user` with string content `<local-command-stdout>…` (replayed or not) | `event{meta, label "command output", text}` |
-| `user` tool results | `event{tool_result}` (sidechain when `parent_tool_use_id` set) |
+| `user` tool results | `event{tool_result}` (sidechain when `parent_tool_use_id` is a string) |
 | `user` other text (interrupt marker) | `event{meta, label "meta", text}` — never `prompt` |
 | `control_request/can_use_tool` (incl. AskUserQuestion, ExitPlanMode) | `permission{request_id, tool_name, input, description, suggestions (permission_suggestions)}` |
 | other `control_request/<subtype>` | `unknown{label "control_request/<subtype>", raw}` |
@@ -334,8 +337,30 @@ non-table object gives `unknown`.
 | `result` | `result{is_error, text (result, else errors joined)}`; resets the streamed mark |
 | anything else | `unknown{label "<type>" or "<type>/<subtype>", raw}` |
 
+The sidechain test is `type(parent_tool_use_id) == "string"`: JSON `null`, whether decoded
+as an absent key or as `vim.NIL`, means the main thread.
+
+A failed hook's text falls back to the original line (`raw`) when it has no non-empty
+`stderr`, `output` or `error`.
+
 User questions and plan approvals both arrive as `can_use_tool`, so they are `permission`
 actions; the Session tells them apart by `tool_name` (`AskUserQuestion`, `ExitPlanMode`).
+
+### Silent by design
+
+`feed` returns no action for:
+
+- `assistant` thinking blocks with empty `thinking` (all thinking seen here), and
+  `assistant` / `user` messages whose `content` is an empty array. (Other non-string
+  content is not silent: for `assistant` it becomes an `unknown` event, as in the
+  transcript parser; for `user` an `unknown` action.)
+- `stream_event` `content_block_start` of any block type (text, tool_use, thinking);
+  `message_start`, `content_block_stop`, `message_delta`, `message_stop`.
+- `content_block_delta` of kinds `input_json_delta`, `thinking_delta`, `signature_delta`.
+- `text_delta` from a subagent (string `parent_tool_use_id`).
+- `system/thinking_tokens`.
+- `system/hook_started` and `system/hook_response` without an error.
+- A `tool_use` block whose id was already reported.
 
 ## Open questions
 

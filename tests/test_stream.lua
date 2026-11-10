@@ -160,6 +160,38 @@ T['sidechain deltas are dropped; known stream events yield nothing'] = function(
   eq({ a[1].type, a[1].label }, { 'unknown', 'stream_event/content_block_delta/future_delta' })
 end
 
+T['a subagent block start does not reset the main streamed mark'] = function()
+  local a = feed_lines({
+    '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}},"parent_tool_use_id":null}',
+    '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Main"}},"parent_tool_use_id":null}',
+    '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}},"parent_tool_use_id":"ta"}',
+    '{"type":"assistant","message":{"content":[{"type":"text","text":"Main"}]},"parent_tool_use_id":null}',
+  })
+  local evs = pick(a, 'event')
+  eq(#evs, 1)
+  eq({ evs[1].event.text, evs[1].streamed, evs[1].event.sidechain }, { 'Main', true, nil })
+end
+
+T['parent_tool_use_id decoded as vim.NIL is the main thread'] = function()
+  local dec = stream.new()
+  local d = dec:feed({ type = 'stream_event', parent_tool_use_id = vim.NIL,
+    event = { type = 'content_block_delta', index = 0, delta = { type = 'text_delta', text = 'x' } } }, nil)
+  eq(d, { { type = 'delta', text = 'x' } })
+  local a = dec:feed({ type = 'assistant', parent_tool_use_id = vim.NIL,
+    message = { content = { { type = 'text', text = 'x' } } } }, '{"type":"assistant","message":{"content":[{"type":"text","text":"x"}]},"parent_tool_use_id":null}')
+  eq(a, { { type = 'event', event = { kind = 'text', text = 'x' }, streamed = true } })
+  local u = dec:feed({ type = 'user', parent_tool_use_id = vim.NIL,
+    message = { content = { { type = 'tool_result', tool_use_id = 't', content = 'ok' } } } }, nil)
+  eq(u[1].event.sidechain, nil)
+end
+
+T['empty thinking block and empty content yield nothing'] = function()
+  eq(feed_lines({
+    '{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"","signature":"s"}]},"parent_tool_use_id":null}',
+    '{"type":"assistant","message":{"content":[]},"parent_tool_use_id":null}',
+  }), {})
+end
+
 T['a repeated tool_use block is reported once'] = function()
   local line = '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t9","name":"Bash","input":{}}]}}'
   eq(#feed_lines({ line, line }), 1)
