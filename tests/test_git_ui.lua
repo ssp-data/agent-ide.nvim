@@ -184,6 +184,21 @@ T['drawer: branch suffix, Changes and Commits sections with counts, files with s
     eq({ row, has_parts(l, row[1], row[2]) ~= nil }, { row, true })
   end
   press_on('Commits on branch (2)')
+  -- uncommitted: a.lua (line 5) and the untracked u.txt against HEAD
+  wait_for(function() return has_line(drawer_lines(), 'uncommitted (2)') ~= nil end, 'uncommitted count')
+  press_on('uncommitted (2)')
+  wait_for(function() return has_parts(drawer_lines(), '          ? u.txt ', ' +1') ~= nil end, 'uncommitted files')
+  eq(has_parts(drawer_lines(), '          M a.lua ', ' +1 −1') ~= nil, true)
+  press_on('          M a.lua')
+  wait_for(function() return view() ~= vim.NIL end, 'diff view')
+  local v = view()
+  eq({ v.mode, v.path, v.n }, { 'head', 'a.lua', 2 })
+  eq(v.left.winbar:find('HEAD (uncommitted)', 1, true) ~= nil, true)
+  eq(v.right.name:sub(-#'/a.lua'), '/a.lua') -- the real, editable file
+  eq({ v.left.diff, v.right.diff, v.right.modifiable }, { true, true, true })
+  child.type_keys('\\gq')
+  wait_for(function() return view() == vim.NIL end, 'diff closed')
+  press_on('uncommitted (2)') -- fold it again
   press_on(' two ')
   wait_for(function() return has_parts(drawer_lines(), '          M a.lua ', ' +1 −1') ~= nil end, 'commit files')
   -- za on a file row folds its section; the cursor lands on the section

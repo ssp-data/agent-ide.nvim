@@ -36,6 +36,7 @@ First public version.
 - **Drafts kept on disk**: the text of a prompt buffer is written to `stdpath('state')/agent-ide/drafts/<session id>.md` as you type and when you leave; it comes back when the session's prompt opens again (also after a crash), and `+ New session` takes over a draft left for an unsent new session of the project. A send, `:q!` and a deleted session remove it.
 - **The model before the first prompt**: the winbar and the footer name the model a session will start with (picked for it, else `claude.model`, else the model last used here, kept in `prefs.json`, else Claude's default); new and resumed sessions start with it.
 - **Commit graph row**: an expanded `Commits` section starts with a dimmed `commit graph` row; `<CR>` opens the graph.
+- **Uncommitted row**: right below it, `uncommitted (n)` lists what is not committed yet (working tree and index against `HEAD`, untracked files included); `<CR>` on a file diffs it against `HEAD`.
 - `y` on a session row in the drawer yanks the last prompt sent in it.
 - Every drawer key is configurable under `keys.drawer` (a key, a list of keys, or `false`).
 - The legend toggle (`gL`, `<leader>aL`) is remembered across restarts (`prefs.json`).

@@ -66,9 +66,14 @@ function M.labels(d)
     local c = d.commit
     return { c.short .. '^', c.short .. ' ' .. c.subject }
   end
-  local b = d.base or {}
-  local left = 'base ' .. (b.label or '?')
-  if b.rev then left = left .. ' (' .. b.rev:sub(1, 7) .. ')' end
+  local left
+  if d.mode == 'head' then
+    left = 'HEAD (uncommitted)'
+  else
+    local b = d.base or {}
+    left = 'base ' .. (b.label or '?')
+    if b.rev then left = left .. ' (' .. b.rev:sub(1, 7) .. ')' end
+  end
   local right = 'working tree'
   if f.status == 'D' then right = right .. ' (deleted)' end
   return { left, right }
