@@ -1,6 +1,7 @@
 -- The Agents tab: a drawer window listing projects and sessions beside a main window.
 local api = vim.api
 local config = require('agent-ide.config')
+local hidden = require('agent-ide.hidden')
 local index = require('agent-ide.index')
 local live = require('agent-ide.live')
 local project = require('agent-ide.project')
@@ -37,6 +38,7 @@ local function node_key(node)
   if node.type == 'section' then return 's:' .. node.key end
   if node.type == 'session' then return 'x:' .. node.session.id end
   if node.type == 'new' then return 'n:' .. node.project.key end
+  if node.type == 'hidden' then return 'h:' .. node.key end
 end
 
 ---State shown for a session (see `drawer_model.state_of`).
@@ -51,17 +53,26 @@ local function text_width(cfg)
   return api.nvim_win_get_width(S.win) - (info and info.textoff or 0)
 end
 
+---Projects as the drawer shows them: unsaved new sessions added, hidden ones grouped.
+local function shown_projects()
+  local projects = model.with_unsaved(S.projects)
+  if not hidden.any() then return projects end
+  return model.with_hidden(projects, hidden.is, model.state_of)
+end
+
 ---Re-render the drawer buffer; keeps the drawer cursor on the same node (or on `focus`).
----@param focus? string node key to place the cursor on
+---`focus == false`: keep the cursor on the same screen line instead (a row went away).
+---@param focus? string|false node key to place the cursor on
 local function render(focus)
   sync()
   if not S.buf then return end
   local cfg = config.get()
-  local t = tree.build(model.with_unsaved(S.projects), model.state_of, S.expanded, os.time(), cfg.icons, cfg.projects_dir,
+  local t = tree.build(shown_projects(), model.state_of, S.expanded, os.time(), cfg.icons, cfg.projects_dir,
     model.note_of, sections.collect,
     { top = sections.collect_top, width = text_width(cfg) })
   local row = S.win and api.nvim_win_get_cursor(S.win)[1]
-  focus = focus or (row and node_key(S.nodes[row]))
+  local view = focus == false and S.win and api.nvim_win_call(S.win, vim.fn.winsaveview)
+  if focus == false then focus = nil else focus = focus or (row and node_key(S.nodes[row])) end
   vim.bo[S.buf].modifiable = true
   api.nvim_buf_set_lines(S.buf, 0, -1, false, t.lines)
   vim.bo[S.buf].modifiable = false
@@ -70,7 +81,10 @@ local function render(focus)
   for _, h in ipairs(t.hl) do
     api.nvim_buf_set_extmark(S.buf, ns, h.line - 1, h.col_start, { end_col = h.col_end, hl_group = h.group })
   end
-  if S.win and focus then
+  if view then
+    view.lnum = math.min(view.lnum, #t.lines)
+    api.nvim_win_call(S.win, function() vim.fn.winrestview(view) end)
+  elseif S.win and focus then
     for i, node in ipairs(S.nodes) do
       if node_key(node) == focus then
         if i ~= row then api.nvim_win_set_cursor(S.win, { i, 0 }) end
@@ -82,6 +96,7 @@ end
 
 local function rescan()
   index.scan(function(sessions)
+    hidden.refresh() -- another Neovim may have hidden or shown sessions
     S.projects = project.group(sessions)
     render()
   end)
@@ -173,6 +188,13 @@ local function toggle_node(node)
   elseif node.type == 'section' then
     toggle_key(node.key, true)
     render('s:' .. node.key)
+  elseif node.type == 'hidden' then
+    toggle_key(node.key, false)
+    render('h:' .. node.key)
+  elseif node.type == 'session' and node.hidden then
+    local key = node.project.key .. '/hidden'
+    toggle_key(key, false)
+    render('h:' .. key)
   elseif node.type == 'session' then
     local key = node.project.key .. '/sessions'
     toggle_key(key, true)
@@ -237,13 +259,27 @@ function actions.park()
   require('agent-ide.ui.chat').park(s)
 end
 
+-- `H`: hide the session (into its project's Hidden group) or, on a hidden one, show it again.
+-- The cursor stays on its screen line, now on the next row. Other rows: nothing.
+function actions.hide()
+  local node = current_node()
+  if not node or node.type ~= 'session' then return end
+  local id = node.session.id
+  local hide = not hidden.is(id)
+  if not hidden.set(id, hide) then return end
+  render(false)
+  -- a session that needs attention stays among the visible rows (drawer_model.with_hidden)
+  local after = hide and current_node()
+  if after and after.type == 'session' and after.session.id == id then notify('hidden; listed here while it needs you') end
+end
+
 function actions.close() M.close() end
 
 -- The drawer's own keys (lhs, action name); a provider row key with the same lhs is neither
 -- mapped nor listed. `?` (actions.help) lists them all.
 local KEYS = {
   { '<CR>', 'open' }, { 'o', 'open' }, { 'za', 'fold' }, { 'R', 'refresh' }, { 'gp', 'jump' },
-  { 'x', 'park' }, { 'glg', 'lazygit' }, { 'q', 'close' }, { 's', 'search' }, { '?', 'help' },
+  { 'x', 'park' }, { 'H', 'hide' }, { 'glg', 'lazygit' }, { 'q', 'close' }, { 's', 'search' }, { '?', 'help' },
   { 'g?', 'help' },
 }
 local OWN = {}
@@ -298,6 +334,7 @@ function actions.help()
     { key = 'gp', desc = 'jump to tmux pane' },
     { key = 's', desc = 'search this project (<Tab> in the picker: all sessions)' },
     { key = 'x', desc = 'park the session: stop its Claude process here' },
+    { key = 'H', desc = 'hide the session into Hidden (n); on a hidden one: show it again' },
     { key = 'glg', desc = 'lazygit for the project (or the row\'s worktree)' },
     { key = 'q', desc = 'close drawer' },
     { key = '? / g?', desc = 'this help' },

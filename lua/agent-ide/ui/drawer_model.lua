@@ -1,6 +1,6 @@
 -- What the drawer shows about sessions, apart from its window: the state of a session, its
--- state word (what a waiting one waits for, why one failed, where it runs), and new sessions
--- no scan has listed yet.
+-- state word (what a waiting one waits for, why one failed, where it runs), new sessions
+-- no scan has listed yet, and which sessions go into a project's `Hidden (n)` group.
 local live = require('agent-ide.live')
 local session = require('agent-ide.session')
 
@@ -125,6 +125,45 @@ function M.with_unsaved(projects)
     end
   end
   return out
+end
+
+-- States in which a hidden session counts as visible: hiding never swallows an ask or a result.
+local ATTENTION = { waiting = true, busy = true, done = true, failed = true }
+
+---Projects with their hidden sessions (`is_hidden`) moved from `sessions` to `hidden`, unless
+---they need attention (waiting, busy, done, failed: then they stay among the visible ones).
+---A project's activity and order follow its visible sessions; one with only hidden sessions
+---shows the age of the newest of them and sorts after every project with a visible one.
+---@param projects table[]
+---@param is_hidden fun(id: string): boolean
+---@param state_of fun(id: string): string
+---@return table[]
+function M.with_hidden(projects, is_hidden, state_of)
+  local out, touched = {}, false
+  for i, p in ipairs(projects) do
+    local shown, hidden = {}, {}
+    for _, s in ipairs(p.sessions) do
+      if is_hidden(s.id) and not ATTENTION[state_of(s.id)] then hidden[#hidden + 1] = s else shown[#shown + 1] = s end
+    end
+    if #hidden == 0 then
+      out[i] = { p = p, n = i, activity = p.activity }
+    else
+      touched = true
+      local newest, all = 0, 0
+      for _, s in ipairs(shown) do newest = math.max(newest, s.activity or 0) end
+      for _, s in ipairs(hidden) do all = math.max(all, s.activity or 0) end
+      local only = #shown == 0
+      out[i] = { n = i, only = only, activity = only and all or newest,
+        p = setmetatable({ sessions = shown, hidden = hidden, activity = only and all or newest }, { __index = p }) }
+    end
+  end
+  if not touched then return projects end
+  table.sort(out, function(a, b)
+    if (a.only or false) ~= (b.only or false) then return not a.only end
+    if a.activity ~= b.activity then return a.activity > b.activity end
+    return a.n < b.n
+  end)
+  return vim.tbl_map(function(o) return o.p end, out)
 end
 
 return M

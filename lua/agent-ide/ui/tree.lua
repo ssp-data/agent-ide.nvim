@@ -59,7 +59,8 @@ local function project_right(rolled, states, icons, age)
   return out
 end
 
----@param projects table[]
+---@param projects table[] a project's `hidden` sessions (see drawer_model.with_hidden) form a
+---  collapsed `Hidden (n)` group at the end of its Sessions section (`expanded[key .. '/hidden']`)
 ---@param state_of fun(session_id: string): string State of one session
 ---@param expanded table<string, boolean>
 ---@param now integer
@@ -125,11 +126,10 @@ function M.build(projects, state_of, expanded, now, icons, projects_dir, note_of
       add({ { '  ' .. (sec_open and icons.open or icons.closed) .. ' '
         .. 'Sessions (' .. #project.sessions .. ')', 'AgentIdeSection' } }, { type = 'section', project = project, key = key })
       if sec_open then
-        for i, s in ipairs(project.sessions) do
-          local state = states[i]
+        local function session_row(s, state, indent, hidden)
           local group = STATE_GROUP[state]
           local title_hl = state == 'parked' and 'AgentIdeParked' or nil
-          local sl = { { '      ' } }
+          local sl = { { indent } }
           local icon = icons[state] or ''
           if icon ~= '' then
             sl[#sl + 1] = { icon, group }
@@ -145,7 +145,19 @@ function M.build(projects, state_of, expanded, now, icons, projects_dir, note_of
             sr[2] = { ' ' }
           end
           sr[#sr + 1] = { M.ago(s.activity, now), 'AgentIdeAge' }
-          add_row(sl, sr, { type = 'session', project = project, session = s, state = state })
+          add_row(sl, sr, { type = 'session', project = project, session = s, state = state, hidden = hidden })
+        end
+        for i, s in ipairs(project.sessions) do session_row(s, states[i], '      ') end
+        -- hidden sessions (see drawer_model.with_hidden): a collapsed group, the section's last row
+        local hidden = project.hidden
+        if hidden and #hidden > 0 then
+          local hkey = project.key .. '/hidden'
+          local h_open = expanded[hkey] == true
+          add({ { '    ' .. (h_open and icons.open or icons.closed) .. ' Hidden (' .. #hidden .. ')', 'AgentIdeParked' } },
+            { type = 'hidden', project = project, key = hkey })
+          if h_open then
+            for _, s in ipairs(hidden) do session_row(s, state_of(s.id), '        ', true) end
+          end
         end
       end
       for _, r in ipairs(rows or {}) do add_provided(r) end
