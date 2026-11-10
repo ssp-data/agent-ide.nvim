@@ -1,5 +1,5 @@
 -- Pure-Lua session index: finds Claude transcript files and extracts per-session metadata.
--- All directory walking and parsing is spread over vim.schedule ticks.
+-- All directory walking and parsing is spread over event-loop turns.
 local parse = require('agent-ide.transcript.parse')
 local M = {}
 
@@ -8,6 +8,11 @@ local FILES_PER_TICK = 8
 local LINES_PER_TICK = 500
 local TITLE_MAX = 60
 local DECODE_OPTS = { luanil = { object = true, array = true } }
+
+-- Run `fn` on the next event-loop turn. Unlike vim.schedule, a chain of these lets timers and
+-- typed keys run between steps (Neovim drains its scheduled-callback queue, new entries included,
+-- before polling again).
+local function yield(fn) vim.defer_fn(fn, 0) end
 
 local function decode(line)
   local ok, rec = pcall(vim.json.decode, line, DECODE_OPTS)
@@ -106,7 +111,7 @@ function M.scan(projects_dir, cb)
     end
     i = last + 1
     if i <= #files then
-      vim.schedule(step)
+      yield(step)
     else
       pcall(cb, sessions)
     end
@@ -132,7 +137,7 @@ function M.history(path, cb)
     end
     i = last + 1
     if i <= #lines then
-      vim.schedule(step)
+      yield(step)
     else
       pcall(cb, events)
     end

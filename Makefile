@@ -13,4 +13,4 @@ test-helper:
 	cargo test --manifest-path helper/Cargo.toml
 
 bench: deps
-	nvim --headless --noplugin -u tests/minimal_init.lua -c "luafile tests/bench.lua" -c "qa!"
+	BENCH_DIR="$(DIR)" nvim --headless --noplugin -u tests/minimal_init.lua -c "luafile tests/bench.lua" -c "qa!"
