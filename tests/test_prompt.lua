@@ -101,34 +101,103 @@ end
 
 -- slash completion ---------------------------------------------------------------------------
 
-T['completion lists the session commands with a prefix, sorted'] = function()
+local WORDS = "vim.tbl_map(function(i) return i.word end, require('agent-ide.ui.prompt').complete(0, ...).words)"
+
+T['completion: plugin entries first, then the session commands; fuzzy, prefix matches first'] = function()
   start()
-  child.lua("require('agent-ide.session').all()[1].slash_commands = { 'context', 'help', 'compact' }")
+  child.lua("require('agent-ide.session').all()[1].slash_commands = { 'context', 'help', 'compact', 'memory' }")
   child.type_keys('i', '/co')
   eq(child.lua_get("require('agent-ide.ui.prompt').complete(1, '')"), 0)
-  eq(child.lua_get("require('agent-ide.ui.prompt').complete(0, '/co')"), { '/compact', '/context' })
-  eq(child.lua_get("require('agent-ide.ui.prompt').complete(0, '/')"), { '/compact', '/context', '/help' })
-  eq(child.lua_get("require('agent-ide.ui.prompt').complete(0, '/x')"), {})
+  eq(child.lua_get(WORDS, { '/' }), { '/copy', '/model', '/compact', '/context', '/help', '/memory' })
+  -- prefix matches first (the plugin's before Claude's), then by the position of the first letter
+  eq(child.lua_get(WORDS, { '/co' }), { '/copy', '/compact', '/context' })
+  eq(child.lua_get(WORDS, { '/mo' }), { '/model', '/memory' })
+  eq(child.lua_get(WORDS, { '/ct' }), { '/context', '/compact' })
+  eq(child.lua_get(WORDS, { '/zq' }), {})
+  local items = child.lua_get("require('agent-ide.ui.prompt').complete(0, '/')")
+  eq(items.refresh, 'always') -- asked again on every typed character
+  eq({ items.words[1].kind, items.words[2].kind, items.words[3].kind }, { 'plugin', 'plugin', '' })
   -- not at a command position: no completion
   child.type_keys('<Esc>', 'cc', 'say /co')
   eq(child.lua_get("require('agent-ide.ui.prompt').complete(1, '')") < 0, true)
 end
 
-T['no commands yet: no matches and a one-time hint'] = function()
+T['no commands yet: the plugin entries, a one-time hint; a new session offers the folder\'s last list'] = function()
   start()
-  child.type_keys('i', '/')
-  eq(child.lua_get('vim.fn.pumvisible()'), 0)
-  eq(child.lua_get("require('agent-ide.ui.prompt').complete(0, '/')"), {})
-  eq(child.lua_get("require('agent-ide.ui.prompt').complete(0, '/')"), {})
-  eq(child.lua_get('_G.notes'), { 'Agent-IDE: commands are known after the first answer in a session' })
-end
-
-T['typing / at the line start opens the completion menu; auto_slash = false turns it off'] = function()
-  start()
-  child.lua("require('agent-ide.session').all()[1].slash_commands = { 'compact', 'context' }")
   child.type_keys('i', '/')
   eq(child.lua_get('vim.fn.pumvisible()'), 1)
-  eq(child.lua_get('vim.api.nvim_get_current_line()'):sub(1, 1), '/') -- the user's completeopt decides on the rest
+  eq(child.lua_get(WORDS, { '/' }), { '/copy', '/model' })
+  eq(child.lua_get(WORDS, { '/' }), { '/copy', '/model' })
+  eq(child.lua_get('_G.notes'), { 'Agent-IDE: commands are known after the first answer in a session' })
+  -- a session in the same folder reported its commands: offered here too
+  child.type_keys('<Esc>')
+  child.lua([[require('agent-ide.session')._commands_seen[require('agent-ide.session').all()[1].cwd] = { 'compact' }]])
+  child.type_keys('S', '/')
+  eq(child.lua_get(WORDS, { '/' }), { '/copy', '/model', '/compact' })
+end
+
+T['/copy and /model: chosen from the menu or sent alone, the plugin acts and nothing is sent'] = function()
+  start()
+  set_events({ { kind = 'prompt', text = 'q' }, { kind = 'text', text = 'first part' },
+    { kind = 'text', text = 'second\npart' } })
+  child.lua([[
+    _G.selects = {}
+    vim.ui.select = function(items, opts, cb) table.insert(_G.selects, { items = items, prompt = opts.prompt }) end
+    local s = require('agent-ide.session').all()[1]
+    _G.sent = {}
+    s.send = function(_, text) table.insert(_G.sent, text); return true end
+  ]])
+  -- chosen from the menu
+  child.type_keys('i', '/', 'cop')
+  wait_for(function() return child.lua_get('vim.fn.pumvisible()') == 1 end, 'menu')
+  child.type_keys('<C-n>', '<C-y>')
+  wait_for(function() return child.lua_get('vim.fn.getreg(\'"\')') == 'first part\n\nsecond\npart' end, 'copied')
+  eq(child.lua_get('vim.api.nvim_get_current_line()'), '')
+  local notes = child.lua_get('_G.notes')
+  eq(vim.startswith(notes[#notes], 'Agent-IDE: copied the last answer (4 lines)'), true)
+  child.type_keys('/', 'mod')
+  wait_for(function() return child.lua_get('vim.fn.pumvisible()') == 1 end, 'menu')
+  child.type_keys('<C-n>', '<C-y>')
+  wait_for(function() return #child.lua_get('_G.selects') == 1 end, 'model picker')
+  eq(child.lua_get('_G.selects[1].prompt'), 'Model')
+  -- sent alone
+  child.type_keys('<Esc>')
+  child.lua("vim.fn.setreg('\"', '')")
+  child.lua('vim.api.nvim_buf_set_lines(0, 0, -1, false, { "/copy" })')
+  child.type_keys('<C-CR>')
+  wait_for(function() return child.lua_get('vim.fn.getreg(\'"\')') ~= '' end, 'copied on send')
+  eq(lines_of('prompt'), { '' })
+  child.lua('vim.api.nvim_buf_set_lines(0, 0, -1, false, { "/model" })')
+  child.type_keys('<C-CR>')
+  wait_for(function() return #child.lua_get('_G.selects') == 2 end, 'model picker on send')
+  eq(child.lua_get('_G.sent'), {})
+end
+
+T['typing / opens the menu with nothing inserted; typing narrows it; completeopt is put back'] = function()
+  start()
+  child.lua("vim.o.completeopt = 'menu'") -- a user setting that inserts the first match at once
+  child.lua("require('agent-ide.session').all()[1].slash_commands = { 'compact', 'context', 'memory' }")
+  child.type_keys('i', '/')
+  eq(child.lua_get('vim.fn.pumvisible()'), 1)
+  eq(child.lua_get('vim.api.nvim_get_current_line()'), '/') -- nothing inserted before a choice
+  eq(child.lua_get('vim.fn.complete_info({ "selected" }).selected'), -1)
+  eq(vim.startswith(child.lua_get('vim.bo.completeopt'), 'menuone,noinsert,noselect'), true)
+  child.type_keys('m', 'o')
+  eq(child.lua_get('vim.api.nvim_get_current_line()'), '/mo')
+  wait_for(function() return child.lua_get('vim.fn.pumvisible()') == 1 end, 'menu after typing')
+  local shown = child.lua_get('vim.tbl_map(function(i) return i.word end, vim.fn.complete_info({ "items" }).items)')
+  eq(shown[1], '/model')
+  eq(vim.tbl_contains(shown, '/compact'), false)
+  child.type_keys('<Esc>')
+  eq(child.lua_get('vim.bo.completeopt'), '')
+  eq(child.lua_get('vim.o.completeopt'), 'menu')
+  -- a loaded nvim-cmp without its menu is closed before ours opens
+  child.type_keys('cc')
+  child.lua("_G.closed = 0; package.loaded.cmp = { visible = function() return false end, close = function() _G.closed = _G.closed + 1 end }")
+  child.type_keys('/')
+  eq(child.lua_get('_G.closed'), 1)
+  eq(child.lua_get('vim.fn.pumvisible()'), 1)
+  child.lua('package.loaded.cmp = nil')
   child.type_keys('<Esc>', 'cc', 'x/')
   eq(child.lua_get('vim.fn.pumvisible()'), 0)
   eq(child.lua_get('vim.api.nvim_get_current_line()'), 'x/')
@@ -185,16 +254,26 @@ end
 
 T['history in insert mode only when the menu is closed and at the first/last line'] = function()
   start()
+  -- keyword completion looks in this buffer only (not in every buffer of the child)
+  child.lua("vim.o.complete = '.'")
   set_events({ { kind = 'prompt', text = 'old' } })
+  local function mode() return child.lua_get('vim.api.nvim_get_mode().mode') end
+  local function pum() return child.lua_get('vim.fn.pumvisible()') end
   child.type_keys('i', 'a', '<CR>', 'b')
+  wait_for(function() return mode() == 'i' and pum() == 0 end, 'insert mode, no menu')
   child.type_keys('<C-p>') -- insert-mode <C-p> on line 2: normal behaviour (completion)
-  eq(lines_of('prompt')[1], 'a')
-  child.type_keys('<Esc>', 'gg', 'A')
-  child.type_keys('<C-p>')
-  eq(lines_of('prompt'), { 'old' })
-  eq(child.lua_get('vim.api.nvim_get_mode().mode'), 'i')
-  child.type_keys('<C-n>')
+  wait_for(function() return pum() == 0 end, 'keyword completion done')
   eq(lines_of('prompt'), { 'a', 'b' })
+  child.type_keys('<Esc>')
+  wait_for(function() return mode() == 'n' end, 'normal mode')
+  child.type_keys('gg', 'A')
+  wait_for(function() return mode() == 'i' and pum() == 0 end, 'insert mode on the first line, no menu')
+  child.type_keys('<C-p>')
+  wait_for(function() return vim.deep_equal(lines_of('prompt'), { 'old' }) end, 'history step back')
+  eq(mode(), 'i')
+  wait_for(function() return pum() == 0 end, 'no menu after the step')
+  child.type_keys('<C-n>')
+  wait_for(function() return vim.deep_equal(lines_of('prompt'), { 'a', 'b' }) end, 'history step forward')
 end
 
 T['insert-mode history keys keep their native action when no step is possible or a plugin menu is open'] = function()

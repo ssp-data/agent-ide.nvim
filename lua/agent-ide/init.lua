@@ -2,7 +2,7 @@
 local config = require('agent-ide.config')
 local M = {}
 
-local mapped = {} -- global keys this module mapped last: name -> lhs
+local mapped = {} -- global keys this module mapped last: name -> lhs list
 
 ---@param opts? table
 function M.setup(opts)
@@ -12,8 +12,8 @@ function M.setup(opts)
   require('agent-ide.ui.quit_guard').setup()
   require('agent-ide.ui.prompt_sections').register() -- before git: Saved prompts follow Sessions
   require('agent-ide.ui.git_sections').register()
-  for name, lhs in pairs(mapped) do
-    pcall(vim.keymap.del, 'n', lhs)
+  for name, list in pairs(mapped) do
+    for _, lhs in ipairs(list) do pcall(vim.keymap.del, 'n', lhs) end
     mapped[name] = nil
   end
   local keys = type(cfg.keys) == 'table' and cfg.keys or {}
@@ -24,10 +24,9 @@ function M.setup(opts)
     prompt_history = { function() M.prompt_history() end, 'prompt history' },
   }
   for name, g in pairs(globals) do
-    if keys[name] then
-      vim.keymap.set('n', keys[name], g[1], { desc = 'Agent-IDE: ' .. g[2] })
-      mapped[name] = keys[name]
-    end
+    local list = require('agent-ide.util.keys').list(keys[name])
+    for _, lhs in ipairs(list) do vim.keymap.set('n', lhs, g[1], { desc = 'Agent-IDE: ' .. g[2] }) end
+    mapped[name] = #list > 0 and list or nil
   end
 end
 

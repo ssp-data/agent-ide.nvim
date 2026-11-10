@@ -85,7 +85,7 @@ T[':w saves a fresh prompt under the project; a second :w updates the same file'
   child.cmd('write')
   local path = folder() .. '/fix-the-login-bug.md'
   eq(read(path), '# Fix: the Login!! bug\n\tdetails  \n[attach] src/a.lua\n')
-  eq(last_note(), 'Agent-IDE: saved → Saved prompts/repo/fix-the-login-bug')
+  eq(last_note(), 'Agent-IDE: saved as a project prompt of repo: fix-the-login-bug')
   eq(origin().path, path)
   eq(origin().kind, 'saved')
   eq(modified(), false)
@@ -93,7 +93,7 @@ T[':w saves a fresh prompt under the project; a second :w updates the same file'
   child.cmd('write')
   eq(files(folder()), { 'fix-the-login-bug.md' })
   eq(read(path), '# Fix: the Login!! bug\nmore\n')
-  eq(last_note(), 'Agent-IDE: saved → Saved prompts/repo/fix-the-login-bug')
+  eq(last_note(), 'Agent-IDE: updated project prompt of repo: fix-the-login-bug')
   -- created 0600 in a folder created 0700
   eq(vim.uv.fs_stat(path).mode % 512, tonumber('600', 8))
   eq(vim.uv.fs_stat(folder()).mode % 512, tonumber('700', 8))
@@ -115,7 +115,7 @@ T['same first line, different text: two files; the same text again: no copy'] = 
   set_prompt({ 'Review', 'one' })
   child.cmd('write')
   eq(files(folder()), { 'review-2.md', 'review.md' })
-  eq(last_note(), 'Agent-IDE: already saved → Saved prompts/repo/review')
+  eq(last_note(), 'Agent-IDE: already saved as a project prompt of repo: review')
   -- the buffer is not tied to that file: editing and saving again never changes it
   eq(origin(), vim.NIL)
   set_prompt({ 'Review', 'one, tweaked' })
@@ -131,7 +131,7 @@ T['pasting a saved prompt, :w, edit, :w: the original is never overwritten'] = f
   vim.fn.writefile({ 'Same text' }, folder() .. '/same-text.md')
   set_prompt({ 'Same text' })
   child.cmd('write')
-  eq(last_note(), 'Agent-IDE: already saved → Saved prompts/repo/same-text')
+  eq(last_note(), 'Agent-IDE: already saved as a project prompt of repo: same-text')
   set_prompt({ 'Same text', 'more' })
   child.cmd('write')
   eq(read(folder() .. '/same-text.md'), 'Same text\n')
@@ -203,7 +203,7 @@ T['<leader>W saves to the library under a name (group/name makes folders); cance
   eq(i[1], { prompt = 'Save to library as: ', default = 'my-post-about-x' })
   eq(read(lib .. '/writing/my-post.md'), 'My post about X\nbody\n')
   eq(origin(), { kind = 'template', path = lib .. '/writing/my-post.md', stamp = origin().stamp })
-  eq(last_note(), 'Agent-IDE: saved → Library/writing/my-post')
+  eq(last_note(), 'Agent-IDE: saved to the library: writing/my-post')
   -- :w now updates that library file
   set_prompt({ 'My post about X', 'body 2' })
   child.cmd('write')
@@ -248,7 +248,7 @@ T['a loaded template is updated in place: the file is the buffer text, nothing k
   set_prompt({ 'New invoice text', '' })
   child.cmd('write')
   eq(read(lib .. '/invoice.md'), 'New invoice text\n\n')
-  eq(last_note(), 'Agent-IDE: saved → Library/invoice')
+  eq(last_note(), 'Agent-IDE: updated library prompt: invoice')
   eq(vim.uv.fs_stat(saved), nil)
 end
 
@@ -347,7 +347,7 @@ T[':w <file> is refused; the prompt stays unmodified'] = function()
   set_prompt({ 'Text' })
   pcall(child.cmd, 'write ' .. tmp .. '/other.md')
   eq(vim.uv.fs_stat(tmp .. '/other.md'), nil)
-  eq(last_note(), 'Agent-IDE: the prompt is saved with :w (no file name); see ? for the keys')
+  eq(last_note(), 'Agent-IDE: the prompt is saved with :w (no file name); see g? for the keys')
   eq(modified(), false)
 end
 

@@ -50,15 +50,37 @@ function M.short(kind, path, project_name)
   return 'Saved prompts/' .. (project_name or folder) .. '/' .. vim.fs.basename(name)
 end
 
+---What a save notice says, `how` being 'saved', 'already' or 'updated':
+---`saved as a project prompt of <project>: <name>`, `saved to the library: <group>/<name>`,
+---`updated project prompt of <project>: <name>`, `updated library prompt: <group>/<name>`.
+---(A project prompt lives in the plugin's data folder, a library prompt in `library_dir`.)
+---@param how 'saved'|'already'|'updated'
+---@param kind string
+---@param path string
+---@param project_name? string
+function M.notice(how, kind, path, project_name)
+  local name = path:gsub('%.md$', '')
+  if kind == 'template' then
+    local lib = cache.dirs().library
+    local rel = vim.startswith(name, lib .. '/') and name:sub(#lib + 2) or vim.fs.basename(name)
+    if how == 'updated' then return 'updated library prompt: ' .. rel end
+    return (how == 'already' and 'already saved to the library: ' or 'saved to the library: ') .. rel
+  end
+  local project = project_name or vim.fs.basename(vim.fs.dirname(name)):gsub('%-%x%x%x%x%x%x%x%x$', '')
+  local base = vim.fs.basename(name)
+  if how == 'updated' then return ('updated project prompt of %s: %s'):format(project, base) end
+  return ('%s as a project prompt of %s: %s'):format(how == 'already' and 'already saved' or 'saved', project, base)
+end
+
 local function project_of(buf)
   local chat = require('agent-ide.ui.chat')
   local s = chat.session_of(buf)
   return s and chat.project_of(s) or nil
 end
 
-local function saved(buf, kind, path, project_name)
+local function saved(buf, kind, path, project_name, how)
   store.set_origin(buf, { kind = kind, path = path })
-  notify('saved → ' .. M.short(kind, path, project_name))
+  notify(M.notice(how or 'saved', kind, path, project_name))
   cache.invalidate()
 end
 
@@ -74,7 +96,7 @@ local function save_new(buf, kind, dir, base, text, project_name)
     for n = 1, 50 do
       local cand = dir .. '/' .. (n == 1 and base or (base .. '-' .. n)) .. '.md'
       if not vim.uv.fs_stat(cand) then break end
-      if read(cand) == text then return notify('already saved → ' .. M.short(kind, cand, project_name)) end
+      if read(cand) == text then return notify(M.notice('already', kind, cand, project_name)) end
     end
     local path = dir .. '/' .. rel .. '.md'
     local ok, err = store.write_new(path, text)
@@ -118,7 +140,7 @@ local function save_origin(buf, o, lines, closing)
   local function write()
     local ok, err = store.replace(o.path, text)
     if not ok then return failed(err) end
-    saved(buf, o.kind, o.path)
+    saved(buf, o.kind, o.path, project_of(buf) and o.kind == 'saved' and project_of(buf).name or nil, 'updated')
   end
   if store.stamp(o.path) == o.stamp then return write() end
   local question = CHANGED:format(M.short(o.kind, o.path))
@@ -206,7 +228,9 @@ function M.attach(buf)
   api.nvim_create_autocmd('BufWriteCmd', { buffer = buf, callback = function(ev)
     vim.bo[ev.buf].modified = false
     if ev.file ~= '' and ev.file ~= api.nvim_buf_get_name(ev.buf) then
-      return notify('the prompt is saved with :w (no file name); see ? for the keys', vim.log.levels.WARN)
+      local help = require('agent-ide.util.keys').label(keys().help)
+      return notify('the prompt is saved with :w (no file name)' .. (help and ('; see ' .. help .. ' for the keys') or ''),
+        vim.log.levels.WARN)
     end
     local ok, err = pcall(M.save, ev.buf, is_exit(last_cmd), is_exit(last_cmd) or is_wq(last_cmd))
     if not ok then failed(err) end
@@ -233,7 +257,7 @@ function M.attach(buf)
     if not ok then failed(err) end
     vim.cmd('normal! ZZ')
   end, { buffer = buf, nowait = true, silent = true, desc = 'Agent-IDE: save the prompt and hide it' })
-  for _, lhs in ipairs(require('agent-ide.ui.diff_buf').keys(keys().save_library)) do
+  for _, lhs in ipairs(require('agent-ide.util.keys').list(keys().save_library)) do
     vim.keymap.set('n', lhs, function() M.save_to_library(buf) end,
       { buffer = buf, nowait = true, silent = true, desc = 'Agent-IDE: save the prompt to the library' })
   end

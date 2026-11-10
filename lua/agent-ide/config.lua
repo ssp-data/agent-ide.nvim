@@ -23,7 +23,7 @@ local function defaults()
       search_picker = { next = { '<C-n>', '<Down>' }, prev = { '<C-p>', '<Up>' }, open = '<CR>', copy = '<C-y>',
         reuse = '<C-e>', scope = '<Tab>', kinds = '<C-t>', close = { '<Esc>', 'q' } },
       -- chat view, buffer-local in the transcript and the prompt
-      chat = { send = '<C-CR>', send_alt = '<leader><CR>', interrupt = '<C-c>', prompt = '<leader>ap', help = '?',
+      chat = { send = '<C-CR>', send_alt = '<leader><CR>', interrupt = '<C-c>', prompt = '<leader>ap', help = 'g?',
         history_prev = '<C-p>', history_next = '<C-n>', attach = '<leader>af',
         answer_inner = 'ir', answer_outer = 'ar', mode = '<S-Tab>', model = '<leader>aM', answer = '<leader>ay',
         raw = 'gr', raw_event = 'gR',
@@ -32,10 +32,12 @@ local function defaults()
         diff = { 'gd', '<leader>gd' },
         save_library = '<leader>W', -- prompt: save the prompt to the library (asks for a name)
         prompts = '<leader>al' }, -- pick a prompt (skills, commands, library, saved)
-      -- diff view, buffer-local on both sides (]c / [c stay Neovim's hunk motions); each value is a
-      -- key, a list of keys, or false
+      -- diff view, buffer-local on both sides; a one-character key (q, ?, R) only on the plugin's
+      -- side, since the right side is your own file (there: macro, search, Replace stay yours).
+      -- ]c / [c are Neovim's hunk motions. Each value is a key, a list of keys, or false
       diff = { next_file = { ']f', '<leader>gj' }, prev_file = { '[f', '<leader>gk' }, flip = { 'gb', '<leader>gt' },
-        branch = { 'gB', '<leader>gB' }, close = { 'q', '<leader>gq' }, help = { '?' }, refresh = { 'R' }, lazygit = 'glg' },
+        branch = { 'gB', '<leader>gB' }, close = { 'q', '<leader>gq' }, help = { '?', 'g?' },
+        refresh = { 'R', '<leader>gR' }, lazygit = 'glg' },
       -- drawer, on prompt rows (elsewhere these keys keep their normal meaning)
       prompts = { edit = 'e', rename = 'r', delete = 'd', yank = 'y', to_library = 'L' },
     },
@@ -43,6 +45,10 @@ local function defaults()
     -- saved prompts. nil dirs: stdpath('data') .. '/agent-ide/library' and '/agent-ide/prompts'
     prompts = { library_dir = nil, saved_dir = nil, command_dirs = { '~/.claude/commands' },
       skill_dirs = { '~/.claude/skills' }, project_dirs = true },
+    -- footer quota: `file` (nil: off) is a JSON file another tool writes,
+    -- { "limits": [ { "label", "percent" (fraction used), "resetsAt" } ], "updatedAt" }; when it is
+    -- readable and fresh (30 min) the footer shows those limits instead of its own
+    quota = { file = nil },
     -- prompt buffer: `/` opens the command menu, `@` opens the file picker
     chat = { auto_slash = true, at_picker = true },
     -- 'nerd' (needs a Nerd Font in the terminal) or 'plain'; `icons` overrides single entries

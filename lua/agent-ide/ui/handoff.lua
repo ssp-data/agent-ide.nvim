@@ -136,7 +136,12 @@ function M.start(s, on)
     a.waiter = run({ 'tmux', 'wait-for', a.channel }, function()
       if away[s.id] == a then finish(s) end
     end)
-    run({ 'tmux', 'split-window', '-h', '-P', '-F', '#{pane_id}', '-c', s.cwd, M.pane_command(s, a.channel) }, function(res)
+    -- beside this Neovim's pane, even when another pane is active by the time this runs
+    local split = { 'tmux', 'split-window', '-h' }
+    local pane = vim.env.TMUX_PANE
+    if pane and pane ~= '' then vim.list_extend(split, { '-t', pane }) end
+    vim.list_extend(split, { '-P', '-F', '#{pane_id}', '-c', s.cwd, M.pane_command(s, a.channel) })
+    run(split, function(res)
       if away[s.id] ~= a then return end
       if res.code ~= 0 then
         notify('cannot open a tmux pane; continue by hand: ' .. by_hand(s), vim.log.levels.WARN)

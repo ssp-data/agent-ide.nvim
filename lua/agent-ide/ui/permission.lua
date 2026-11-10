@@ -30,7 +30,7 @@ local function chat() return require('agent-ide.ui.chat') end
 
 local function answer_key()
   local keys = config.get().keys
-  local k = type(keys) == 'table' and type(keys.chat) == 'table' and keys.chat.answer
+  local k = type(keys) == 'table' and type(keys.chat) == 'table' and require('agent-ide.util.keys').label(keys.chat.answer)
   return k or 'the answer key'
 end
 

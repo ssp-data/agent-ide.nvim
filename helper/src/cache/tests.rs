@@ -126,3 +126,39 @@ fn cache_with_other_rules_or_format_is_ignored_and_the_file_is_private() {
     }
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn older_index_versions_are_removed_when_the_current_one_is_written() {
+    use crate::cache::is_old_version;
+    assert!(is_old_version("index-v1.json"));
+    assert!(is_old_version("index-v2.json"));
+    assert!(is_old_version("index-v42.json"));
+    assert!(!is_old_version(crate::cache::FILE_NAME));
+    for other in ["index-v.json", "index-vx.json", "index-v1.json.tmp", "xindex-v1.json", "index-v1.jsonl", "search-v1.json", "index-v1"] {
+        assert!(!is_old_version(other), "{other}");
+    }
+
+    let root = tmp("old-versions");
+    let cache_dir = root.join("cache");
+    std::fs::create_dir_all(cache_dir.join("index-v9.json")).unwrap(); // a folder of that name stays
+    let keep = ["search-v1.json", "index-v1.json.tmp", "notes.txt", "index-vx.json"];
+    for f in ["index-v1.json", "index-v2.json"].iter().chain(keep.iter()) {
+        std::fs::write(cache_dir.join(f), "x").unwrap();
+    }
+    let below = cache_dir.join("index-v9.json").join("index-v1.json");
+    std::fs::write(&below, "x").unwrap();
+    let projects = root.join("projects");
+    project(&projects, "{\"type\":\"user\",\"message\":{\"content\":\"x\"}}\n");
+    let reads = AtomicUsize::new(0);
+    let mut c = Cache::load(Some(&cache_dir));
+    scan::scan(&projects, Some(&mut c), &reads);
+    c.save();
+    assert!(cache_dir.join(crate::cache::FILE_NAME).is_file());
+    assert!(!cache_dir.join("index-v1.json").exists());
+    assert!(!cache_dir.join("index-v2.json").exists());
+    for f in keep {
+        assert!(cache_dir.join(f).is_file(), "{f} must stay");
+    }
+    assert!(below.is_file(), "nothing below the folder is touched");
+    let _ = std::fs::remove_dir_all(&root);
+}

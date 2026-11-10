@@ -110,6 +110,7 @@ local function on_change(s, what)
   elseif what == 'state' or what == 'meta' then
     if c then update_winbar(c) end
     drawer().refresh()
+    if what == 'state' then drawer().live_policy() end
   end
 end
 
@@ -130,12 +131,36 @@ local function send(c)
   if not valid_buf(c.pbuf) then return end
   local text = prompt.text_to_send(api.nvim_buf_get_lines(c.pbuf, 0, -1, false))
   if not text:find('%S') then return end
+  -- `/model`, `/copy` alone: the plugin's own commands, nothing is sent to Claude
+  local own = prompt.plugin_command(text)
+  if own then
+    prompt.clear(c.pbuf)
+    return own(c.s)
+  end
   if require('agent-ide.ui.handoff').away(c.s) then
     return notify('Agent-IDE: this session is open in native Claude (tmux pane); quit it there to continue here',
       vim.log.levels.WARN)
   end
   if c.loading then
     c.send_after_load = true
+    return
+  end
+  -- A send that starts Claude for a session not alive here first asks `claude agents` afresh
+  -- (the cached map may be old): two Claudes must never drive one session. The text stays in
+  -- the prompt meanwhile (typing goes on); what the prompt holds when the answer comes is sent.
+  -- (A session the polled map lists as elsewhere is refused at once, below.)
+  if not c.live_checked and c.s:needs_start() and not c.s:_elsewhere() then
+    if c.checking then return end -- one question at a time; the answer sends the prompt
+    c.checking = true
+    local cfg = require('agent-ide.config').get()
+    require('agent-ide.live').query({ cmd = cfg.live.cmd, interval_ms = cfg.live.interval_ms }, function()
+      -- a failed question leaves the cached map to decide, as without the drawer
+      c.checking = false
+      c.live_checked = true
+      local ok, err = pcall(send, c)
+      c.live_checked = false
+      if not ok then error(err, 0) end
+    end)
     return
   end
   local ok, reason = c.s:send(text)

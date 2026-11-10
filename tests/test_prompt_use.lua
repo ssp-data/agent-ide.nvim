@@ -285,7 +285,7 @@ T['help floats list the prompt keys'] = function()
   end
   child.type_keys('q')
   child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.chat")._windows().prompt)')
-  child.type_keys('?')
+  child.type_keys('g?')
   text = table.concat(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), '\n')
   eq(text:find('<leader>al', 1, true) ~= nil, true)
   eq(text:find('<leader>W', 1, true) ~= nil, true)

@@ -12,7 +12,7 @@ local function chat() return require('agent-ide.ui.chat') end
 ---Sessions waiting in another Claude come after this Neovim's waiting ones.
 ---@return { s: table|nil, id: string, elsewhere: boolean }[]
 function M.needing()
-  local live = require('agent-ide.live').get()
+  local live = require('agent-ide.live').fresh()
   local out, mine = {}, {}
   local rank = { waiting = 1, failed = 3, done = 4 }
   for i, s in ipairs(session.all()) do

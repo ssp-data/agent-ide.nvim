@@ -14,7 +14,7 @@ function M.cmd(scenario_lines)
   for i, l in ipairs(scenario_lines) do out[i] = type(l) == 'string' and l or vim.json.encode(l) end
   vim.fn.writefile(out, path)
   vim.uv.os_setenv('FAKE_CLAUDE_LOG', log)
-  return { 'nvim', '-l', root .. '/tests/fake_claude.lua', path }, log
+  return { vim.v.progpath, '-l', root .. '/tests/fake_claude.lua', path }, log
 end
 
 ---@param log_path string

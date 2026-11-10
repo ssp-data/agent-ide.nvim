@@ -478,6 +478,7 @@ T['follow']['window keeps following when a closed tool fold ends the buffer'] = 
 end
 
 local function best_of(n, fn)
+  collectgarbage('collect') -- earlier garbage is not this code's pause
   local best = math.huge
   for _ = 1, n do
     local t0 = vim.uv.hrtime()

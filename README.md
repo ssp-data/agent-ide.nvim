@@ -72,7 +72,7 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
 
 ```lua
 {
-  'your-github-user/Agent-IDE.nvim', -- replace with the repository path
+  'ssp-data/agents-ide.nvim',
   build = 'make helper', -- optional; needs cargo
   cmd = 'Agents',
   keys = { { '<leader>aa', '<cmd>Agents<cr>', desc = 'Agent-IDE: toggle drawer' } },
@@ -80,9 +80,18 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
 }
 ```
 
-Without `cargo` leave out `build`; the plugin uses its Lua backend.
+Without `cargo` leave out `build`; the plugin uses its Lua backend. If Neovim says that the helper is out of date, the helper binary was built from older sources than the plugin (both must read transcripts by the same rules); see [Settings you may need](#settings-you-may-need).
 
-If Neovim says that the helper is out of date, the helper binary was built from older sources than the plugin (both must read transcripts by the same rules): run `make helper` in the plugin folder (or let your plugin manager run its build step). Until then the plugin uses its Lua backend.
+Lazy-loaded on `cmd = 'Agents'` (or the key above), the plugin starts with the first `:Agents`: until then the other global keys (`<leader>an`, `<leader>as`, `<leader>aP`), `:AgentsSearch`, the footer and the status file for a desktop bar do not exist yet. To have them from the start, load it after startup instead:
+
+```lua
+{
+  'ssp-data/agents-ide.nvim',
+  build = 'make helper',
+  event = 'VeryLazy',
+  opts = {},
+}
+```
 
 ## Configuration
 
@@ -104,7 +113,10 @@ require('agent-ide').setup({
     models = { 'fable', 'opus', 'sonnet', 'haiku' },     -- what the model picker offers
   },
   tcd = true, -- opening a session sets the tab's working directory to its project
-  keys = { -- false disables a mapping; keys = false disables all of them
+  -- each key option is a key, a list of keys, or false (no mapping); keys = false turns off all of
+  -- these. Fixed, not configurable: the drawer's own keys, q / <Esc> in help floats, q in the raw
+  -- view, ]c / [c in the diff view, and / and @ in the prompt (chat.auto_slash, chat.at_picker)
+  keys = {
     toggle = '<leader>aa',
     next_waiting = '<leader>an',
     search = '<leader>as', -- search all sessions
@@ -112,14 +124,16 @@ require('agent-ide').setup({
     -- the search picker's query line; close works in normal mode (insert-mode <Esc> leaves insert mode)
     search_picker = { next = { '<C-n>', '<Down>' }, prev = { '<C-p>', '<Up>' }, open = '<CR>', copy = '<C-y>',
       reuse = '<C-e>', scope = '<Tab>', kinds = '<C-t>', close = { '<Esc>', 'q' } },
-    chat = { send = '<C-CR>', send_alt = '<leader><CR>', interrupt = '<C-c>', prompt = '<leader>ap', help = '?',
+    chat = { send = '<C-CR>', send_alt = '<leader><CR>', interrupt = '<C-c>', prompt = '<leader>ap', help = 'g?',
       history_prev = '<C-p>', history_next = '<C-n>', attach = '<leader>af',
       answer_inner = 'ir', answer_outer = 'ar', mode = '<S-Tab>', model = '<leader>aM', answer = '<leader>ay',
       raw = 'gr', raw_event = 'gR', native = '<leader>at', park = '<leader>ax', diff = { 'gd', '<leader>gd' },
       save_library = '<leader>W', prompts = '<leader>al' },
-    -- diff view; each value is a key, a list of keys, or false
+    -- diff view, on both sides; a one-character key (q, ?, R) only on the left side, since the
+    -- right side is your own file, where they stay macro recording, search and Replace mode
     diff = { next_file = { ']f', '<leader>gj' }, prev_file = { '[f', '<leader>gk' }, flip = { 'gb', '<leader>gt' },
-      branch = { 'gB', '<leader>gB' }, close = { 'q', '<leader>gq' }, help = { '?' }, refresh = { 'R' }, lazygit = 'glg' },
+      branch = { 'gB', '<leader>gB' }, close = { 'q', '<leader>gq' }, help = { '?', 'g?' },
+      refresh = { 'R', '<leader>gR' }, lazygit = 'glg' },
     -- drawer, on prompt rows (elsewhere these keys keep their normal meaning)
     prompts = { edit = 'e', rename = 'r', delete = 'd', yank = 'y', to_library = 'L' },
   },
@@ -130,6 +144,7 @@ require('agent-ide').setup({
     skill_dirs = { '~/.claude/skills' },     -- Claude's skills (read only)
     project_dirs = true, -- also <project>/.claude/commands and /skills of the chat's project
   },
+  quota = { file = nil }, -- footer quota from a file another tool writes (see Footer); nil: off
   chat = { auto_slash = true, at_picker = true }, -- `/` opens the command menu, `@` the file picker
   icons_style = 'nerd', -- 'nerd' (needs a Nerd Font) or 'plain' (characters of any monospace font)
   icons = {}, -- override single icons of that set, for example { busy = '*', changes = '' }; '' hides one
@@ -177,14 +192,14 @@ In the drawer:
 | `x` | Park the session: stop the Claude process this Neovim runs for it |
 | `q` | Close the drawer |
 | `glg` | Open lazygit for the row's repository (a worktree row or session: that worktree) |
-| `?` | Help |
+| `?`, `g?` | Help (`/` searches in it, `q` or `<Esc>` closes it) |
 | `e` | Prompt row: edit its file in the main window (Claude's commands and skills open read-only) |
 | `r` | Prompt row: rename (library: `group/name` moves it to another group) |
 | `d` | Prompt row: delete the file (asks first) |
 | `y` | Prompt row: yank its text (unnamed and `+` registers) |
 | `L` | Saved prompt row: copy it into the library (asks for a name) |
 
-The prompt row keys are under `keys.prompts`; elsewhere in the drawer they keep their Vim meaning, and a drawer key above always wins over one of them.
+The prompt row keys are under `keys.prompts`; elsewhere in the drawer they keep their Vim meaning, and a drawer key above always wins over one of them. The other drawer keys are fixed.
 
 In the chat (transcript and prompt buffer, unless noted):
 
@@ -206,7 +221,7 @@ In the chat (transcript and prompt buffer, unless noted):
 | `gd`, `<leader>gd` | Transcript, on an `Edit` or `Write` fold: the branch diff of that file |
 | `<C-p>`, `<C-n>` | Prompt: older or newer prompt (also `<Up>` on the first line, `<Down>` on the last) |
 | `<leader>af` | Prompt: pick a file and add an `[attach]` line |
-| `/` | Prompt, on an empty line: Claude's commands (menu) |
+| `/` | Prompt, on an empty line: the command menu; typing narrows it (fuzzy), nothing is inserted until you choose (`<C-n>`, `<C-y>`) |
 | `@` | Prompt, after a space: pick a file to attach |
 | `<leader>al` | Pick a prompt: saved prompts, library, Claude's commands and skills |
 | `<leader>W` | Prompt: save it to the library (asks for a name; `group/name` makes a folder) |
@@ -214,7 +229,7 @@ In the chat (transcript and prompt buffer, unless noted):
 | `za` | Toggle fold |
 | `:q` | Prompt: hide the window; the draft stays |
 | `:q!` | Prompt: hide the window and discard the draft |
-| `?` | Help |
+| `g?` | Help (`?` stays Vim's backward search) |
 
 The history buffer is markdown with folds for tool calls, results and thinking. Anything the viewer does not understand is shown as a fold marked `unknown`, never dropped, and truncated output says how many lines are hidden.
 
@@ -222,7 +237,7 @@ The history buffer is markdown with folds for tool calls, results and thinking. 
 
 Open a session from the drawer, or start one with `+ New session` under a project. The transcript fills the main window of the Agents tab and a prompt buffer opens below it. Opening a session shows its history without starting Claude; the first prompt you send starts `claude -p` for it (resuming the session when it has a history), and the process keeps running until you park the session (`<leader>ax`, or `x` in the drawer), hand it to native Claude, or quit Neovim. Parking asks first when Claude is working, puts queued prompts back into the prompt buffer, and keeps the transcript; the next prompt resumes the session. The winbar shows project, title, model, permission mode, state and the number of queued prompts.
 
-**Prompt buffer.** A normal markdown buffer: write as much as you like and send it with `<C-CR>`. Its text is sent as typed, except that an `[attach] <path>` line outside a fenced code block becomes `@<path>` (`@"<path>"` when the path holds spaces), which makes Claude read the file. `@` after a space opens a file picker that adds such a line; `/` on an empty line opens the menu of the commands the session listed (known after its first answer). `<C-p>` and `<C-n>` step through the prompts of the session.
+**Prompt buffer.** A normal markdown buffer: write as much as you like and send it with `<C-CR>`. Its text is sent as typed, except that an `[attach] <path>` line outside a fenced code block (a fence starting at column 0) becomes `@<path>` (`@"<path>"` when the path holds spaces), which makes Claude read the file. `@` after a space opens a file picker that adds such a line; `/` on an empty line opens the command menu: the commands the session listed (known after its first answer; a new session offers the list last seen for its project in this Neovim) and, on top, two of the plugin's own, marked `plugin`: `/model` opens the model picker and `/copy` copies the last answer to the unnamed and `+` registers. They act when chosen from the menu or sent as the whole prompt, and are never sent to Claude. `<C-p>` and `<C-n>` step through the prompts of the session.
 
 **While Claude works.** Answers stream into the transcript. A prompt sent while a turn runs is queued by the plugin and sent after that turn, in order. `<C-c>` interrupts the turn and puts the queued prompts back into the prompt buffer.
 
@@ -240,7 +255,7 @@ Open a session from the drawer, or start one with `+ New session` under a projec
 
 ## Footer
 
-`require('agent-ide').statusline()` gives a short text for a statusline: the state of all sessions, the model of the chat you are in and the quota left (percent remaining, with a small bar):
+`require('agent-ide').statusline()` gives a short text for a statusline: the state of all sessions, the model of the chat you are in and the quota used (percent used, with a small bar that fills as you use it):
 
 | Level | Colour | Text | When |
 |---|---|---|---|
@@ -249,7 +264,15 @@ Open a session from the drawer, or start one with `+ New session` under a projec
 | 3 | orange | `review (n)` | a turn ended (or failed) in a session you have not looked at since |
 | 4 | violet | `input required (n)` | Claude waits for your answer |
 
-followed by, for example, ` · haiku-5-5 · 5h ▰▰▰▰▱ 82% · week ▰▰▰▱▱ 64%`. `statusline_hl()` names the highlight group of the level (`AgentIdeLevel1` to `AgentIdeLevel4`). For lualine:
+followed by, for example, ` · haiku-5-5 · 5h ▰▱▱▱▱ 18% · week ▰▰▱▱▱ 36%`. The quota comes from the rate-limit reports of the Claude processes this Neovim runs (kept across restarts): `5h`, `week`, and `week <model>` for a per-model weekly window; overage windows only when there is nothing else. Values older than 10 minutes say how old they are (` · 25m old`); after an hour, or once a window's reset time has passed, its bar is drawn dimmed with `?` instead of the percentage. The plugin never reads credentials and never asks the network for the quota.
+
+**`quota.file`.** If another tool on your machine already keeps the usage up to date, point `quota.file` at the JSON file it writes, `{ "limits": [ { "label": "…", "percent": 0.42, "resetsAt": "2026-11-10T18:00:00+01:00" } ], "updatedAt": "…" }` (`percent` is the fraction used, 0 to 1; a value above 1 is read as percent; `resetsAt` and `updatedAt` are ISO 8601 times or epoch seconds; without `updatedAt` the file's modification time counts; other fields are ignored). The footer then shows those limits, with their labels, instead of its own. It reads the file at most once a minute, without blocking, and falls back to its own values while the file is missing, unreadable, malformed or older than 30 minutes. For example, Omarchy's agents panel writes such a file:
+
+```lua
+opts = { quota = { file = '~/.local/state/omarchy/agents/usage/claude.json' } }
+```
+
+`statusline_hl()` names the highlight group of the level (`AgentIdeLevel1` to `AgentIdeLevel4`). For lualine:
 
 ```lua
 require('lualine').setup({
@@ -276,7 +299,7 @@ With a lazy-loaded plugin, a component that does not load it:
 
 ## Git: what an agent changed
 
-Each git project in the drawer has two more sections below its sessions: `Changes vs <base>` (everything on the branch since it left the default branch, uncommitted and untracked files included; on the default branch, uncommitted changes against `HEAD`) and `Commits on branch` (`Recent commits` on the default branch), each commit expanding to its files. The project row shows the branch when it is not the default branch. The lists refresh when a session of the project finishes a turn, on `R`, and when you come back to the drawer after more than 5 s.
+Each git project in the drawer has two more sections below its sessions: `Changes vs <base>` (everything on the branch since it left the default branch, uncommitted and untracked files included; on the default branch, uncommitted changes against `HEAD`) and `Commits on branch` (`Recent commits` on the default branch), each commit expanding to its files. The project row shows the branch when it is not the default branch. The lists refresh when a session of the project run in this Neovim finishes a turn, on `R`, and when you come back to the drawer after more than 5 s.
 
 `<CR>` on a file opens a side-by-side diff in the main window, built on Neovim's own diff mode. For branch changes the right side is your real, editable file. In the chat, `gd` (or `<leader>gd`) on an `Edit` or `Write` fold opens the diff of that file. Opening a diff sets the Agents tab's directory to that work tree (`tcd`, like opening a chat), so your own lazygit or picker keys work on it. Sessions in a linked worktree get a row per work tree (worktree icon, `<branch> · <folder>`) with its own Changes and Commits.
 
@@ -285,13 +308,13 @@ Each git project in the drawer has two more sections below its sessions: `Change
 | `]f`, `<leader>gj` / `[f`, `<leader>gk` | Next / previous changed file |
 | `gb`, `<leader>gt` | This file in one commit only (pick which); again: back to the whole branch |
 | `gB`, `<leader>gB` | Back to the whole-branch diff |
-| `R` | Reload the list and the base side |
-| `]c` / `[c` | Next / previous hunk (Neovim) |
+| `R` (left side), `<leader>gR` | Reload the list and the base side |
+| `]c` / `[c` | Next / previous hunk (Neovim's motions, also when a filetype plugin maps these keys) |
 | `glg` | lazygit for this repository |
-| `q`, `<leader>gq` | Close the diff, back to what was shown before (`:q` on either side too) |
-| `?` | Help |
+| `q` (left side), `<leader>gq` | Close the diff, back to what was shown before (`:q` on either side too) |
+| `?` (left side), `g?` | Help |
 
-The keys are under `keys.diff` (and `keys.chat.diff`) in the configuration; each value is a key, a list of keys, or `false`. Git is only read (`git --no-optional-locks`, never a command that writes); acting is left to lazygit.
+The right side is your own file, so the one-character keys `q`, `?` and `R` are mapped only on the left (base) side; on your file they stay macro recording, backward search and Replace mode, and the `<leader>g…` and `g?` forms work on both sides. Your own buffer-local mappings on the right side are put back when the diff closes. The keys are under `keys.diff` (and `keys.chat.diff`) in the configuration; each value is a key, a list of keys, or `false`. Git is only read (`git --no-optional-locks`, never a command that writes); acting is left to lazygit.
 
 ## Prompts
 
@@ -348,15 +371,26 @@ Tool calls are searched only on request (`<C-t>`), tool output never. The index 
 
 ## How it works
 
-The plugin reads the local Claude Code transcripts (JSONL files), builds an index of projects and sessions, and renders a transcript as markdown on demand. A small Rust helper (`agent-ide-helper`) can do the scanning, parsing and file watching off the Neovim process. When the helper is not built, or fails, a pure Lua implementation takes over and gives identical results. Neither path blocks the editor: the drawer opens in under 50 ms with 60 projects, a 1 MB history in under 150 ms with the helper, and a cold Lua scan never blocks the UI for more than 16 ms at a time.
+The plugin reads the local Claude Code transcripts (JSONL files), builds an index of projects and sessions, and renders a transcript as markdown on demand. A small Rust helper (`agent-ide-helper`) can do the scanning, parsing and file watching off the Neovim process. When the helper is not built, or fails, a pure Lua implementation takes over and gives identical results for the drawer and the history; search without the helper is limited (titles and prompts, exact words). Neither path blocks the editor: the drawer opens in under 50 ms with 60 projects, a 1 MB history in under 150 ms with the helper, and a cold Lua scan never blocks the UI for more than 16 ms at a time.
 
 ## Privacy
 
-Apart from Claude Code itself, everything stays on your machine. The plugin reads transcripts under `projects_dir` and the output of `claude agents --json`, and sends nothing over the network; what you type in a chat goes to the `claude` process it starts, which talks to Anthropic as it always does.
+Apart from Claude Code itself, everything stays on your machine. The plugin reads transcripts under `projects_dir`, the output of `claude agents --json` and, when you set it, `quota.file`; it sends nothing over the network and never reads credentials. What you type in a chat goes to the `claude` process it starts, which talks to Anthropic as it always does.
 
-Prompts you save go to `stdpath('data')/agent-ide/prompts/<project folder>-<short hash>/` (and templates to `stdpath('data')/agent-ide/library` unless you set `prompts.library_dir`).
+What it writes, all of it private (new files `0600`, folders it creates `0700`, written through a temporary file renamed into place; a prompt file you already had keeps its mode):
 
-The Rust helper keeps a metadata cache in `stdpath('cache')/agent-ide/index-v3.json` (on Linux usually `~/.cache/nvim/agent-ide/index-v3.json`). It holds the path, title, working directory, branch, size and modification time of each session, so the drawer opens fast. You can delete it at any time; it is rebuilt on the next scan.
+| File | Where | Holds |
+|---|---|---|
+| `index-v3.json` (helper only) | `stdpath('cache')/agent-ide/` (on Linux usually `~/.cache/nvim/agent-ide/`) | session metadata, see below; files of earlier format versions (`index-v1.json`, …) there are removed when it is written |
+| `search-v1.json` (helper only) | the same folder | the search index, see below |
+| `status-<pid>.json`, one per Neovim | `$XDG_RUNTIME_DIR/agent-ide/` (else `stdpath('run')/agent-ide/`) | level, counts and the sessions that are not parked (id, project folder name, title, state, the tool an ask is about); removed when that Neovim quits |
+| `quota.json` | `stdpath('state')/agent-ide/` | the last quota windows (percent used, reset times) and when they were reported |
+| Saved prompts (per project) | `stdpath('data')/agent-ide/prompts/<project folder>-<short hash>/`, or `prompts.saved_dir` | the prompts you save with `:w` |
+| Library prompts (templates) | `stdpath('data')/agent-ide/library`, or wherever you point `prompts.library_dir` | the prompts you save with `<leader>W`, rename or move |
+
+A save notice names the kind: `saved as a project prompt of <project>: <name>` for a per-project prompt (in the plugin's data folder, not in your project) and `saved to the library: <group>/<name>` for a library prompt (in `prompts.library_dir`).
+
+The Rust helper's metadata cache `index-v3.json` holds the path, title, working directory, branch, size and modification time of each session, so the drawer opens fast. You can delete it at any time; it is rebuilt on the next scan.
 
 The search index is `search-v1.json` in the same folder. It holds the first 4 KiB of every prompt and answer and a one-line summary of every tool call, with the session titles and paths. It is written at most every 30 seconds; changes since the last write are indexed again on the next start (the helper is stopped right after Neovim closes its input, so a final write is not guaranteed). Both files are ignored when a different helper version, other parse rules or another file format wrote them.
 

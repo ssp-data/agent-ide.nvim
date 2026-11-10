@@ -87,16 +87,37 @@ local function rescan()
   end)
 end
 
+local live_policy
+
 -- Every finished poll re-renders (about 0.4 ms), so ages stay current with any backend.
-local function start_live()
+-- `slow`: the drawer is hidden; poll 4x less often (the footer and `send` still use the map).
+local function start_live(slow)
   local cfg = config.get()
-  live.start({ interval_ms = cfg.live.interval_ms, cmd = cfg.live.cmd, on_poll = function()
+  live.start({ interval_ms = cfg.live.interval_ms * (slow and 4 or 1), cmd = cfg.live.cmd, defer = slow, on_poll = function()
+    if not shown then live_policy() end
     require('agent-ide.status').refresh()
     tmux.refresh_labels(model.elsewhere_pids(), function() render() end)
     render()
     local chat = package.loaded['agent-ide.ui.chat']
     if chat then chat.refresh_winbars() end
   end })
+end
+
+-- While the drawer is hidden: slow polling as long as an Agents tab exists or a session is alive
+-- here, else none.
+live_policy = function()
+  if shown then return end
+  sync()
+  local alive = S.tab ~= nil
+  for _, s in ipairs(session.all()) do
+    if alive then break end
+    alive = s:_alive()
+  end
+  if not alive then
+    live.stop()
+  elseif live.interval() ~= config.get().live.interval_ms * 4 then
+    start_live(true)
+  end
 end
 
 local function set_shown(v)
@@ -107,7 +128,7 @@ local function set_shown(v)
     index.set_visible(true)
     render()
   else
-    live.stop()
+    live_policy()
     index.set_visible(false)
   end
 end
@@ -223,6 +244,7 @@ function actions.close() M.close() end
 local KEYS = {
   { '<CR>', 'open' }, { 'o', 'open' }, { 'za', 'fold' }, { 'R', 'refresh' }, { 'gp', 'jump' },
   { 'x', 'park' }, { 'glg', 'lazygit' }, { 'q', 'close' }, { 's', 'search' }, { '?', 'help' },
+  { 'g?', 'help' },
 }
 local OWN = {}
 for _, k in ipairs(KEYS) do OWN[vim.keycode(k[1])] = true end
@@ -278,7 +300,7 @@ function actions.help()
     { key = 'x', desc = 'park the session: stop its Claude process here' },
     { key = 'glg', desc = 'lazygit for the project (or the row\'s worktree)' },
     { key = 'q', desc = 'close drawer' },
-    { key = '?', desc = 'this help' },
+    { key = '? / g?', desc = 'this help' },
     { key = '/', desc = 'search (built-in)' },
   }
   for _, k in ipairs(provider_keys()) do rows[#rows + 1] = { key = k.lhs, desc = k.desc } end
@@ -321,6 +343,7 @@ local function teardown()
   if debounce then debounce:stop() end
   if resize_timer then resize_timer:stop() end
   S.tab, S.win = nil, nil
+  live_policy()
 end
 
 local function create_tab()
@@ -399,6 +422,9 @@ end
 
 ---Re-render the drawer (e.g. after a session changed state); keeps focus and other cursors.
 function M.refresh() render() end
+
+---Re-decide live polling while the drawer is hidden (e.g. a session started or ended here).
+function M.live_policy() live_policy() end
 
 ---@return { tab: integer|nil, win: integer|nil, buf: integer|nil, projects: table[], nodes: table[] }
 function M.state()

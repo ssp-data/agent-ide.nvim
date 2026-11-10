@@ -158,6 +158,7 @@ T['a history response of 40 MB arrives quickly and keeps the helper'] = function
     type = 'tool_result', tool_use_id = 't', content = string.rep('synthetic output line\n', 200) } } } }) .. '\n'
   local n = math.ceil(40 * 1024 * 1024 / #rec)
   synth.write(path, string.rep(rec, n))
+  collectgarbage('collect') -- the 40 MB string built above is not the request's pause
   local t0 = vim.uv.hrtime()
   local ev = history(path)
   local ms = (vim.uv.hrtime() - t0) / 1e6

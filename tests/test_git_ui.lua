@@ -284,7 +284,7 @@ T['q returns to the chat that was open; keys and diff options are gone from the 
   press_on('M a.lua')
   wait_for(function() local v = view(); return v ~= vim.NIL and v.right.diff end, 'diff')
   eq(child.lua_get('require("agent-ide.ui.chat")._windows().prompt'), vim.NIL) -- the prompt split made room
-  child.type_keys('q')
+  child.type_keys('\\gq')
   wait_for(function() return view() == vim.NIL end, 'closed')
   wait_for(function() return child.lua_get('require("agent-ide.ui.chat")._windows().prompt ~= nil') end, 'chat back')
   eq(child.lua_get('vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().transcript))'),
@@ -430,7 +430,7 @@ T['a session in a linked worktree: one row per work tree, diffs, gd, lazygit and
   wait_for(function() local v = view(); return v ~= vim.NIL and v.right.diff end, 'worktree diff')
   eq(view().right.name, wt .. '/w.lua')
   eq(child.lua_get('require("agent-ide.ui.diff").state().root'), wt)
-  child.type_keys('q')
+  child.type_keys('\\gq')
   wait_for(function() return view() == vim.NIL end, 'closed')
   press_on('A w.lua', 'glg')
   eq(child.lua_get('_G.snacks_cwd'), wt)
@@ -486,7 +486,7 @@ T['the same file open in another tab keeps its own window options'] = function()
     return { diff = vim.wo[w].diff, fdm = vim.wo[w].foldmethod }
   end)()]])
   eq(other, { diff = false, fdm = 'indent' })
-  child.type_keys('q')
+  child.type_keys('\\gq')
   wait_for(function() return view() == vim.NIL end, 'closed')
 end
 
@@ -559,7 +559,7 @@ T['glg and ? in the diff view'] = function()
   child.lua('_G.Snacks = { lazygit = function(o) _G.snacks_cwd = o.cwd end }')
   child.type_keys('glg')
   eq(child.lua_get('_G.snacks_cwd'), repo)
-  child.type_keys('?')
+  child.type_keys('g?')
   wait_for(function() return child.lua_get('vim.api.nvim_win_get_config(0).relative') ~= '' end, 'help')
   local text = table.concat(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), '\n')
   for _, k in ipairs({ ']f', '[f', 'gb', 'gB', 'q', ']c / [c', 'glg' }) do eq(text:find(k, 1, true) ~= nil, true) end
@@ -598,11 +598,11 @@ T['gd on an Edit or Write fold in the chat opens the branch diff of that file'] 
   eq(child.lua_get('_G.notes[#_G.notes]'), 'Agent-IDE: no Edit or Write of a file here')
   gd_at(tline('│ ▸ Edit: ')) -- a look-alike line inside the Write body: the Write's file
   wait_for(function() local v = view(); return v ~= vim.NIL and v.path == 'new.lua' end, 'diff of new.lua from the body')
-  child.type_keys('q')
+  child.type_keys('\\gq')
   wait_for(function() return view() == vim.NIL end, 'closed')
   gd_at(tline('▸ Write: '))
   wait_for(function() local v = view(); return v ~= vim.NIL and v.path == 'new.lua' end, 'diff of new.lua')
-  child.type_keys('q')
+  child.type_keys('\\gq')
   wait_for(function() return view() == vim.NIL end, 'closed')
   gd_at(tline('▸ Edit: '))
   wait_for(function() local v = view(); return v ~= vim.NIL and v.path == 'a.lua' end, 'diff of a.lua')
@@ -624,7 +624,7 @@ T['q returns to a parked or handed-off session\'s chat; the hand-off key outside
   wait_for(function() local v = view(); return v ~= vim.NIL and v.right.diff end, 'diff')
   -- while the session is away in native Claude
   child.lua([[local h = require('agent-ide.ui.handoff'); _G.orig_away = h.away; h.away = function() return true end]])
-  child.type_keys('q')
+  child.type_keys('\\gq')
   wait_for(function() return view() == vim.NIL end, 'closed')
   wait_for(function() return child.lua_get('require("agent-ide.ui.chat")._windows().prompt ~= nil') end, 'chat back')
   local w = child.lua_get('require("agent-ide.ui.chat")._windows().transcript')
@@ -678,6 +678,96 @@ T['every key of a list works; the user\'s own mappings on those keys are back af
   eq(child.lua_get('vim.fn.maparg("]f", "n")'), '')
 end
 
+-- The buffer-local normal-mode mapping of `lhs` in buffer `buf`: its desc, or vim.NIL.
+local function local_desc(buf, lhs)
+  return child.lua_get([[(function(b, k)
+    return vim.api.nvim_buf_call(b, function()
+      local m = vim.fn.maparg(k, 'n', false, true)
+      return (m.buffer == 1 and (m.desc or '(no desc)')) or vim.NIL
+    end)
+  end)(...)]], { buf, lhs })
+end
+
+T['q, ? and R are mapped on the scratch side only; the real file keeps them, the <leader>g / g? forms work on both'] = function()
+  start()
+  open_file('M a.lua')
+  local lbuf = child.lua_get('vim.api.nvim_win_get_buf(require("agent-ide.ui.diff").state().left)')
+  local rbuf = child.lua_get('vim.api.nvim_win_get_buf(require("agent-ide.ui.diff").state().right)')
+  for _, k in ipairs({ 'q', '?', 'R' }) do
+    eq(local_desc(rbuf, k), vim.NIL)
+    eq(vim.startswith(local_desc(lbuf, k), 'Agent-IDE:'), true)
+  end
+  for _, k in ipairs({ '<leader>gq', 'g?', '<leader>gR', ']c', '[c' }) do
+    eq(vim.startswith(local_desc(rbuf, k), 'Agent-IDE:'), true)
+    eq(vim.startswith(local_desc(lbuf, k), 'Agent-IDE:'), true)
+  end
+  -- on the real file q records a macro again
+  child.type_keys('qa')
+  eq(child.lua_get('vim.fn.reg_recording()'), 'a')
+  child.type_keys('q')
+  eq(child.lua_get('vim.fn.reg_recording()'), '')
+  eq(view() ~= vim.NIL, true)
+  -- g? opens the help on the real side; q on the scratch side closes the view
+  child.type_keys('g?')
+  wait_for(function() return child.lua_get('vim.api.nvim_win_get_config(0).relative') ~= '' end, 'help')
+  local text = table.concat(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), '\n')
+  for _, k in ipairs({ 'q / <leader>gq', '? / g?', 'R / <leader>gR' }) do eq(text:find(k, 1, true) ~= nil, true) end
+  child.type_keys('q')
+  child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.diff").state().left)')
+  child.type_keys('q')
+  wait_for(function() return view() == vim.NIL end, 'closed by q on the scratch side')
+end
+
+T[']c / [c jump between hunks although a filetype plugin maps them; that map is back, intact, afterwards'] = function()
+  start()
+  -- a plugin maps ]c on every lua buffer (so also the scratch side and the real file)
+  child.lua([[
+    _G.plugin_calls = 0
+    local function plugin_map(buf)
+      vim.keymap.set('n', ']c', function() _G.plugin_calls = _G.plugin_calls + 1 end, { buffer = buf, desc = 'theirs' })
+    end
+    _G.plugin_map = plugin_map
+    vim.api.nvim_create_autocmd('FileType', { pattern = 'lua', callback = function(ev) plugin_map(ev.buf) end })
+    vim.api.nvim_buf_call(vim.fn.bufadd(...), function() vim.fn.bufload(vim.api.nvim_get_current_buf()); vim.bo.filetype = 'lua' end)
+  ]], { repo .. '/a.lua' })
+  local rbuf = child.lua_get('vim.fn.bufnr(...)', { repo .. '/a.lua' })
+  eq(local_desc(rbuf, ']c'), 'theirs')
+  open_file('M a.lua')
+  local d = child.lua_get('require("agent-ide.ui.diff").state()')
+  -- hunks of a.lua against main: lines 2, 5 and 8
+  for _, w in ipairs({ d.right, d.left }) do
+    child.lua('vim.api.nvim_set_current_win(...); vim.api.nvim_win_set_cursor(0, { 1, 0 })', { w })
+    child.type_keys(']c')
+    eq(child.lua_get('vim.api.nvim_win_get_cursor(0)[1]'), 2)
+    child.type_keys('2]c')
+    eq(child.lua_get('vim.api.nvim_win_get_cursor(0)[1]'), 8)
+    child.type_keys('[c')
+    eq(child.lua_get('vim.api.nvim_win_get_cursor(0)[1]'), 5)
+  end
+  eq(child.lua_get('_G.plugin_calls'), 0)
+  child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.diff").state().right)')
+  child.type_keys('\\gq')
+  wait_for(function() return view() == vim.NIL end, 'closed')
+  eq(local_desc(rbuf, ']c'), 'theirs')
+  child.lua([[vim.api.nvim_buf_call(..., function() vim.api.nvim_feedkeys(']c', 'x', false) end)]], { rbuf })
+  eq(child.lua_get('_G.plugin_calls'), 1)
+end
+
+T['a ]c the plugin replaced while the view was open is not deleted on close'] = function()
+  start()
+  child.lua([[vim.api.nvim_buf_call(vim.fn.bufadd(...), function()
+    vim.fn.bufload(vim.api.nvim_get_current_buf())
+    vim.keymap.set('n', ']c', function() end, { buffer = true, desc = 'mine' })
+  end)]], { repo .. '/a.lua' })
+  local rbuf = child.lua_get('vim.fn.bufnr(...)', { repo .. '/a.lua' })
+  open_file('M a.lua')
+  -- another plugin re-attaches meanwhile and maps ]c again
+  child.lua([[vim.keymap.set('n', ']c', function() end, { buffer = ..., desc = 'third party' })]], { rbuf })
+  child.type_keys('\\gq')
+  wait_for(function() return view() == vim.NIL end, 'closed')
+  eq(local_desc(rbuf, ']c'), 'third party')
+end
+
 T['R in the diff view reloads the list; opening a diff sets the tab directory to its work tree'] = function()
   local elsewhere = tmp .. '/elsewhere'
   vim.fn.mkdir(elsewhere, 'p')
@@ -688,7 +778,7 @@ T['R in the diff view reloads the list; opening a diff sets the tab directory to
   eq(child.lua_get('vim.fn.getcwd(-1, ...)', { agents }), repo)
   eq(child.lua_get('vim.fn.getcwd(-1, -1)'), elsewhere) -- the global directory never changes
   R.write(repo, 'z.txt', { 'z' })
-  child.type_keys('R')
+  child.type_keys('\\gR')
   wait_for(function() return view().n == 6 end, 'R refresh')
 end
 
@@ -726,13 +816,13 @@ T['gd inside a subagent fold: a nested Edit opens its file, a look-alike in a ne
   -- the look-alike inside the nested Write body resolves to the Write's file, never to a.lua
   gd_at(find('│ │ ▸ Edit: ' .. repo .. '/a.lua'))
   wait_for(function() local v = view(); return v ~= vim.NIL and v.path == 'u.txt' end, 'diff of the Write file')
-  child.type_keys('q')
+  child.type_keys('\\gq')
   wait_for(function() return view() == vim.NIL end, 'closed')
   -- the nested Edit's own header and a line of its body
   local edit = find('│ ▸ Edit: ' .. repo .. '/a.lua')
   gd_at(edit + 1)
   wait_for(function() local v = view(); return v ~= vim.NIL and v.path == 'a.lua' end, 'diff of the nested Edit')
-  child.type_keys('q')
+  child.type_keys('\\gq')
   wait_for(function() return view() == vim.NIL end, 'closed again')
   gd_at(edit)
   wait_for(function() local v = view(); return v ~= vim.NIL and v.path == 'a.lua' end, 'nested Edit header')

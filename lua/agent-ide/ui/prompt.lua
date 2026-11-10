@@ -95,29 +95,164 @@ end
 
 local SLASH = '^/[%w:_%-]*$'
 
----`completefunc` of a prompt buffer: `/` commands of the session.
+-- Screen-only commands Claude does not list but the plugin can do; they never reach Claude.
+local PLUGIN_COMMANDS = {
+  { name = 'model', info = 'pick the model (Agent-IDE)' },
+  { name = 'copy', info = 'copy the last answer to the unnamed and + registers (Agent-IDE)' },
+}
+
+---The last answer of `s`: Claude's text after the last prompt (subagents left out).
+local function last_answer(s)
+  local parts = {}
+  for _, ev in ipairs(s.events or {}) do
+    if not ev.sidechain then
+      if ev.kind == 'prompt' then
+        parts = {}
+      elseif ev.kind == 'text' and type(ev.text) == 'string' and ev.text ~= '' then
+        parts[#parts + 1] = ev.text
+      end
+    end
+  end
+  return #parts > 0 and table.concat(parts, '\n\n') or nil
+end
+
+local ACTIONS = {
+  model = function(s) require('agent-ide.ui.mode').pick_model(s) end,
+  copy = function(s)
+    local text = last_answer(s)
+    if not text then return vim.notify('Agent-IDE: no answer to copy yet', vim.log.levels.INFO) end
+    vim.fn.setreg('"', text)
+    local clip = pcall(vim.fn.setreg, '+', text)
+    local n = #vim.split(text, '\n', { plain = true })
+    vim.notify(('Agent-IDE: copied the last answer (%d line%s)%s'):format(n, n == 1 and '' or 's',
+      clip and '' or '; no clipboard, unnamed register only'), vim.log.levels.INFO)
+  end,
+}
+
+---The plugin's own action for a prompt that is only `/model` or `/copy` (else nil).
+---@param text string
+---@return fun(s: table)|nil
+function M.plugin_command(text)
+  local name = vim.trim(text or ''):match('^/(%a+)$')
+  return name and ACTIONS[name] or nil
+end
+
+---Fuzzy score of `name` for `query` (subsequence, case-insensitive): nil when it does not
+---match; lower is better: prefix matches first (0), then by the position of the first letter,
+---then by how close together the letters are.
+local function score(name, query)
+  if query == '' then return 0, 0 end
+  local n, q = name:lower(), query:lower()
+  if n:sub(1, #q) == q then return 0, 0 end
+  local pos, first = 0, nil
+  for i = 1, #q do
+    pos = n:find(q:sub(i, i), pos + 1, true)
+    if not pos then return nil end
+    first = first or pos
+  end
+  return first, pos - first
+end
+
+---Menu entries for `base` (`/` and what follows): the plugin's own commands first, then
+---Claude's (the session's, else the last list seen for its folder in this Neovim).
+---@param s table|nil Session
+---@param base string
+---@return table[] complete-items
+function M.matches(s, base)
+  local query = (base or ''):gsub('^/', '')
+  local commands = s and s.slash_commands
+  if (not commands or #commands == 0) and s and s.cwd then
+    commands = require('agent-ide.session')._commands_seen[s.cwd]
+  end
+  local found, seen = {}, {}
+  local function add(name, kind, info, rank)
+    if seen[name] then return end
+    seen[name] = true
+    local sc, span = score(name, query)
+    if sc then
+      found[#found + 1] = { sc = sc, span = span, rank = rank, item = { word = '/' .. name, abbr = '/' .. name, kind = kind,
+        info = info or '', icase = 1, user_data = kind == 'plugin' and { agent_ide = name } or nil } }
+    end
+  end
+  for _, c in ipairs(PLUGIN_COMMANDS) do add(c.name, 'plugin', c.info, 0) end
+  for _, c in ipairs(commands or {}) do
+    if type(c) == 'string' then add(c, '', nil, 1) end
+  end
+  table.sort(found, function(a, b)
+    if a.sc ~= b.sc then return a.sc < b.sc end
+    if a.span ~= b.span then return a.span < b.span end
+    if a.rank ~= b.rank then return a.rank < b.rank end
+    return a.item.word < b.item.word
+  end)
+  return vim.tbl_map(function(f) return f.item end, found)
+end
+
+---`completefunc` of a prompt buffer: `/` commands, matched fuzzily; asked again on every typed
+---character (`refresh`), so typing narrows the menu.
 ---@param findstart integer
 ---@param base string
 function M.complete(findstart, base)
   local line = api.nvim_get_current_line():sub(1, api.nvim_win_get_cursor(0)[2])
   if findstart == 1 then return line:match(SLASH) and 0 or -2 end
   local st = bufs[api.nvim_get_current_buf()]
-  local commands = st and st.s.slash_commands or {}
-  if #commands == 0 then
-    if not hinted then
-      hinted = true
-      vim.notify(HINT, vim.log.levels.INFO)
-    end
-    return {}
+  local s = st and st.s
+  local known = s and ((s.slash_commands and #s.slash_commands > 0)
+    or (s.cwd and require('agent-ide.session')._commands_seen[s.cwd]))
+  if not known and not hinted then
+    hinted = true
+    vim.notify(HINT, vim.log.levels.INFO)
   end
-  local out = {}
-  for _, c in ipairs(commands) do
-    local item = '/' .. c
-    if item:sub(1, #base) == base then out[#out + 1] = item end
-  end
-  table.sort(out)
-  return out
+  return { words = M.matches(s, base), refresh = 'always' }
 end
+
+-- 'completeopt' while the `/` menu is open: nothing inserted or selected before a choice.
+local fuzzy_ok
+local function menu_completeopt()
+  if fuzzy_ok == nil then
+    local old = vim.o.completeopt
+    fuzzy_ok = pcall(function() vim.o.completeopt = 'menuone,fuzzy' end)
+    vim.o.completeopt = old
+  end
+  return 'menuone,noinsert,noselect' .. (fuzzy_ok and ',fuzzy' or '')
+end
+
+---Set the menu's 'completeopt' on prompt `buf` (put back when the menu is done) and close the
+---menu of a completion plugin, so it does not pile on top.
+local function open_menu(buf)
+  local st = bufs[buf]
+  if st.saved_cot == nil then
+    st.saved_cot = api.nvim_get_option_value('completeopt', { scope = 'local', buf = buf })
+  end
+  api.nvim_set_option_value('completeopt', menu_completeopt(), { scope = 'local', buf = buf })
+  local cmp = package.loaded['cmp']
+  if type(cmp) == 'table' then
+    if type(cmp.close) == 'function' then pcall(cmp.close) end
+    if type(cmp.abort) == 'function' then pcall(cmp.abort) end
+  end
+end
+
+local function close_menu(buf)
+  local st = bufs[buf]
+  if not st or st.saved_cot == nil then return end
+  if api.nvim_buf_is_valid(buf) then
+    api.nvim_set_option_value('completeopt', st.saved_cot, { scope = 'local', buf = buf })
+  end
+  st.saved_cot = nil
+end
+
+---A plugin entry chosen from the menu: take its text out of the line and act.
+local function on_complete_done(buf)
+  local item = vim.v.completed_item
+  local reason = vim.v.event and vim.v.event.reason
+  local data = type(item) == 'table' and item.user_data
+  if type(data) ~= 'table' or not data.agent_ide or (reason and reason ~= 'accept') then return end
+  local st, fn = bufs[buf], ACTIONS[data.agent_ide]
+  if not st or not fn then return end
+  if api.nvim_get_current_line() == item.word then api.nvim_set_current_line('') end
+  vim.schedule(function() fn(st.s) end)
+end
+
+M._menu_completeopt = menu_completeopt
 
 -- History -------------------------------------------------------------------------------------------
 
@@ -326,17 +461,24 @@ function M.setup_buf(buf, s)
   vim.bo[buf].completefunc = "v:lua.require'agent-ide.ui.prompt'.complete"
   local keys, opts = chat_keys(), chat_opts()
   local function map(modes, lhs, fn, desc)
-    if not lhs then return end
     vim.keymap.set(modes, lhs, fn, { buffer = buf, expr = true, nowait = true, silent = true, desc = 'Agent-IDE: ' .. desc })
   end
+  local list = require('agent-ide.util.keys').list
 
   if opts.auto_slash ~= false then
     map('i', '/', function()
       local empty_line = api.nvim_get_current_line() == ''
-      local commands = bufs[buf] and bufs[buf].s.slash_commands
-      if empty_line and commands and #commands > 0 and not menu_visible() then return '/<C-x><C-u>' end
+      if empty_line and bufs[buf] and not menu_visible() then
+        open_menu(buf)
+        return '/<C-x><C-u>'
+      end
       return '/'
     end, 'command menu')
+    api.nvim_create_autocmd('CompleteDone', { buffer = buf, callback = function()
+      on_complete_done(buf)
+      close_menu(buf)
+    end })
+    api.nvim_create_autocmd('InsertLeave', { buffer = buf, callback = function() close_menu(buf) end })
   end
 
   if opts.at_picker ~= false then
@@ -350,21 +492,23 @@ function M.setup_buf(buf, s)
       return '@'
     end, 'attach file')
   end
-  if keys.attach then
-    map('n', keys.attach, function()
+  for _, lhs in ipairs(list(keys.attach)) do
+    map('n', lhs, function()
       return ('<Cmd>lua require("agent-ide.ui.prompt").pick(%d, false)<CR>'):format(buf)
     end, 'attach file')
   end
 
-  if keys.history_prev then
-    map('n', keys.history_prev, edge_key(buf, -1, keys.history_prev, false), 'previous prompt')
-    map('n', '<Up>', edge_key(buf, -1, '<Up>', false), 'previous prompt')
-    map('i', keys.history_prev, edge_key(buf, -1, keys.history_prev, true), 'previous prompt')
-  end
-  if keys.history_next then
-    map('n', keys.history_next, edge_key(buf, 1, keys.history_next, false), 'next prompt')
-    map('n', '<Down>', edge_key(buf, 1, '<Down>', false), 'next prompt')
-    map('i', keys.history_next, edge_key(buf, 1, keys.history_next, true), 'next prompt')
+  for dir, name in pairs({ [-1] = 'history_prev', [1] = 'history_next' }) do
+    local l = list(keys[name])
+    local desc = dir < 0 and 'previous prompt' or 'next prompt'
+    for _, lhs in ipairs(l) do
+      map('n', lhs, edge_key(buf, dir, lhs, false), desc)
+      map('i', lhs, edge_key(buf, dir, lhs, true), desc)
+    end
+    if #l > 0 then
+      local arrow = dir < 0 and '<Up>' or '<Down>'
+      map('n', arrow, edge_key(buf, dir, arrow, false), desc)
+    end
   end
 end
 

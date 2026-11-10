@@ -195,6 +195,7 @@ T['300 library entries: re-render under 5 ms collapsed and 20 ms expanded'] = fu
       prompts = { command_dirs = {}, skill_dirs = {}, library_dir = tmp .. '/lib', saved_dir = tmp .. '/saved' } })
     require('agent-ide').toggle()
     _G.best = function()
+      collectgarbage('collect')
       local best = math.huge
       for _ = 1, 5 do
         local t0 = vim.uv.hrtime()
@@ -221,7 +222,12 @@ T['300 library entries: re-render under 5 ms collapsed and 20 ms expanded'] = fu
       end
     end
   ]])
-  eq(child.lua_get('#vim.api.nvim_buf_get_lines(require("agent-ide.ui.drawer").state().buf, 0, -1, false)'), 1 + 1 + 1 + 10 + 300 + 1) -- Prompts, Skills & commands (0), Library, groups, entries, no sessions
+  -- Prompts, Skills & commands (0), Library, groups, entries, no sessions
+  local want = 1 + 1 + 1 + 10 + 300 + 1
+  vim.wait(5000, function()
+    return child.lua_get('#vim.api.nvim_buf_get_lines(require("agent-ide.ui.drawer").state().buf, 0, -1, false)') == want
+  end, 10)
+  eq(child.lua_get('#vim.api.nvim_buf_get_lines(require("agent-ide.ui.drawer").state().buf, 0, -1, false)'), want)
   local expanded = child.lua_get('_G.best()')
   -- the entries stay loaded; the Prompts node collapsed again
   child.lua([[

@@ -205,6 +205,8 @@ T['<C-CR> in insert mode sends; the answer streams into the transcript; prompt i
   type_prompt('Hello there')
   child.type_keys('<C-CR>')
   eq(mode(), 'i')
+  -- the first send of a session asks `claude agents` first (asynchronously)
+  wait_for(function() return prompt_lines()[1] == '' end, 'prompt emptied')
   eq(prompt_lines(), { '' })
   eq(child.lua_get('vim.bo[vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().prompt)].modified'), false)
   -- streamed part shows before the turn ends
@@ -428,6 +430,47 @@ T['winbar of a session running elsewhere follows live polls'] = function()
   wait_for(function() return winbar() == 'repo · Alpha basics · model ? · mode:? · waiting' end, 'winbar after poll')
 end
 
+T['drawer hidden: a session opened in a terminal Claude meanwhile is refused, the text stays'] = function()
+  local live_file = tmp .. '/live.json'
+  vim.fn.writefile({ '[]' }, live_file)
+  start(turn('Never sent', 'no'))
+  child.lua('require("agent-ide").setup(vim.tbl_deep_extend("force", require("agent-ide.config").get(), { live = { interval_ms = 2000, cmd = { "cat", ... } } }))', { live_file })
+  open_fixture()
+  -- hide the drawer: polling slows to 4x the interval (8 s here), so the next poll is far away
+  child.lua('require("agent-ide.ui.drawer").close()')
+  eq(child.lua_get('require("agent-ide.live").interval()'), 8000)
+  -- the user opens the session in a terminal Claude now
+  vim.fn.writefile({ '[{"sessionId":"' .. FIXTURE_ID .. '","status":"idle","pid":1,"cwd":"/x"}]' }, live_file)
+  child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.chat")._windows().prompt)')
+  type_prompt('Never sent')
+  child.type_keys('<C-CR>')
+  -- typing is not blocked while the question runs
+  child.type_keys(' more')
+  wait_for(function()
+    local notes = child.lua_get('_G.notes')
+    return notes[#notes] == 'Agent-IDE: session is running in another Claude; use gp in the drawer to jump to it'
+  end, 'refusal notice')
+  child.type_keys('<Esc>')
+  eq(prompt_lines(), { 'Never sent more' })
+  vim.wait(200)
+  eq(fake.log(log), {})
+  eq(current().owned, false)
+end
+
+T['drawer hidden: a send asks afresh and starts Claude when no other Claude runs it'] = function()
+  local live_file = tmp .. '/live.json'
+  vim.fn.writefile({ '[]' }, live_file)
+  start(turn('Go on', 'Fine.'))
+  child.lua('require("agent-ide").setup(vim.tbl_deep_extend("force", require("agent-ide.config").get(), { live = { interval_ms = 2000, cmd = { "cat", ... } } }))', { live_file })
+  open_fixture()
+  child.lua('require("agent-ide.ui.drawer").close()')
+  child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.chat")._windows().prompt)')
+  type_prompt('Go on')
+  child.type_keys('<C-CR>', '<Esc>')
+  wait_for(function() return has_line(transcript(), 'Fine.') ~= nil end, 'answer')
+  eq(prompt_lines(), { '' })
+end
+
 T['+ New session on a project without a folder key is refused'] = function()
   vim.fn.mkdir(projects .. '/-nocwd', 'p')
   vim.fn.writefile({ vim.json.encode({ type = 'user', uuid = 'q', message = { role = 'user', content = 'No cwd here' } }) },
@@ -570,13 +613,13 @@ T['a session running elsewhere refuses to send and keeps the text'] = function()
   eq(fake.log(log), {})
 end
 
-T['? opens the chat help'] = function()
+T['g? opens the chat help'] = function()
   start()
   open_new()
-  child.type_keys('?')
+  child.type_keys('g?')
   wait_for(function() return child.lua_get('vim.api.nvim_win_get_config(0).relative') ~= '' end, 'help float')
   local text = table.concat(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), '\n')
-  for _, key in ipairs({ '<C-CR>', '<leader><CR>', '<C-c>', '<leader>ap', '?', 'za', ':w', 'i / a / o' }) do
+  for _, key in ipairs({ '<C-CR>', '<leader><CR>', '<C-c>', '<leader>ap', 'g?', 'za', ':w', 'i / a / o' }) do
     eq(text:find(key, 1, true) ~= nil, true)
   end
 end

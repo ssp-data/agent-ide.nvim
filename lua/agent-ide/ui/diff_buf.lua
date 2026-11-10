@@ -55,11 +55,7 @@ local saved = {} -- buf -> { [lhs] = maparg dict|false }
 ---Keys of a config value: a key, a list of keys, or false/nil (none).
 ---@param v string|string[]|false|nil
 ---@return string[]
-function M.keys(v)
-  if type(v) == 'string' then return { v } end
-  if type(v) == 'table' then return vim.tbl_filter(function(k) return type(k) == 'string' and k ~= '' end, v) end
-  return {}
-end
+function M.keys(v) return require('agent-ide.util.keys').list(v) end
 
 ---Map `lhs` (a key or a list of keys) in normal mode on `buf`, remembering buffer-local
 ---mappings they replace.
@@ -79,14 +75,26 @@ function M.map(buf, lhs, fn, desc)
   vim.keymap.set('n', lhs, fn, { buffer = buf, nowait = true, silent = true, desc = 'Agent-IDE: ' .. desc })
 end
 
----Remove the keys mapped by `map` from `buf` and restore what they replaced.
+local function local_map(buf, lhs)
+  return api.nvim_buf_call(buf, function()
+    local m = vim.fn.maparg(lhs, 'n', false, true)
+    return (type(m) == 'table' and m.buffer == 1) and m or nil
+  end)
+end
+
+---Remove the keys mapped by `map` from `buf` and restore what they replaced. A key another
+---plugin mapped meanwhile (its description does not start with `Agent-IDE:`) is left alone.
 function M.unmap(buf)
   local s = saved[buf]
   saved[buf] = nil
   if not s or not api.nvim_buf_is_valid(buf) then return end
   for lhs, m in pairs(s) do
-    pcall(vim.keymap.del, 'n', lhs, { buffer = buf })
-    if m then api.nvim_buf_call(buf, function() vim.fn.mapset('n', false, m) end) end
+    local cur = local_map(buf, lhs)
+    if cur and type(cur.desc) == 'string' and vim.startswith(cur.desc, 'Agent-IDE:') then
+      pcall(vim.keymap.del, 'n', lhs, { buffer = buf })
+      cur = nil
+    end
+    if m and not cur then api.nvim_buf_call(buf, function() vim.fn.mapset('n', false, m) end) end
   end
 end
 

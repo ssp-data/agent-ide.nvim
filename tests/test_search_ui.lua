@@ -343,6 +343,7 @@ T['the helper cache directory is 0700 and its files 0600'] = function()
   need_helper()
   local xdg = tmp .. '/xdg'
   vim.fn.mkdir(xdg .. '/nvim/agent-ide', 'p', tonumber('755', 8))
+  local saved_cache = vim.uv.os_getenv('XDG_CACHE_HOME')
   vim.uv.os_setenv('XDG_CACHE_HOME', xdg)
   local ok, err = pcall(function()
     child.restart({ '-u', 'tests/minimal_init.lua' })
@@ -352,7 +353,7 @@ T['the helper cache directory is 0700 and its files 0600'] = function()
     open_picker()
     type_query('release')
   end)
-  vim.uv.os_unsetenv('XDG_CACHE_HOME')
+  if saved_cache then vim.uv.os_setenv('XDG_CACHE_HOME', saved_cache) else vim.uv.os_unsetenv('XDG_CACHE_HOME') end
   if not ok then error(err, 0) end
   local dir = xdg .. '/nvim/agent-ide'
   local mode = function(p) return bit.band(vim.uv.fs_stat(p).mode, tonumber('777', 8)) end

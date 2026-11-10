@@ -193,7 +193,7 @@ end
 ---@param is_transcript boolean
 ---@param keys table config.keys.chat
 function M.map_chat(buf, is_transcript, keys)
-  for _, lhs in ipairs(require('agent-ide.ui.diff_buf').keys(keys.prompts)) do
+  for _, lhs in ipairs(require('agent-ide.util.keys').list(keys.prompts)) do
     vim.keymap.set('n', lhs, function() M.pick() end, { buffer = buf, nowait = true, silent = true, desc = 'Agent-IDE: pick a prompt' })
     local first = vim.keycode(lhs):byte(1)
     if not is_transcript and first and (first < 0x20 or first == 0x7f or first == 0x80) then

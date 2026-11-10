@@ -180,12 +180,11 @@ local function get_view(s)
   vim.bo[buf].bufhidden, vim.bo[buf].undolevels, vim.bo[buf].modifiable = 'hide', -1, false
   v = { buf = buf, mode = 'live', gen = 0, dropped = 0, n = 0 }
   views[s.id] = v
-  local lhs = { 'q', require('agent-ide.ui.chat_keys').keys().raw }
+  local lhs = { 'q' }
+  vim.list_extend(lhs, require('agent-ide.util.keys').list(require('agent-ide.ui.chat_keys').keys().raw))
   for _, key in ipairs(lhs) do
-    if key then
-      vim.keymap.set('n', key, function() back(s, buf) end,
-        { buffer = buf, nowait = true, silent = true, desc = 'Agent-IDE: back to the chat' })
-    end
+    vim.keymap.set('n', key, function() back(s, buf) end,
+      { buffer = buf, nowait = true, silent = true, desc = 'Agent-IDE: back to the chat' })
   end
   return v
 end
@@ -198,10 +197,19 @@ function M.open(s, opts)
   define_highlights()
   local v = get_view(s)
   local win = opts.win or api.nvim_get_current_win()
+  -- 'list' of the transcript is remembered (history.apply_win puts it back); read before the
+  -- buffer changes, since the raw buffer brings the options it last had in this window
+  if api.nvim_win_get_buf(win) ~= v.buf and vim.w[win].agent_ide_list == nil then
+    vim.w[win].agent_ide_list = vim.wo[win].list
+  end
   api.nvim_win_set_buf(win, v.buf)
   -- the transcript's fold options must not apply to wire lines (`back` restores them)
   api.nvim_set_option_value('foldmethod', 'manual', { scope = 'local', win = win })
   api.nvim_set_option_value('foldenable', false, { scope = 'local', win = win })
+  -- raw lines are byte-exact, some of several MB (pasted images): never wrap them
+  for name, value in pairs({ wrap = false, linebreak = false, list = false }) do
+    api.nvim_set_option_value(name, value, { scope = 'local', win = win })
+  end
   if ran_here(s) then fill_live(v, s) else fill_file(v, s) end
   api.nvim_set_option_value('winbar', (winbar(s.id)), { scope = 'local', win = win })
   local last = api.nvim_buf_line_count(v.buf)

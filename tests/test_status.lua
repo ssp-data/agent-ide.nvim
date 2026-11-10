@@ -91,25 +91,104 @@ T['model of the focused session, claude- prefix removed'] = function()
   eq(status.statusline(), 'agents ok')
 end
 
-T['quota text, bars and percentages'] = function()
+T['quota text: percent used, the bar fills with use'] = function()
   use({})
   set_quota({ five_hour = { utilization = 0.07, resets_at = NOW + 100 }, seven_day = { utilization = 0.18, resets_at = NOW + 100 } })
-  eq(status.statusline(), 'agents ok · 5h ▰▰▰▰▰ 93%% · week ▰▰▰▰▱ 82%%')
+  eq(status.statusline(), 'agents ok · 5h ▱▱▱▱▱ 7%% · week ▰▱▱▱▱ 18%%')
+  set_quota({ five_hour = { utilization = 0.625 }, seven_day = { utilization = 0.005 } })
+  eq(status.statusline(), 'agents ok · 5h ▰▰▰▱▱ 63%% · week ▱▱▱▱▱ 1%%') -- floor(x*100+0.5)
 end
 
-T['quota: extra windows, clamping'] = function()
+T['quota: readable labels, clamping, overage windows only when alone'] = function()
   use({})
-  set_quota({ zeta = { utilization = 1.5 }, five_hour = { utilization = 0 }, extra = { utilization = 0.5 } })
-  eq(status.statusline(), 'agents ok · 5h ▰▰▰▰▰ 100%% · extra ▰▰▰▱▱ 50%% · zeta ▱▱▱▱▱ 0%%')
+  set_quota({ zeta_window = { utilization = 1.5 }, five_hour = { utilization = 0 }, seven_day_opus = { utilization = 0.5 },
+    seven_day_overage_included = { utilization = 0.9 }, seven_day = { utilization = -0.2 } })
+  eq(status.statusline(), 'agents ok · 5h ▱▱▱▱▱ 0%% · week ▱▱▱▱▱ 0%% · week opus ▰▰▰▱▱ 50%% · zeta window ▰▰▰▰▰ 100%%')
+  set_quota({ seven_day_overage_included = { utilization = 0.9 } })
+  eq(status.statusline(), 'agents ok · week overage included ▰▰▰▰▰ 90%%')
 end
 
-T['quota stale: past reset or older than 6 h'] = function()
+T['quota age: shown after 10 min; dimmed with ? after 60 min or past the reset'] = function()
   use({})
-  set_quota({ five_hour = { utilization = 0.07, resets_at = NOW - 1 }, seven_day = { utilization = 0.18, resets_at = NOW + 100 } })
-  eq(status.statusline(), 'agents ok · 5h ? · week ▰▰▰▰▱ 82%%')
-  set_quota({ five_hour = { utilization = 0.07 } })
-  status._src.now = function() return NOW + 6 * 3600 + 1 end
-  eq(status.statusline(), 'agents ok · 5h ?')
+  set_quota({ five_hour = { utilization = 0.4, resets_at = NOW - 1 }, seven_day = { utilization = 0.18, resets_at = NOW + 100000 } })
+  eq(status.statusline(), 'agents ok · 5h ▪▪▫▫▫ ? · week ▰▱▱▱▱ 18%%')
+  status._src.now = function() return NOW + 10 * 60 end
+  eq(status.statusline(), 'agents ok · 5h ▪▪▫▫▫ ? · week ▰▱▱▱▱ 18%%')
+  status._src.now = function() return NOW + 25 * 60 end
+  eq(status.statusline(), 'agents ok · 5h ▪▪▫▫▫ ? · week ▰▱▱▱▱ 18%% · 25m old')
+  status._src.now = function() return NOW + 3600 + 1 end
+  eq(status.statusline(), 'agents ok · 5h ▪▪▫▫▫ ? · week ▪▫▫▫▫ ? · 1h old')
+end
+
+T['quota.file: parsed times and shapes'] = function()
+  eq(status._parse_time('1970-01-01T00:00:00Z'), 0)
+  eq(status._parse_time('2026-11-10T12:30:15.123+01:00'), 1794310215)
+  eq(status._parse_time('2026-11-10T11:30:15Z'), 1794310215)
+  eq(status._parse_time('2026-11-10T06:30:15-05:00'), 1794310215)
+  eq(status._parse_time(1794310215000), 1794310215)
+  eq(status._parse_time('yesterday'), nil)
+  local q = status._parse_quota_file(vim.json.encode({ limits = {
+    { label = 'Session', percent = 0.42, resetsAt = '2026-11-10T11:30:15Z' }, { label = 'Weekly', percent = 64 } },
+    updatedAt = '1970-01-01T00:16:40Z', other = { 1 } }), 5)
+  eq(q, { limits = { { label = 'Session', used = 0.42, resets_at = 1794310215 }, { label = 'Weekly', used = 0.64 } },
+    updated = 1000 })
+  eq(status._parse_quota_file(vim.json.encode({ limits = { { label = 'x', percent = 0.1 } } }), 7).updated, 7) -- mtime
+  for _, bad in ipairs({ '{not json', '[]', '{"limits":{}}', '{"limits":[]}', '{"limits":[{"label":"x"}]}',
+    '{"limits":[{"label":1,"percent":0.1}]}' }) do
+    eq(status._parse_quota_file(bad, 1), nil)
+  end
+end
+
+T['quota.file: its limits replace the own values; missing, malformed or old falls back'] = function()
+  local config = require('agent-ide.config')
+  local file = dir .. '/usage.json'
+  local now = os.time()
+  use({})
+  status._src.now = function() return now end
+  local function iso(t) return os.date('!%Y-%m-%dT%H:%M:%SZ', t) end
+  local function write(obj) vim.fn.writefile({ type(obj) == 'string' and obj or vim.json.encode(obj) }, file) end
+  local function line() return status.statusline() end
+  local function wait_line(want, ms)
+    if vim.wait(ms or 2000, function() return line() == want end, 10) then return true end
+    if ms then return false end
+    error('want ' .. want .. ', have ' .. line(), 2)
+  end
+  write({ limits = { { label = 'Session', percent = 0.42, resetsAt = iso(now + 600) },
+    { label = 'Week', percent = 0.9, resetsAt = iso(now - 1) } }, updatedAt = iso(now - 60) })
+  config.setup({ quota = { file = file } })
+  local ok, err = pcall(function()
+    set_quota({ five_hour = { utilization = 0.1 } })
+    status._src.now = function() return now end
+    eq(wait_line('agents ok · Session ▰▰▱▱▱ 42%% · Week ▪▪▪▪▪ ?'), true)
+    -- read at most every 60 s: a change shows only then
+    write({ limits = { { label = 'Session', percent = 0.5 } }, updatedAt = iso(now - 60) })
+    vim.wait(100)
+    eq(line(), 'agents ok · Session ▰▰▱▱▱ 42%% · Week ▪▪▪▪▪ ?')
+    now = now + 61
+    eq(wait_line('agents ok · Session ▰▰▰▱▱ 50%%'), true)
+    -- older than 10 min (written 20 min before, read a minute later): says so; older than 30 min: the own values
+    write({ limits = { { label = 'Session', percent = 0.5 } }, updatedAt = iso(now - 20 * 60) })
+    now = now + 61
+    eq(wait_line('agents ok · Session ▰▰▰▱▱ 50%% · 21m old'), true)
+    write({ limits = { { label = 'Session', percent = 0.5 } }, updatedAt = iso(now - 31 * 60 - 61) })
+    now = now + 61
+    eq(wait_line('agents ok · 5h ▰▱▱▱▱ 10%%'), true)
+    -- malformed, then missing
+    write({ limits = { { label = 'Session', percent = 0.5 } }, updatedAt = iso(now) })
+    now = now + 61
+    eq(wait_line('agents ok · Session ▰▰▰▱▱ 50%%'), true)
+    write('{"limits": "nope"')
+    now = now + 61
+    eq(wait_line('agents ok · 5h ▰▱▱▱▱ 10%%'), true)
+    write({ limits = { { label = 'Session', percent = 0.5 } }, updatedAt = iso(now) })
+    now = now + 61
+    eq(wait_line('agents ok · Session ▰▰▰▱▱ 50%%'), true)
+    os.remove(file)
+    now = now + 61
+    eq(wait_line('agents ok · 5h ▰▱▱▱▱ 10%%'), true)
+  end)
+  config.setup({})
+  if not ok then error(err, 0) end
 end
 
 T['statusline never raises without setup or with broken sources'] = function()
@@ -137,7 +216,7 @@ T['quota survives a restart'] = function()
   vim.wait(2000, function() return loaded ~= nil end, 10)
   vim.fn.stdpath = orig
   eq(loaded, true)
-  eq(status.statusline(), 'agents ok · 5h ▰▰▰▰▰ 93%%')
+  eq(status.statusline(), 'agents ok · 5h ▱▱▱▱▱ 7%%')
 end
 
 T['corrupt quota file is ignored'] = function()
@@ -298,9 +377,9 @@ T['quota reset time in milliseconds is converted'] = function()
   local now = 1.78e9
   status._src.now = function() return now end
   set_quota({ five_hour = { utilization = 0.1, resets_at = (now + 100) * 1000 } })
-  eq(status.statusline(), 'agents ok · 5h ▰▰▰▰▰ 90%%')
+  eq(status.statusline(), 'agents ok · 5h ▰▱▱▱▱ 10%%')
   set_quota({ five_hour = { utilization = 0.1, resets_at = (now - 100) * 1000 } })
-  eq(status.statusline(), 'agents ok · 5h ?')
+  eq(status.statusline(), 'agents ok · 5h ▪▫▫▫▫ ?')
 end
 
 T['refresh errors never reach the dispatcher; deltas are ignored'] = function()
