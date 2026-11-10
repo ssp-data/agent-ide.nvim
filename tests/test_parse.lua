@@ -24,4 +24,24 @@ end
 T['bookkeeping yields nothing'] = function()
   eq(parse.parse_line('{"type":"api-request-blob","hash":"h","message":{"content":"zzz"}}'), {})
 end
+T['unknown block raw is the exact original text, scalars included'] = function()
+  local block = [[{"type": "odd" , "k":"{[\"x\"]} \\", "n":[[1,{"a":"]"}], 2],"o":{"z":[]}}]]
+  local line = '{"type":"assistant","message":{"content":["scalar", 7 ,' .. block .. ',{"type":"text","text":"ok"}]}}'
+  eq(parse.parse_line(line), {
+    { kind = 'unknown', label = 'string', raw = '"scalar"' },
+    { kind = 'unknown', label = 'number', raw = '7' },
+    { kind = 'unknown', label = 'odd', raw = block },
+    { kind = 'text', text = 'ok' },
+  })
+end
+T['numeric block type label uses Lua number formatting'] = function()
+  local function label(n)
+    return parse.parse_line('{"type":"assistant","message":{"content":[{"type":' .. n .. '}]}}')[1].label
+  end
+  eq(label('100000000000000'), '1e+14')
+  eq(label('99999999999999'), '99999999999999')
+  eq(label('1.5'), '1.5')
+  eq(label('0.00001'), '1e-05')
+  eq(label('123456789012345678'), '1.2345678901235e+17')
+end
 return T

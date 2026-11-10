@@ -58,9 +58,9 @@ fn blocks_and_sidechain() {
     let line = r#"{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"thinking","thinking":""},{"type":"tool_use","name":"B"},{"type":"video","a":1},"s",{"type":"x"}]}}"#;
     let ev = one(line);
     assert_eq!(ev[0], json!({"kind":"tool_call","name":"B","input":{},"sidechain":true}));
-    // raw text comes from the original line; Lua's scanner skips the string element, so it is misaligned.
+    // raw is always the original text of that exact block, scalars included
     assert_eq!(ev[1], json!({"kind":"unknown","label":"video","raw":r#"{"type":"video","a":1}"#,"sidechain":true}));
-    assert_eq!(ev[2], json!({"kind":"unknown","label":"string","raw":r#"{"type":"x"}"#,"sidechain":true}));
+    assert_eq!(ev[2], json!({"kind":"unknown","label":"string","raw":r#""s""#,"sidechain":true}));
     assert_eq!(ev[3], json!({"kind":"unknown","label":"x","raw":r#"{"type":"x"}"#,"sidechain":true}));
 }
 
@@ -87,4 +87,27 @@ fn non_table_content_is_unknown_record() {
     let line = r#"{"type":"user","message":{"content":5}}"#;
     assert_eq!(one(line), vec![json!({"kind":"unknown","label":"user","raw":line})]);
     assert!(one(r#"{"type":"user","message":{"content":{"a":1}}}"#).is_empty());
+}
+
+#[test]
+fn raw_is_exact_substring_with_braces_escapes_and_nesting() {
+    let block = r#"{"type": "odd" , "k":"{[\"x\"]} \\", "n":[[1,{"a":"]"}], 2],"o":{"z":[]}}"#;
+    let line = format!(r#"{{"type":"assistant","message":{{"content":["scalar", 7 ,{block},{{"type":"text","text":"ok"}}]}}}}"#);
+    let ev = one(&line);
+    assert_eq!(ev[0], json!({"kind":"unknown","label":"string","raw":r#""scalar""#}));
+    assert_eq!(ev[1], json!({"kind":"unknown","label":"number","raw":"7"}));
+    assert_eq!(ev[2], json!({"kind":"unknown","label":"odd","raw":block}));
+    assert_eq!(ev[3], json!({"kind":"text","text":"ok"}));
+}
+
+#[test]
+fn numeric_block_type_label_uses_lua_number_format() {
+    let label = |n: &str| one(&format!(r#"{{"type":"assistant","message":{{"content":[{{"type":{n}}}]}}}}"#))[0]["label"].clone();
+    assert_eq!(label("100000000000000"), json!("1e+14"));
+    assert_eq!(label("99999999999999"), json!("99999999999999"));
+    assert_eq!(label("5"), json!("5"));
+    assert_eq!(label("1.5"), json!("1.5"));
+    assert_eq!(label("0.0001"), json!("0.0001"));
+    assert_eq!(label("0.00001"), json!("1e-05"));
+    assert_eq!(label("123456789012345678"), json!("1.2345678901235e+17"));
 }

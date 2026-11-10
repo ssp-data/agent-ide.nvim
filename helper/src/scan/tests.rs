@@ -59,3 +59,16 @@ fn json_to_the_wire_has_null_cwd() {
     let v = serde_json::to_value(&m).unwrap();
     assert!(v["cwd"].is_null() && v["branch"].is_null());
 }
+
+#[test]
+fn non_string_prompt_text_keeps_the_session_and_is_skipped() {
+    let dir = std::env::temp_dir().join(format!("agent-ide-helper-nonstr-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("-p")).unwrap();
+    let body = "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":5}]}}\n{\"type\":\"user\",\"message\":{\"content\":\"real prompt\"}}\n";
+    std::fs::write(dir.join("-p/abc.jsonl"), body).unwrap();
+    let got = run(&dir);
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].title, "real prompt");
+    let _ = std::fs::remove_dir_all(&dir);
+}

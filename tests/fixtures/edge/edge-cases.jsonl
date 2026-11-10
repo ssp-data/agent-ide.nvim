@@ -19,6 +19,7 @@
 {"type":"user","message":{"content":{"a":1}}}
 {"type":"user","message":"not an object"}
 {"type":"assistant","message":{"content":[]}}
+{"type":"assistant","message":{"content":["scalar", 7 ,{"type": "odd" , "k":"{[\"x\"]} \\", "n":[[1,{"a":"]"}], 2],"o":{"z":[]}},{"type":100000000000000},{"type":"text","text":"ok"}]}}
 {"type":"summary","summary":"bookkeeping"}
 {"type":"future-thing","isSidechain":true,"payload":{"k":[1,2]}}
 {"type":"user","message":{"content":"cut off here

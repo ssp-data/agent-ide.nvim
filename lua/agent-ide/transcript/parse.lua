@@ -44,24 +44,26 @@ local function raw_content_blocks(line)
         if depth == 2 and key == 'content' and top_key == 'message' then
           local arr = line:match('^%s*()%[', colon + 1)
           if not arr then return nil end
-          local blocks, d, start, j = {}, 0, nil, arr + 1
+          -- One entry per element (scalars included) so indexes line up with `ipairs(content)`.
+          local blocks, d, s0, j = {}, 0, arr + 1, arr + 1
+          local function push(e)
+            local t = line:sub(s0, e - 1):match('^%s*(.-)%s*$')
+            if t ~= '' then blocks[#blocks + 1] = t end
+          end
           while true do
-            j = line:find('["{}%[%]]', j)
+            j = line:find('["{},%[%]]', j)
             if not j then return nil end
             local ch = line:sub(j, j)
             if ch == '"' then
               j = string_end(line, j)
               if not j then return nil end
             elseif ch == '{' or ch == '[' then
-              if d == 0 then start = j end
               d = d + 1
+            elseif ch == ',' then
+              if d == 0 then push(j); s0 = j + 1 end
             else
               d = d - 1
-              if d == 0 then
-                blocks[#blocks + 1] = line:sub(start, j)
-              elseif d < 0 then
-                return blocks
-              end
+              if d < 0 then push(j); return blocks end
             end
             j = j + 1
           end

@@ -65,17 +65,33 @@ fn or_empty(v: Option<&Value>) -> Value {
     }
 }
 
+/// C `%.14g`, which is how LuaJIT prints numbers.
+fn lua_number(f: f64) -> String {
+    if f == 0.0 {
+        return "0".into();
+    }
+    if !f.is_finite() {
+        return if f.is_nan() { "nan".into() } else if f > 0.0 { "inf".into() } else { "-inf".into() };
+    }
+    let sci = format!("{:.13e}", f); // 14 significant digits, already rounded
+    let (mant, exp) = sci.split_once('e').unwrap();
+    let exp: i32 = exp.parse().unwrap();
+    if exp < -4 || exp >= 14 {
+        let m = if mant.contains('.') { mant.trim_end_matches('0').trim_end_matches('.') } else { mant };
+        format!("{m}e{}{:02}", if exp < 0 { '-' } else { '+' }, exp.abs())
+    } else {
+        let s = format!("{:.*}", (13 - exp).max(0) as usize, f);
+        if s.contains('.') { s.trim_end_matches('0').trim_end_matches('.').to_string() } else { s }
+    }
+}
+
 /// Lua `tostring(v)` for the values that can appear as a block `type`.
 fn lua_tostring(v: Option<&Value>) -> String {
     match v {
         None | Some(Value::Null) => "nil".into(),
         Some(Value::String(s)) => s.clone(),
         Some(Value::Bool(b)) => b.to_string(),
-        Some(Value::Number(n)) => match n.as_f64() {
-            Some(f) if f.is_finite() && f.fract() == 0.0 && f.abs() < 1e15 => format!("{}", f as i64),
-            Some(f) => format!("{f}"),
-            None => n.to_string(),
-        },
+        Some(Value::Number(n)) => n.as_f64().map_or_else(|| n.to_string(), lua_number),
         Some(_) => "table".into(),
     }
 }
@@ -161,23 +177,30 @@ fn raw_content_blocks(line: &[u8]) -> Option<Vec<String>> {
                 if arr >= line.len() || line[arr] != b'[' {
                     return None;
                 }
+                // One entry per element (scalars included) so indexes line up with the array.
                 let mut blocks = Vec::new();
-                let (mut d, mut start, mut j) = (0i32, 0usize, arr + 1);
+                let (mut d, mut s0, mut j) = (0i32, arr + 1, arr + 1);
+                let push = |s0: usize, e: usize, blocks: &mut Vec<String>| {
+                    let t = String::from_utf8_lossy(&line[s0..e]).trim_matches(|c| c < '\u{80}' && is_space(c as u8)).to_string();
+                    if !t.is_empty() {
+                        blocks.push(t);
+                    }
+                };
                 loop {
-                    j = find_any(line, j, STRUCT)?;
+                    j = find_any(line, j, b"\"{},[]")?;
                     match line[j] {
                         b'"' => j = string_end(line, j)?,
-                        b'{' | b'[' => {
+                        b'{' | b'[' => d += 1,
+                        b',' => {
                             if d == 0 {
-                                start = j;
+                                push(s0, j, &mut blocks);
+                                s0 = j + 1;
                             }
-                            d += 1;
                         }
                         _ => {
                             d -= 1;
-                            if d == 0 {
-                                blocks.push(String::from_utf8_lossy(&line[start..=j]).into_owned());
-                            } else if d < 0 {
+                            if d < 0 {
+                                push(s0, j, &mut blocks);
                                 return Some(blocks);
                             }
                         }

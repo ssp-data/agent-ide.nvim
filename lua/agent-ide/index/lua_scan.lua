@@ -50,7 +50,7 @@ function M.meta(path, mtime, size)
       end
     elseif not first_prompt and line:find('"user"', 1, true) then
       for _, ev in ipairs(parse.parse_line(line)) do
-        if ev.kind == 'prompt' and not ev.sidechain and ev.text and ev.text:find('%S') then
+        if ev.kind == 'prompt' and not ev.sidechain and type(ev.text) == 'string' and ev.text:find('%S') then
           first_prompt = ev.text
           break
         end

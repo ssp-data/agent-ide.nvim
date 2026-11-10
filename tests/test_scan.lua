@@ -41,4 +41,16 @@ T['history returns the same events as parse_text'] = function()
   local f = io.open(p); local text = f:read('a'); f:close()
   eq(ev, require('agent-ide.transcript.parse').parse_text(text))
 end
+T['non-string prompt text keeps the session and is skipped'] = function()
+  local d = vim.fn.tempname()
+  vim.fn.mkdir(d .. '/-p', 'p')
+  local f = assert(io.open(d .. '/-p/abc.jsonl', 'w'))
+  f:write('{"type":"user","message":{"content":[{"type":"text","text":5}]}}\n')
+  f:write('{"type":"user","message":{"content":"real prompt"}}\n')
+  f:close()
+  local all = run(d)
+  eq(#all, 1)
+  eq(all[1].title, 'real prompt')
+  vim.fn.delete(d, 'rf')
+end
 return T
