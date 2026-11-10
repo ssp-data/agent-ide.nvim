@@ -85,6 +85,7 @@ local function parse_timestamp(ts)
   local t = days_from_civil(y, mo, d) * 86400 + h * 3600 + mi * 60 + sec
   if t >= 0 then return t end
 end
+M.parse_timestamp = parse_timestamp
 
 -- The `timestamp` of the last user/assistant record with a valid one among the lines of `text`
 -- that start at or after byte `from`. Only lines containing `"timestamp"` are decoded.
