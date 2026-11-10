@@ -69,10 +69,57 @@ T['stop: result arriving after stop does not call on_change'] = function()
 end
 
 T['match_pane'] = function()
-  local out = '/dev/pts/3 work:1.0\n/dev/pts/9 neomd:2.1\n'
-  eq(tmux.match_pane('pts/9', out), 'neomd:2.1')
-  eq(tmux.match_pane('/dev/pts/3', out), 'work:1.0')
+  local out = '/dev/pts/3 %1\n/dev/pts/9 %12\n'
+  eq(tmux.match_pane('pts/9', out), '%12')
+  eq(tmux.match_pane('/dev/pts/3', out), '%1')
   eq(tmux.match_pane('pts/4', out), nil)
+end
+
+T['jump_to_pid targets the pane id, whatever the session name'] = function()
+  local saved_env, saved_system = vim.env.TMUX, vim.system
+  vim.env.TMUX = '/tmp/fake,1,0'
+  local cmds = {}
+  local replies = {
+    ps = { code = 0, stdout = 'pts/9\n' },
+    ['list-panes'] = { code = 0, stdout = '/dev/pts/3 %1\n/dev/pts/9 %12\n' },
+    ['switch-client'] = { code = 0, stdout = '' },
+  }
+  vim.system = function(cmd, _, cb)
+    cmds[#cmds + 1] = cmd
+    cb(replies[cmd[1] == 'ps' and 'ps' or cmd[2]])
+    return {}
+  end
+  local got
+  tmux.jump_to_pid(42, function(ok, reason) got = { ok, reason } end)
+  vim.wait(500, function() return got ~= nil end)
+  vim.system, vim.env.TMUX = saved_system, saved_env
+  eq(got, { true, nil })
+  eq(cmds[2], { 'tmux', 'list-panes', '-a', '-F', '#{pane_tty} #{pane_id}' })
+  eq(cmds[3], { 'tmux', 'switch-client', '-t', '%12' })
+end
+
+T['start: a hung command is killed and polling goes on'] = function()
+  local polls = 0
+  local orig = vim.notify
+  vim.notify = function() end
+  live.start({ interval_ms = 30, timeout_ms = 100, cmd = { 'sleep', '10' }, on_poll = function() polls = polls + 1 end })
+  local ok = vim.wait(2000, function() return polls >= 2 end, 10)
+  live.stop()
+  vim.notify = orig
+  eq(ok, true)
+  vim.fn.system({ 'pgrep', '-P', tostring(vim.fn.getpid()), '-x', 'sleep' })
+  eq(vim.v.shell_error ~= 0, true) -- no sleep left behind
+end
+
+T['start: on_poll runs after every poll, on_change only on change'] = function()
+  local polls, changes = 0, 0
+  live.start({ interval_ms = 30, cmd = { 'echo', '[]' },
+    on_change = function() changes = changes + 1 end, on_poll = function() polls = polls + 1 end })
+  vim.wait(2000, function() return polls >= 3 end, 10)
+  live.stop()
+  eq(polls >= 3, true)
+  eq(changes, 0)
+  eq(live.active(), false)
 end
 
 T['jump_to_pid: not in tmux'] = function()

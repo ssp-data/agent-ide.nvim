@@ -116,7 +116,8 @@ function M.open(session, project)
   api.nvim_win_set_buf(win, buf)
   api.nvim_set_current_win(win)
   refresh_windows(buf)
-  if config.get().tcd and project.key and vim.fn.isdirectory(project.key) == 1 then
+  -- only an absolute key is a folder: a project without cwd is keyed by a bare directory name
+  if config.get().tcd and project.key and project.key:sub(1, 1) == '/' and vim.fn.isdirectory(project.key) == 1 then
     api.nvim_win_call(win, function() vim.cmd.tcd(vim.fn.fnameescape(project.key)) end)
   end
 end

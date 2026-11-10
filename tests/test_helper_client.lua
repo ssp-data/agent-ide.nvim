@@ -138,6 +138,48 @@ T['a history response of 40 MB arrives quickly and keeps the helper'] = function
   if ms >= 1500 then error(('40 MB history took %.0f ms'):format(ms), 0) end
 end
 
+T['drawer and history lines are byte-identical between backends'] = function()
+  need_helper()
+  local project, tree, render = require('agent-ide.project'), require('agent-ide.ui.tree'), require('agent-ide.transcript.render')
+  local root = temp_dir()
+  local function slurp(p) local f = assert(io.open(p, 'rb')); local t = f:read('a'); f:close(); return t end
+  local edge = slurp(vim.fn.fnamemodify('tests/fixtures/edge/edge-cases.jsonl', ':p'))
+  local alpha = slurp(fixture_path)
+  local function user(cwd, text) return vim.json.encode({ type = 'user', cwd = cwd, message = { content = text } }) .. '\n' end
+  local files = {
+    ['-w-one/a1.jsonl'] = user('/w/one', 'first in one') .. alpha,
+    ['-w-one/a2.jsonl'] = user('/w/one/sub', 'second in one') .. edge,
+    ['-w-two/b1.jsonl'] = user('/w/two', 'only in two') .. synth.title_line('Two title'),
+    ['-w-three/c1.jsonl'] = synth.big('Early', nil, 'Late'),
+    ['-w-three/c2.jsonl'] = user('/w/three', 'tie \255 bytes'),
+    ['-nocwd/d1.jsonl'] = '{"type":"mode","mode":"normal"}\n',
+  }
+  for name, text in pairs(files) do
+    synth.write(root .. '/' .. name, text)
+    vim.uv.fs_utime(root .. '/' .. name, 1700000000, 1700000000) -- all tied: order must still agree
+  end
+  local function pipeline()
+    local sessions = scan(root)
+    local projects = project.group(sessions, { home = '/nohome' })
+    local expanded = {}
+    for _, p in ipairs(projects) do expanded[p.key] = true end
+    local icons = { open = 'v', closed = '>', project = 'P', waiting = 'W', busy = 'B', idle = 'I', parked = '.' }
+    local drawer = tree.build(projects, {}, expanded, 1700000000 + 7200, icons, root).lines
+    local paths = vim.tbl_map(function(m) return m.path end, sessions)
+    table.sort(paths)
+    local hist = {}
+    for _, p in ipairs(paths) do hist[#hist + 1] = render.render(history(p)).lines end
+    return drawer, hist
+  end
+  local hd, hh = pipeline()
+  eq(index.backend(), 'helper')
+  local ld, lh = lua_only(pipeline)
+  eq(#hd > 6, true)
+  eq(#hh, 6)
+  eq(hd, ld)
+  eq(hh, lh)
+end
+
 T['history of a missing file is empty under both backends, without fallback'] = function()
   eq(lua_only(function() return history('/nonexistent/x/abc.jsonl') end), {})
   eq(#notes, 0)
@@ -226,6 +268,32 @@ T['changed notification reaches on_change'] = function()
   index.on_change(nil)
   eq(ok, true)
   vim.fn.delete(tmp, 'rf')
+end
+
+T['missing projects dir is not a helper failure; the watch is armed once it exists'] = function()
+  need_helper()
+  index._tick_ms = 30
+  index.set_visible(true)
+  local missing = temp_dir() .. '/projects'
+  local n = 0
+  index.on_change(function() n = n + 1 end, missing)
+  eq(wait(function() return n >= 2 end, 2000), true) -- the timer covers while there is no watch
+  eq(#notes, 0)
+  eq(index.backend(), 'helper')
+  vim.fn.mkdir(missing .. '/-p', 'p')
+  eq(#scan(missing), 0) -- a rescan re-arms the watch
+  vim.wait(200, function() return false end)
+  local seen = n
+  vim.wait(200, function() return false end)
+  eq(n, seen) -- watch confirmed: timer stopped
+  local file = missing .. '/-p/abc.jsonl'
+  local ok = wait(function()
+    local f = io.open(file, 'a'); f:write('{"type":"ai-title","aiTitle":"t"}\n'); f:close()
+    return n > seen
+  end, 4000)
+  index.on_change(nil)
+  eq(ok, true)
+  eq(#notes, 0)
 end
 
 T['lua backend runs the change timer only while visible'] = function()

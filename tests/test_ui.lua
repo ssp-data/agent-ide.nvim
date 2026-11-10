@@ -286,4 +286,91 @@ T['setup maps the toggle key; false disables it'] = function()
   eq(child.lua_get('vim.fn.maparg("<leader>aa", "n")'), '')
 end
 
+
+T['ages are re-rendered on every live poll'] = function()
+  start()
+  child.lua('require("agent-ide").toggle()')
+  wait_drawer_line('^> P alpha  W ')
+  -- jump the clock 500 days; the live map does not change, the age must still update
+  child.lua([[
+    _G.fake_now = os.time() + 500 * 86400
+    os.time = function() return _G.fake_now end
+  ]])
+  local want = child.lua_get([[(function()
+    for _, p in ipairs(require('agent-ide.ui.drawer').state().projects) do
+      if p.name == 'alpha' then return require('agent-ide.ui.tree').ago(p.mtime, _G.fake_now) end
+    end
+  end)()]])
+  wait_drawer_line('> P alpha  W ' .. want, true)
+end
+
+T['missing projects dir: no warning, helper stays, hint shown'] = function()
+  if not require('agent-ide.index.helper').available() then return MiniTest.skip('helper not built') end
+  local missing = vim.fn.tempname() .. '/no-such-projects'
+  child.restart({ '-u', 'tests/minimal_init.lua' })
+  child.lua([[
+    _G.notes = {}
+    vim.notify = function(msg, level) table.insert(_G.notes, { msg, level }) end
+    require('agent-ide').setup(...)
+    require('agent-ide').toggle()
+  ]], { { projects_dir = missing, live = { interval_ms = 50, cmd = { 'echo', '[]' } }, icons = ICONS } })
+  wait_drawer_line('No Claude sessions found in ' .. missing, true)
+  vim.wait(300)
+  eq(child.lua_get('_G.notes'), {})
+  eq(child.lua_get('require("agent-ide.index").backend()'), 'helper')
+end
+
+-- Record what the drawer tells the live poller and the index about visibility.
+local function track_visibility()
+  child.lua([[
+    local index = require('agent-ide.index')
+    local set_visible = index.set_visible
+    _G.vis = nil
+    index.set_visible = function(v) _G.vis = v; return set_visible(v) end
+  ]])
+end
+local function shown_state() return child.lua_get('{ require("agent-ide.live").active(), _G.vis }') end
+
+T['live polling and the change timer run only while the drawer is on screen'] = function()
+  start()
+  track_visibility()
+  child.lua('require("agent-ide").toggle()')
+  eq(shown_state(), { true, true })
+  -- :q in the drawer window
+  child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.drawer").state().win)')
+  child.cmd('quit')
+  eq(child.lua_get('vim.fn.tabpagenr("$")'), 2)
+  eq(shown_state(), { false, false })
+  child.lua('require("agent-ide").toggle()')
+  eq(shown_state(), { true, true })
+  -- another tab
+  child.cmd('tabprevious')
+  eq(shown_state(), { false, false })
+  child.cmd('tabnext')
+  eq(shown_state(), { true, true })
+  child.cmd('tabclose')
+  eq(shown_state(), { false, false })
+end
+
+T['highlight groups survive a colorscheme change; waiting is violet'] = function()
+  start()
+  child.cmd('colorscheme default')
+  eq(child.lua_get('vim.api.nvim_get_hl(0, { name = "AgentIdeWaiting" }).fg'), 0xa277ff)
+  eq(child.lua_get('vim.api.nvim_get_hl(0, { name = "AgentIdeBusy" }).link'), 'DiagnosticWarn')
+end
+
+T['a relative project key never changes the tab cwd'] = function()
+  local tmp = vim.fn.tempname()
+  vim.fn.mkdir(tmp .. '/-nocwd', 'p')
+  start()
+  child.cmd('cd ' .. vim.fn.fnameescape(tmp))
+  child.lua('require("agent-ide").toggle()')
+  local before = child.lua_get('vim.fn.getcwd(-1, 0)')
+  child.lua([[require('agent-ide.ui.history').open(
+    { id = '44444444-4444-4444-8444-444444444444', path = ..., title = '(untitled)' },
+    { key = '-nocwd', name = '-nocwd' })]], { FIXTURES .. '/-nocwd/44444444-4444-4444-8444-444444444444.jsonl' })
+  eq(child.lua_get('vim.fn.getcwd(-1, 0)'), before)
+  vim.fn.delete(tmp, 'rf')
+end
+
 return T

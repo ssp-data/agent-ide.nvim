@@ -11,6 +11,7 @@ local failed = false -- helper failed: Lua for the rest of the session
 local notified = false
 local visible = false
 local watching = false -- `watch` sent to the current helper process
+local watch_active = false -- ... and confirmed by it
 local handler_set = false
 local watch_dir
 local timer
@@ -23,8 +24,10 @@ function M.backend()
   return 'lua'
 end
 
+-- The timer detects changes for the Lua backend, and for the helper while it has no confirmed
+-- watch (e.g. the projects directory does not exist yet); each tick's rescan retries the watch.
 local function sync_timer()
-  local want = M.backend() == 'lua' and on_change_cb ~= nil and visible
+  local want = on_change_cb ~= nil and visible and (M.backend() == 'lua' or not watch_active)
   if want and not timer then
     timer = vim.uv.new_timer()
     timer:start(M._tick_ms, M._tick_ms, vim.schedule_wrap(function()
@@ -40,7 +43,7 @@ end
 local function fail(reason)
   if not failed then
     failed = true
-    watching = false
+    watching, watch_active = false, false
   end
   if not notified then
     notified = true
@@ -52,27 +55,26 @@ end
 
 local function ensure_watch(dir)
   if watching or M.backend() ~= 'helper' then return end
-  watching = true
   watch_dir = dir
+  -- a projects directory that does not exist yet is not an error: try again on the next rearm
+  if not vim.uv.fs_stat(dir) then return end
+  watching = true
   if not handler_set then
     handler_set = true
     helper.on_exit(function(reason) fail(reason) end)
     helper.on('changed', function() if on_change_cb then on_change_cb() end end)
   end
   helper.request('watch', { projects_dir = dir }, function(err)
-    if err == 'stopped' then
-      watching = false
-    elseif err then
-      watching = false
-      fail(err)
-      -- the timer now takes over change detection
-    end
+    -- a watch error is not a helper failure: the timer covers until a rearm succeeds
+    watching = err == nil
+    watch_active = err == nil
+    sync_timer()
   end)
 end
 
 -- A stopped helper restarts lazily on the next request without its watch: re-arm it first.
 local function rearm()
-  if watching and not helper.running() then watching = false end
+  if watching and not helper.running() then watching, watch_active = false, false end
   if on_change_cb and not watching then ensure_watch(watch_dir or projects_dir()) end
 end
 
@@ -116,7 +118,7 @@ function M.on_change(fn, dir)
   sync_timer()
 end
 
----The drawer reports whether it is showing. Only matters for the Lua backend's timer.
+---The drawer reports whether it is showing; the change timer runs only while it is.
 ---@param v boolean
 function M.set_visible(v)
   visible = v and true or false
@@ -126,7 +128,7 @@ end
 ---Test-only: forget failure, notice, callbacks and the helper process.
 function M._reset()
   helper._reset()
-  failed, notified, visible, watching, handler_set, watch_dir = false, false, false, false, false, nil
+  failed, notified, visible, watching, watch_active, handler_set, watch_dir = false, false, false, false, false, false, nil
   on_change_cb = nil
   M._tick_ms = 5000
   sync_timer()

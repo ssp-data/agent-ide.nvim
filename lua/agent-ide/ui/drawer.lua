@@ -14,6 +14,7 @@ local augroup = api.nvim_create_augroup('agent-ide.drawer', { clear = true })
 
 local S = { tab = nil, win = nil, buf = nil, projects = {}, nodes = {}, expanded = {} }
 local debounce -- uv timer for index.on_change
+local shown = false -- the drawer window is on screen: live polling and the change timer run
 
 local function valid_win(w) return w ~= nil and api.nvim_win_is_valid(w) end
 
@@ -69,9 +70,29 @@ local function rescan()
   end)
 end
 
+-- Every finished poll re-renders (about 0.4 ms), so ages stay current with any backend.
 local function start_live()
   local cfg = config.get()
-  live.start({ interval_ms = cfg.live.interval_ms, cmd = cfg.live.cmd, on_change = function() render() end })
+  live.start({ interval_ms = cfg.live.interval_ms, cmd = cfg.live.cmd, on_poll = function() render() end })
+end
+
+local function set_shown(v)
+  if v == shown then return end
+  shown = v
+  if v then
+    start_live()
+    index.set_visible(true)
+    render()
+  else
+    live.stop()
+    index.set_visible(false)
+  end
+end
+
+-- Shown means: the drawer window exists and the Agents tab is the current tab.
+local function refresh_shown()
+  sync()
+  set_shown(S.win ~= nil and api.nvim_get_current_tabpage() == S.tab)
 end
 
 local function on_index_change()
@@ -127,7 +148,7 @@ end
 
 function actions.refresh()
   rescan()
-  start_live()
+  if shown then start_live() end
 end
 
 function actions.jump()
@@ -170,14 +191,13 @@ local function open_drawer()
     wrap = false, cursorline = true, foldenable = false }) do
     set_opt(S.win, name, value)
   end
-  index.set_visible(true)
   render()
+  refresh_shown()
 end
 
 local function teardown()
-  live.stop()
+  set_shown(false)
   index.on_change(nil)
-  index.set_visible(false)
   if debounce then debounce:stop() end
   S.tab, S.win = nil, nil
 end
@@ -192,8 +212,15 @@ local function create_tab()
       api.nvim_clear_autocmds({ group = augroup })
     end
   end })
+  -- `:q`, `<C-w>c` and friends in the drawer: the window is still valid while this runs
+  api.nvim_create_autocmd('WinClosed', { group = augroup, callback = function(ev)
+    if S.win and tonumber(ev.match) == S.win then
+      S.win = nil
+      set_shown(false)
+    end
+  end })
+  api.nvim_create_autocmd('TabEnter', { group = augroup, callback = refresh_shown })
   open_drawer()
-  start_live()
   index.on_change(on_index_change)
   rescan()
 end
@@ -226,7 +253,7 @@ function M.close()
   if api.nvim_get_current_win() == win and main then api.nvim_set_current_win(main) end
   api.nvim_win_close(win, false)
   S.win = nil
-  index.set_visible(false)
+  set_shown(false)
 end
 
 function M.toggle()

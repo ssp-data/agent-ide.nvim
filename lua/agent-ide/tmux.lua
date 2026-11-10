@@ -2,7 +2,7 @@
 local M = {}
 
 ---@param tty string  with or without the /dev/ prefix
----@param list_panes_output string  lines of `<pane_tty> <session>:<window>.<pane>`
+---@param list_panes_output string  lines of `<pane_tty> <pane_id>` (pane ids like `%3` never hold spaces)
 ---@return string|nil
 function M.match_pane(tty, list_panes_output)
   local want = tty:gsub('^/dev/', '')
@@ -27,7 +27,7 @@ function M.jump_to_pid(pid, cb)
   run({ 'ps', '-o', 'tty=', '-p', tostring(pid) }, function(ps)
     local tty = vim.trim(ps.stdout or '')
     if ps.code ~= 0 or tty == '' or tty == '?' or tty == '??' then return cb(false, 'process not found') end
-    run({ 'tmux', 'list-panes', '-a', '-F', '#{pane_tty} #{session_name}:#{window_index}.#{pane_index}' }, function(lp)
+    run({ 'tmux', 'list-panes', '-a', '-F', '#{pane_tty} #{pane_id}' }, function(lp)
       local target = lp.code == 0 and M.match_pane(tty, lp.stdout) or nil
       if not target then return cb(false, 'pane not found') end
       run({ 'tmux', 'switch-client', '-t', target }, function(sw)

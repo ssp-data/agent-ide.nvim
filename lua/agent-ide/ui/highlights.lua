@@ -3,7 +3,7 @@ local M = {}
 
 local GROUPS = {
   AgentIdeProject = { bold = true },
-  AgentIdeWaiting = { link = 'Constant' }, -- violet in most colorschemes
+  AgentIdeWaiting = { fg = '#a277ff', ctermfg = 141 }, -- violet
   AgentIdeBusy = { link = 'DiagnosticWarn' }, -- yellow
   AgentIdeIdle = { link = 'DiagnosticOk' }, -- green
   AgentIdeParked = { link = 'Comment' }, -- dimmed
@@ -12,10 +12,17 @@ local GROUPS = {
   AgentIdeSection = { link = 'Directory' },
 }
 
-function M.setup()
+local function apply()
   for name, def in pairs(GROUPS) do
     vim.api.nvim_set_hl(0, name, vim.tbl_extend('force', def, { default = true }))
   end
+end
+
+---Define the groups, and again after every colorscheme change (`:hi clear` drops them).
+function M.setup()
+  apply()
+  local group = vim.api.nvim_create_augroup('agent-ide.highlights', { clear = true })
+  vim.api.nvim_create_autocmd('ColorScheme', { group = group, callback = apply })
 end
 
 return M

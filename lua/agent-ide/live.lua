@@ -52,19 +52,21 @@ local function fail(reason)
   vim.notify('agent-ide: cannot read live sessions (' .. reason .. ')', vim.log.levels.WARN)
 end
 
-local function poll(gen, cmd, on_change)
-  if running then return end
+local function poll(gen, opts)
+  if gen ~= generation or running then return end
   local function finish(new, reason)
+    if gen ~= generation then return end -- stopped meanwhile: `running` belongs to a newer start
     running = false
-    if gen ~= generation then return end
     if reason then fail(reason) end
     if not vim.deep_equal(new, map) then
       map = new
-      on_change(map)
+      if opts.on_change then opts.on_change(map) end
     end
+    if opts.on_poll then opts.on_poll(map) end
   end
   running = true
-  local ok = pcall(vim.system, cmd, { text = true }, function(res)
+  -- a hung command is killed after the timeout, so polling never stalls
+  local ok = pcall(vim.system, opts.cmd, { text = true, timeout = opts.timeout_ms }, function(res)
     vim.schedule(function()
       if res.code ~= 0 then
         finish({}, 'exit code ' .. tostring(res.code))
@@ -76,16 +78,25 @@ local function poll(gen, cmd, on_change)
   if not ok then finish({}, 'command not found') end
 end
 
----@param opts { interval_ms: integer, cmd?: string[], on_change: fun(map: table) }
+---`on_change` runs when the map changed, `on_poll` after every finished poll.
+---@param opts { interval_ms: integer, cmd?: string[], timeout_ms?: integer, on_change?: fun(map: table), on_poll?: fun(map: table) }
 function M.start(opts)
   M.stop()
   local gen = generation
-  local cmd = opts.cmd or { 'claude', 'agents', '--json' }
-  local function tick() poll(gen, cmd, opts.on_change) end
+  local p = {
+    cmd = opts.cmd or { 'claude', 'agents', '--json' },
+    timeout_ms = opts.timeout_ms or math.max(opts.interval_ms, 2000),
+    on_change = opts.on_change,
+    on_poll = opts.on_poll,
+  }
+  local function tick() poll(gen, p) end
   timer = vim.uv.new_timer()
   timer:start(opts.interval_ms, opts.interval_ms, vim.schedule_wrap(tick))
   tick()
 end
+
+---@return boolean polling
+function M.active() return timer ~= nil end
 
 function M.stop()
   generation = generation + 1
