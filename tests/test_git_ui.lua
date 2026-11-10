@@ -218,7 +218,7 @@ T['Enter on a changed file: base scratch left, the real file right, both in diff
   eq(v.left.winbar, 'base main (' .. mb .. ') · a.lua · file 1/5')
   eq(v.right.winbar, 'working tree · file 1/5')
   -- two windows beside the drawer, the right one focused
-  eq(child.lua_get('#vim.api.nvim_tabpage_list_wins(0)'), 3)
+  eq(child.lua_get('#vim.tbl_filter(function(w) return vim.api.nvim_win_get_config(w).focusable end, vim.api.nvim_tabpage_list_wins(0))'), 3)
   eq(child.lua_get('vim.api.nvim_get_current_win() == require("agent-ide.ui.diff").state().right'), true)
 end
 
@@ -335,7 +335,7 @@ T['q returns to the chat that was open; keys and diff options are gone from the 
   wait_for(function() return child.lua_get('require("agent-ide.ui.chat")._windows().prompt ~= nil') end, 'chat back')
   eq(child.lua_get('vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().transcript))'),
     'agent-ide://chat/' .. ID)
-  eq(child.lua_get('#vim.api.nvim_tabpage_list_wins(0)'), 3) -- transcript, prompt, drawer
+  eq(child.lua_get('#vim.tbl_filter(function(w) return vim.api.nvim_win_get_config(w).focusable end, vim.api.nvim_tabpage_list_wins(0))'), 3) -- transcript, prompt, drawer
   child.lua([[vim.api.nvim_buf_call(vim.fn.bufnr(...), function() vim.cmd('normal q') end)]], { repo .. '/a.lua' })
   eq(child.lua_get('_G.mine'), true) -- the user's own buffer-local q is back
   local o = real_buf_opts(repo .. '/a.lua')
@@ -361,10 +361,10 @@ T['opening a chat or another diff replaces the view cleanly; repeated opens keep
     press_on('M a.lua')
     wait_for(function() return view().path == 'a.lua' end, 'a.lua')
   end
-  eq(child.lua_get('#vim.api.nvim_tabpage_list_wins(0)'), 3)
+  eq(child.lua_get('#vim.tbl_filter(function(w) return vim.api.nvim_win_get_config(w).focusable end, vim.api.nvim_tabpage_list_wins(0))'), 3)
   press_on('Work on it')
   wait_for(function() return view() == vim.NIL end, 'diff closed by the chat')
-  eq(child.lua_get('#vim.api.nvim_tabpage_list_wins(0)'), 3) -- transcript, prompt, drawer
+  eq(child.lua_get('#vim.tbl_filter(function(w) return vim.api.nvim_win_get_config(w).focusable end, vim.api.nvim_tabpage_list_wins(0))'), 3) -- transcript, prompt, drawer
   eq(child.lua_get('vim.tbl_contains(vim.tbl_map(function(w) return vim.wo[w].diff end, vim.api.nvim_tabpage_list_wins(0)), true)'), false)
   local o = real_buf_opts(repo .. '/a.lua')
   eq({ o.diff, o.scb, o.crb, o.bar }, { false, false, false, 'GLOBAL' })

@@ -117,7 +117,7 @@ These are the defaults. Pass only what you want to change to `setup()` (or `opts
 ```lua
 require('agent-ide').setup({
   projects_dir = vim.fn.expand('~/.claude/projects'),
-  drawer = { width = 44, side = 'right' },
+  drawer = { width = 44, side = 'right', legend = true }, -- legend: the state marks at the bottom (gL)
   live = { interval_ms = 5000, cmd = { 'claude', 'agents', '--json' } },
   helper = { enabled = true, path = nil }, -- nil: <plugin root>/helper/target/release/agent-ide-helper
   claude = {
@@ -187,6 +187,8 @@ The drawer has no header line; `?` lists every key. Each row shows its state mar
 
 Ages read `now`, `5m`, `3h`, `12d`, then months (`14mo`) and years (`2y`). Colours: waiting violet (bold), busy yellow, idle green, done orange, failed red, parked rows (mark, title, age) and ages dimmed, never italic; the groups are `AgentIdeWaiting`, `AgentIdeBusy`, `AgentIdeIdle`, `AgentIdeDone`, `AgentIdeFailed`, `AgentIdeParked`, `AgentIdeAge` and `AgentIdeSection`, and a colorscheme can set them. The dim groups (`AgentIdeParked`, `AgentIdeAge`, `AgentIdeMissing`, `AgentIdeBranch`, `AgentIdeGitUntracked`) take the foreground of `Comment` at setup and on every `ColorScheme`, without italic or bold. A project row is its fold arrow and bold name; a parked project's name is dimmed. A project whose folder is gone says `(folder missing)`; a session started in a sub-folder of its project shows `<subfolder>/ · <title>`.
 
+**Legend.** The bottom of the drawer explains the state marks: `● input  ◐ running  ● idle  ○ parked  ✓ done  ✗ failed`, each mark in its colour (the marks of your icon set), over one or two lines. It stays put while the list scrolls, never takes the focus and never covers the cursor row (the list scrolls instead). It hides itself while the drawer is shorter than 12 lines or narrower than 24 columns. `gL` shows or hides it; `drawer = { legend = false }` starts with it hidden.
+
 **Hidden sessions.** `H` on a session row hides it: nothing is deleted, the session only moves into a collapsed, dimmed `Hidden (n)` group, the last row of its project's `Sessions (n)` section (which counts the visible ones only). `<CR>` or `za` expands the group; its rows open like any other session, and `H` on one shows it again. Hidden sessions do not count for the project's age, order or state mark, except while one needs you: a hidden session that is waiting, busy, done-unread or failed is listed among the normal rows (and counted in the roll-up, the footer and `<leader>an`) for as long as that lasts. A project whose sessions are all hidden still shows, with `Sessions (0)` and its group. Search finds hidden sessions as usual. The list is kept in `hidden.json` (see [Privacy](#privacy)); several Neovims share it.
 
 ### Deleting sessions
@@ -227,6 +229,7 @@ In the drawer:
 | `H` | Hide the session into its project's `Hidden (n)` group; on a hidden session: show it again (Vim's `H` motion is not available in the drawer) |
 | `D` | Delete an inactive session: move it to the plugin's trash after a confirm (see [Deleting sessions](#deleting-sessions)) |
 | `q` | Close the drawer |
+| `gL` | Show or hide the legend of the state marks |
 | `glg` | Open lazygit for the row's repository (a worktree row or session: that worktree) |
 | `?`, `g?` | Help (`/` searches in it, `q` or `<Esc>` closes it) |
 | `e` | Prompt row: edit its file in the main window (Claude's commands and skills open read-only) |

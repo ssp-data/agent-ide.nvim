@@ -130,7 +130,7 @@ T['picker: live results, highlights, moving, preview, close keys (Lua fallback)'
   eq(state() ~= vim.NIL, true, 'Esc in insert mode only leaves insert mode')
   child.type_keys('q')
   eq(state(), vim.NIL)
-  eq(child.lua_get('#vim.tbl_filter(function(w) return vim.api.nvim_win_get_config(w).relative ~= "" end, vim.api.nvim_list_wins())'), 0)
+  eq(child.lua_get('#vim.tbl_filter(function(w) local c = vim.api.nvim_win_get_config(w); return c.relative ~= "" and c.focusable end, vim.api.nvim_list_wins())'), 0)
 end
 
 T['picker with the helper: fuzzy, answers, kinds cycle, Enter opens the chat on the hit line'] = function()

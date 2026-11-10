@@ -7,6 +7,7 @@ local live = require('agent-ide.live')
 local project = require('agent-ide.project')
 local session = require('agent-ide.session')
 local tmux = require('agent-ide.tmux')
+local legend = require('agent-ide.ui.drawer_legend')
 local model = require('agent-ide.ui.drawer_model')
 local sections = require('agent-ide.ui.sections')
 local tree = require('agent-ide.ui.tree')
@@ -102,6 +103,7 @@ local function render(focus)
       end
     end
   end
+  legend.update()
 end
 
 local function rescan()
@@ -386,6 +388,8 @@ end
 
 function actions.close() M.close() end
 
+function actions.legend() legend.toggle() end
+
 -- The drawer's own keys (lhs, action name); a provider row key with the same lhs is neither
 -- mapped nor listed. `?` (actions.help) lists them all.
 local KEYS = {
@@ -393,6 +397,7 @@ local KEYS = {
   { 'x', 'park' }, { 'H', 'hide' }, { 'D', 'delete' }, { 'zM', 'collapse_all' }, { 'zR', 'expand_all' }, { 'glg', 'lazygit' }, { 'q', 'close' }, { 's', 'search' }, { '?', 'help' },
   { 'g?', 'help' },
   { 'gG', 'graph' }, -- commit graph of the row's repository (ui/graph.lua)
+  { 'gL', 'legend' }, -- legend of the state marks (ui/drawer_legend.lua)
 }
 local OWN = {}
 for _, k in ipairs(KEYS) do OWN[vim.keycode(k[1])] = true end
@@ -462,6 +467,7 @@ function actions.help()
     { key = '? / g?', desc = 'this help' },
     { key = '/', desc = 'search (built-in)' },
     { key = 'gG', desc = 'commit graph of the project (or the row\'s worktree)' },
+    { key = 'gL', desc = 'show or hide the legend of the state marks' },
   }
   for _, k in ipairs(provider_keys()) do rows[#rows + 1] = { key = k.lhs, desc = k.desc } end
   require('agent-ide.ui.help').open('Agent-IDE drawer', rows)
@@ -498,6 +504,7 @@ local function open_drawer()
 end
 
 local function teardown()
+  legend.close()
   set_shown(false)
   index.on_change(nil)
   if debounce then debounce:stop() end
@@ -564,6 +571,7 @@ function M.close()
   if api.nvim_get_current_win() == win and main then api.nvim_set_current_win(main) end
   api.nvim_win_close(win, false)
   S.win = nil
+  legend.close()
   set_shown(false)
 end
 

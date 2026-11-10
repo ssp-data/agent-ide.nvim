@@ -757,7 +757,7 @@ T['visible follows the transcript window and the focused tab'] = function()
   open_new('2<CR>') -- a second new session reuses the same two windows
   eq(child.lua_get('#require("agent-ide.session").all()'), 2)
   eq(child.lua_get('{ require("agent-ide.session").all()[1].visible, require("agent-ide.session").all()[2].visible }'), { false, true })
-  eq(child.lua_get('#vim.api.nvim_tabpage_list_wins(0)'), 3)
+  eq(child.lua_get('#vim.tbl_filter(function(w) return vim.api.nvim_win_get_config(w).focusable end, vim.api.nvim_tabpage_list_wins(0))'), 3)
   -- closing the transcript window
   child.lua('vim.api.nvim_win_close(require("agent-ide.ui.chat")._windows().transcript, true)')
   eq(child.lua_get('require("agent-ide.session").all()[2].visible'), false)
