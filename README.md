@@ -45,7 +45,7 @@ require('agent-ide').setup({
 })
 ```
 
-`:Agents` (or the toggle key) opens the Agents tab with the drawer; run it again to close the drawer.
+`:Agents` (or the toggle key) opens the Agents tab with the drawer. Inside the Agents tab it closes or reopens the drawer; from any other tab it switches to the Agents tab.
 
 ## Keys in the drawer
 
@@ -66,6 +66,8 @@ The plugin reads the local Claude Code transcripts (JSONL files), builds an inde
 ## Privacy
 
 Everything stays on your machine. The plugin reads transcripts under `projects_dir` and the output of `claude agents --json`, and sends nothing over the network.
+
+The Rust helper keeps a metadata cache in `stdpath('cache')/agent-ide/index-v2.json` (on Linux usually `~/.cache/nvim/agent-ide/index-v2.json`). It holds the path, title, working directory, branch, size and modification time of each session, so the drawer opens fast. You can delete it at any time; it is rebuilt on the next scan.
 
 ## Roadmap
 
