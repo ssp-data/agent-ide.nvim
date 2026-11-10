@@ -1,9 +1,10 @@
 //! Transcript record -> Event conversion.
 //!
 //! This is a line-for-line port of `lua/agent-ide/transcript/parse.lua`; where that file has
-//! quirks (Lua `ipairs` stopping at `null`, `x or default` treating `false` like `nil`, the
-//! hand-written scanner that finds the original text of content blocks) they are reproduced on
-//! purpose, because the user's deal-breaker is any difference between the two backends.
+//! quirks (`x or default` treating `false` like `nil`, the hand-written scanner that finds the
+//! original text of content blocks) they are reproduced on purpose, because the user's
+//! deal-breaker is any difference between the two backends. Invalid UTF-8 is replaced with
+//! `String::from_utf8_lossy` before decoding; the Lua side does the same (`fix_utf8`).
 use rayon::prelude::*;
 use serde_json::{Map, Value};
 
@@ -21,7 +22,6 @@ const BOOKKEEPING: &[&str] = &[
     "api-request",
     "api-request-shape",
     "api-request-blob",
-    "system",
     "summary",
     "queue-operation",
     "cost-state",
@@ -96,12 +96,13 @@ fn lua_tostring(v: Option<&Value>) -> String {
     }
 }
 
-/// Lua `type(v)` for non-table values.
+/// Lua `type(v)` for non-table values (`null` in an array is `vim.NIL`, labelled `null`).
 fn lua_type_name(v: &Value) -> &'static str {
     match v {
         Value::String(_) => "string",
         Value::Number(_) => "number",
         Value::Bool(_) => "boolean",
+        Value::Null => "null",
         _ => "table",
     }
 }
@@ -220,7 +221,7 @@ fn tool_result_text(content: Option<&Value>) -> String {
         Some(Value::String(s)) => s.clone(),
         Some(Value::Array(items)) => {
             let mut parts = Vec::new();
-            for item in items.iter().take_while(|x| !x.is_null()) {
+            for item in items {
                 match item {
                     Value::Object(_) => {
                         if let (Some(Value::String(t)), Some(Value::String(txt))) = (field(item, "type"), field(item, "text")) {
@@ -232,6 +233,7 @@ fn tool_result_text(content: Option<&Value>) -> String {
                         parts.push(format!("[{}]", lua_tostring(field(item, "type"))));
                     }
                     Value::Array(_) => parts.push("[nil]".into()),
+                    Value::Null => parts.push("[null]".into()),
                     other => parts.push(format!("[{}]", lua_type_name(other))),
                 }
             }
@@ -338,7 +340,7 @@ fn conversation_events(rtype: &str, is_meta: bool, message: Option<&Value>, line
         Some(Value::Array(items)) => {
             let mut raws: Option<Vec<String>> = None;
             let mut out = Vec::new();
-            for (idx, block) in items.iter().take_while(|b| !b.is_null()).enumerate() {
+            for (idx, block) in items.iter().enumerate() {
                 let mut raw = || {
                     let r = raws.get_or_insert_with(|| raw_content_blocks(line).unwrap_or_default());
                     r.get(idx).cloned().unwrap_or_else(|| block.to_string())
@@ -347,34 +349,45 @@ fn conversation_events(rtype: &str, is_meta: bool, message: Option<&Value>, line
             }
             out
         }
-        // An object is a Lua table with no array part: `ipairs` yields nothing.
-        Some(Value::Object(_)) => Vec::new(),
+        Some(Value::Object(_)) => vec![unknown("content".into(), line_text())],
         _ => vec![unknown(rtype.into(), line_text())],
     }
 }
 
-/// Events of one transcript line (empty for blank, invalid or cut-off lines).
-pub fn parse_line(line: &[u8]) -> Vec<Event> {
+/// Events of one line, and whether the line failed to decode.
+pub fn parse_record(line: &[u8]) -> (Vec<Event>, bool) {
     if !line.iter().any(|b| !is_space(*b)) {
-        return Vec::new();
+        return (Vec::new(), false);
     }
+    let fixed = String::from_utf8_lossy(line);
+    let line = fixed.as_bytes();
     let rec: Value = match serde_json::from_slice(line) {
         Ok(v) => v,
-        Err(_) => return Vec::new(),
+        Err(_) => return (vec![unknown("invalid JSON".into(), fixed.into_owned())], true),
     };
     if !matches!(rec, Value::Object(_) | Value::Array(_)) {
-        return Vec::new();
+        return (vec![unknown("?".into(), fixed.into_owned())], false);
     }
     let rtype = match field(&rec, "type") {
         Some(Value::String(s)) => s.as_str(),
         _ => "?",
     };
     let mut events = if BOOKKEEPING.contains(&rtype) {
-        return Vec::new();
+        return (Vec::new(), false);
+    } else if rtype == "system" {
+        let label = match field(&rec, "subtype") {
+            Some(Value::String(s)) if !s.is_empty() => format!("system: {s}"),
+            _ => "system".into(),
+        };
+        let text = match field(&rec, "content") {
+            Some(Value::String(s)) => s.clone(),
+            _ => fixed.clone().into_owned(),
+        };
+        vec![event("meta", vec![("label", label.into()), ("text", text.into())])]
     } else if rtype == "user" || rtype == "assistant" {
         conversation_events(rtype, is_true(field(&rec, "isMeta")), field(&rec, "message"), line)
     } else {
-        vec![unknown(rtype.into(), String::from_utf8_lossy(line).into_owned())]
+        vec![unknown(rtype.into(), fixed.clone().into_owned())]
     };
     if is_true(field(&rec, "isSidechain")) {
         for ev in &mut events {
@@ -383,14 +396,27 @@ pub fn parse_line(line: &[u8]) -> Vec<Event> {
             }
         }
     }
-    events
+    (events, false)
 }
 
-/// Events of a whole transcript, in file order (lines are parsed in parallel).
+/// Events of one line. A non-blank line that does not decode is an `unknown` event.
+pub fn parse_line(line: &[u8]) -> Vec<Event> {
+    parse_record(line).0
+}
+
+/// Events of a whole transcript, in file order (lines are parsed in parallel). The
+/// unterminated last line is skipped when it does not decode (it is still being written).
 pub fn parse_bytes(data: &[u8]) -> Vec<Event> {
     let lines: Vec<&[u8]> = data.split(|b| *b == b'\n').filter(|l| !l.is_empty()).collect();
-    let parsed: Vec<Vec<Event>> = lines.par_iter().map(|l| parse_line(l)).collect();
-    parsed.into_iter().flatten().collect()
+    let partial_last = data.last().map_or(false, |b| *b != b'\n');
+    let n = lines.len();
+    let parsed: Vec<(Vec<Event>, bool)> = lines.par_iter().map(|l| parse_record(l)).collect();
+    parsed
+        .into_iter()
+        .enumerate()
+        .filter(|(k, (_, invalid))| !(*invalid && partial_last && k + 1 == n))
+        .flat_map(|(_, (evs, _))| evs)
+        .collect()
 }
 
 pub fn parse_text(text: &str) -> Vec<Event> {

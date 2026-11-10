@@ -9,7 +9,7 @@ M._grace_ms = 500 -- after closing stdin, wait this long before SIGTERM
 local state = { proc = nil, cur = nil, exit_fns = {}, gen = 0, next_id = 1, pending = {}, buf = '', handlers = {} }
 local augroup
 
-local DECODE_OPTS = { luanil = { object = true, array = true } }
+local DECODE_OPTS = require('agent-ide.transcript.parse').DECODE_OPTS
 
 ---@return string
 function M.path()

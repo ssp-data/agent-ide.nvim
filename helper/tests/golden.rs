@@ -1,5 +1,5 @@
 //! Every golden in tests/fixtures/golden must equal the events parsed from its fixture.
-use agent_ide_helper::events::parse_text;
+use agent_ide_helper::events::parse_bytes;
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -21,8 +21,9 @@ fn every_golden_matches_its_fixture() {
             &std::fs::read_to_string(root().join("golden").join(format!("{name}.events.json"))).unwrap(),
         )
         .unwrap();
-        let text = std::fs::read_to_string(root().join(fixture)).unwrap();
-        let got = Value::Array(parse_text(&text));
+        // bytes, not a string: the edge fixture holds invalid UTF-8 on purpose
+        let data = std::fs::read(root().join(fixture)).unwrap();
+        let got = Value::Array(parse_bytes(&data));
         assert_eq!(got, golden, "golden {name}");
         seen += 1;
     }

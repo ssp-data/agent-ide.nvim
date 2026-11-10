@@ -122,19 +122,16 @@ end
 ---@param path string
 ---@param cb fun(events: table[])
 function M.history(path, cb)
-  local events, lines, i = {}, nil, 1
+  local events, lines, partial, i = {}, nil, false, 1
   local function step()
     if not lines then
-      lines = {}
       local f = io.open(path, 'rb')
       local text = f and f:read('a') or ''
       if f then f:close() end
-      for line in text:gmatch('[^\n]+') do lines[#lines + 1] = line end
+      lines, partial = parse.split_lines(text)
     end
     local last = math.min(i + LINES_PER_TICK - 1, #lines)
-    for k = i, last do
-      for _, ev in ipairs(parse.parse_line(lines[k])) do events[#events + 1] = ev end
-    end
+    for k = i, last do parse.append_line_events(events, lines, k, partial) end
     i = last + 1
     if i <= #lines then
       yield(step)

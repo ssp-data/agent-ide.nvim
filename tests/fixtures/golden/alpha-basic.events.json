@@ -13,6 +13,7 @@
   { "kind": "meta", "label": "meta", "text": "Caveat: local commands below." },
   { "kind": "meta", "label": "meta", "text": "meta block" },
   { "kind": "meta", "label": "meta", "text": "<system-reminder>be careful</system-reminder>" },
+  { "kind": "meta", "label": "system", "text": "synthetic" },
   { "kind": "unknown", "label": "image", "raw": "{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"image/png\",\"data\":\"AAAA\"}}" },
   { "kind": "unknown", "label": "future-thing", "raw": "{\"type\":\"future-thing\",\"cwd\":\"/home/u/git/alpha\",\"gitBranch\":\"feat/x\",\"payload\":{\"k\":1}}" },
   { "kind": "prompt", "text": "Subagent: find usages.", "sidechain": true },

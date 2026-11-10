@@ -5,16 +5,63 @@ fn one(line: &str) -> Vec<Value> {
     parse_line(line.as_bytes())
 }
 
+fn inv(raw: &str) -> Value {
+    json!({"kind":"unknown","label":"invalid JSON","raw":raw})
+}
+
 #[test]
-fn cut_off_last_line_and_invalid_lines_yield_nothing() {
+fn blank_lines_yield_nothing_and_invalid_lines_are_unknown() {
     assert!(one("").is_empty());
     assert!(one("   \t").is_empty());
-    assert!(one(r#"{"type":"user","message":{"content":"hal"#).is_empty());
-    assert!(one("not json").is_empty());
-    assert!(one("42").is_empty());
-    assert!(one("\"str\"").is_empty());
-    assert!(one("null").is_empty());
-    assert!(parse_text("not json\n{\"type\":\"user\",\"message\":{\"content\":\"hal").is_empty());
+    let cut = r#"{"type":"user","message":{"content":"hal"#;
+    assert_eq!(one(cut), vec![inv(cut)]);
+    assert_eq!(one("not json"), vec![inv("not json")]);
+    assert_eq!(one("42"), vec![json!({"kind":"unknown","label":"?","raw":"42"})]);
+    assert_eq!(one("\"str\""), vec![json!({"kind":"unknown","label":"?","raw":"\"str\""})]);
+    assert_eq!(one("null"), vec![json!({"kind":"unknown","label":"?","raw":"null"})]);
+}
+
+#[test]
+fn only_an_unterminated_last_line_that_does_not_decode_is_skipped() {
+    let cut = r#"{"type":"user","message":{"content":"hal"#;
+    assert_eq!(parse_text(&format!("not json\n{cut}")), vec![inv("not json")]);
+    assert_eq!(parse_text(&format!("{cut}\n")), vec![inv(cut)]);
+    assert_eq!(parse_text(r#"{"type":"user","message":{"content":"whole"}}"#), vec![json!({"kind":"prompt","text":"whole"})]);
+}
+
+#[test]
+fn object_content_and_null_elements_lose_nothing() {
+    let obj = r#"{"type":"assistant","message":{"content":{"type":"text","text":"t"}}}"#;
+    assert_eq!(one(obj), vec![json!({"kind":"unknown","label":"content","raw":obj})]);
+    let nulls = r#"{"type":"user","message":{"content":{"a":null}}}"#;
+    assert_eq!(one(nulls), vec![json!({"kind":"unknown","label":"content","raw":nulls})]);
+    assert!(one(r#"{"type":"assistant","message":{"content":[]}}"#).is_empty());
+    let n = json!({"kind":"unknown","label":"null","raw":"null"});
+    assert_eq!(
+        one(r#"{"type":"assistant","message":{"content":[{"type":"text","text":"a"},null,{"type":"text","text":"b"},null]}}"#),
+        vec![json!({"kind":"text","text":"a"}), n.clone(), json!({"kind":"text","text":"b"}), n]
+    );
+    let tr = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"x","content":[{"type":"text","text":"a"},null,{"type":"text","text":"b"}]}]}}"#;
+    assert_eq!(one(tr)[0]["text"], json!("a\n[null]\nb"));
+}
+
+#[test]
+fn invalid_utf8_is_replaced_before_decoding() {
+    let ev = parse_line(b"{\"type\":\"user\",\"message\":{\"content\":\"bad \xff byte\"}}");
+    assert_eq!(ev, vec![json!({"kind":"prompt","text":"bad \u{fffd} byte"})]);
+    let ev = parse_line(b"not json \xfe");
+    assert_eq!(ev, vec![inv("not json \u{fffd}")]);
+}
+
+#[test]
+fn system_records_are_meta_events() {
+    assert_eq!(
+        one(r#"{"type":"system","subtype":"compact_boundary","content":"done"}"#),
+        vec![json!({"kind":"meta","label":"system: compact_boundary","text":"done"})]
+    );
+    let line = r#"{"type":"system","isSidechain":true,"content":{"a":1}}"#;
+    assert_eq!(one(line), vec![json!({"kind":"meta","label":"system","text":line,"sidechain":true})]);
+    assert!(one(r#"{"type":"attachment","x":1}"#).is_empty());
 }
 
 #[test]
@@ -77,16 +124,9 @@ fn tool_result_flattening() {
 }
 
 #[test]
-fn null_in_content_array_stops_iteration_like_lua_ipairs() {
-    let line = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"a"},null,{"type":"text","text":"b"}]}}"#;
-    assert_eq!(one(line), vec![json!({"kind":"text","text":"a"})]);
-}
-
-#[test]
 fn non_table_content_is_unknown_record() {
     let line = r#"{"type":"user","message":{"content":5}}"#;
     assert_eq!(one(line), vec![json!({"kind":"unknown","label":"user","raw":line})]);
-    assert!(one(r#"{"type":"user","message":{"content":{"a":1}}}"#).is_empty());
 }
 
 #[test]
