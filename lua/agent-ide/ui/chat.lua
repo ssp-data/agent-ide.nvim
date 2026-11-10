@@ -262,7 +262,8 @@ local function load(c, fresh)
 end
 
 ---Continue the session in native Claude in a tmux pane; when that Claude exits, reload it from
----disk and show it (in place when it is on screen; opened when the user is in normal mode).
+---disk and show it (in place when it is on screen; opened when the user is in the Agents tab in
+---normal mode; else a notice).
 function ACT.native(c)
   require('agent-ide.ui.handoff').start(c.s, {
     away = function()
@@ -272,7 +273,7 @@ function ACT.native(c)
     back = function(s)
       if valid_buf(c.tbuf) and s.visible then
         load(c, false)
-      elseif api.nvim_get_mode().mode == 'n' then
+      elseif api.nvim_get_mode().mode == 'n' and api.nvim_get_current_tabpage() == drawer().state().tab then
         M.open(s, c.project)
       else
         notify('Agent-IDE: native Claude ended; the session is parked and can be opened from the drawer')

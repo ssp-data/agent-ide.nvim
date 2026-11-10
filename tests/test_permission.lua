@@ -380,7 +380,7 @@ T['AskUserQuestion: cancelling a question denies it'] = function()
   open_new()
   send_normal('Ask me')
   wait_for(function() return #selects() == 1 end, 'question')
-  eq(selects()[1].prompt, 'Pick? (several: one per round, then Done)')
+  eq(selects()[1].prompt, 'Pick? (several: one per round, then Done choosing)')
   child.lua('_G.cancel()')
   wait_for(function() return has_line(transcript(), 'Ok.') ~= nil end, 'answer')
   eq(answers()[1], { subtype = 'success', request_id = 'q1',
@@ -388,7 +388,7 @@ T['AskUserQuestion: cancelling a question denies it'] = function()
   eq(#selects(), 1)
 end
 
-T['AskUserQuestion: multiSelect picks one option per round until Done; labels go back joined by ", "'] = function()
+T['AskUserQuestion: multiSelect picks one option per round until Done choosing; labels go back joined by ", "'] = function()
   local input = { questions = {
     { question = 'Fruits?', header = 'F', multiSelect = true,
       options = { { label = 'Apple' }, { label = 'Banana' }, { label = 'Cherry' } } },
@@ -400,16 +400,16 @@ T['AskUserQuestion: multiSelect picks one option per round until Done; labels go
   open_new()
   send_normal('Ask me')
   wait_for(function() return #selects() == 1 end, 'round 1')
-  eq(selects()[1].labels, { 'Apple', 'Banana', 'Cherry' }) -- no Done before a first choice
+  eq(selects()[1].labels, { 'Apple', 'Banana', 'Cherry' }) -- nothing to finish before a first choice
   pick('Cherry')
   wait_for(function() return #selects() == 2 end, 'round 2')
-  eq(selects()[2].prompt, 'Fruits? (several: one per round, then Done) — chosen: Cherry')
-  eq(selects()[2].labels, { 'Done', 'Apple', 'Banana' })
+  eq(selects()[2].prompt, 'Fruits? (several: one per round, then Done choosing) — chosen: Cherry')
+  eq(selects()[2].labels, { 'Done choosing', 'Apple', 'Banana' })
   pick('Apple')
   wait_for(function() return #selects() == 3 end, 'round 3')
-  eq(selects()[3].labels, { 'Done', 'Banana' })
-  pick('Done')
-  -- second question: choosing every option ends it without a Done round
+  eq(selects()[3].labels, { 'Done choosing', 'Banana' })
+  pick('Done choosing')
+  -- second question: choosing every option ends it without a last round
   wait_for(function() return #selects() == 4 end, 'second question')
   pick('Y')
   wait_for(function() return #selects() == 5 end, 'second question round 2')

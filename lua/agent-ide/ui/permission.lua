@@ -159,14 +159,14 @@ local function ask_plan(s, p, finish)
   }, 'Approve Claude\'s plan?', function(choice) finish(choice == nil, choice) end)
 end
 
-local DONE = 'Done'
+local DONE = 'Done choosing'
 
 ---A multi-select question: one select per round, each offering the options not chosen yet
 ---(and Done once something is chosen). `done(labels)` gets the chosen labels in option order,
 ---or nil when a round is cancelled.
 local function ask_several(q, items, done)
   local chosen = {}
-  local prompt = tostring(q.question) .. ' (several: one per round, then Done)'
+  local prompt = tostring(q.question) .. ' (several: one per round, then ' .. DONE .. ')'
   local function picked()
     local out = {}
     for _, it in ipairs(items) do

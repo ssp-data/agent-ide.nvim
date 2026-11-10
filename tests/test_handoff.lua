@@ -189,6 +189,17 @@ T['in tmux: parks, opens a pane with claude --resume, refuses sends, reloads whe
   eq(child.lua_get('vim.api.nvim_get_mode().mode'), 'n')
 end
 
+T['native Claude ends while the user works in another tab: a notice, no focus change'] = function()
+  start()
+  open_fixture()
+  child.type_keys('\\at')
+  wait_for(function() return #tmux_calls() == 2 end, 'tmux calls')
+  child.lua('vim.cmd("tabnew"); _G.work = { tab = vim.api.nvim_get_current_tabpage(), win = vim.api.nvim_get_current_win() }')
+  vim.fn.writefile({}, tmux_dir .. '/release')
+  wait_for(function() return has_line(notes(), 'native Claude ended') ~= nil end, 'notice')
+  eq(child.lua_get('vim.api.nvim_get_current_tabpage() == _G.work.tab and vim.api.nvim_get_current_win() == _G.work.win'), true)
+end
+
 T['a running session is parked (its process stopped) before the pane opens'] = function()
   start({ { expect = 'Hi' }, init(), say('Hello.'), result('Hello.') })
   open_fixture()
