@@ -128,7 +128,11 @@ end
 -- Every finished poll re-renders (about 0.4 ms), so ages stay current with any backend.
 local function start_live()
   local cfg = config.get()
-  live.start({ interval_ms = cfg.live.interval_ms, cmd = cfg.live.cmd, on_poll = function() render() end })
+  live.start({ interval_ms = cfg.live.interval_ms, cmd = cfg.live.cmd, on_poll = function()
+    render()
+    local chat = package.loaded['agent-ide.ui.chat']
+    if chat then chat.refresh_winbars() end
+  end })
 end
 
 local function set_shown(v)
@@ -196,7 +200,8 @@ function actions.open()
   elseif node.type == 'new' then
     local p = node.project
     local dir = p.root or p.key
-    if vim.fn.isdirectory(dir) ~= 1 then return notify('project folder not found: ' .. dir) end
+    -- only an absolute key is a folder: a project without cwd is keyed by a bare directory name
+    if dir:sub(1, 1) ~= '/' or vim.fn.isdirectory(dir) ~= 1 then return notify('project folder not found: ' .. dir) end
     local s = session.open({ cwd = dir })
     unsaved[s.id] = { key = p.key, activity = os.time() }
     require('agent-ide.ui.chat').open(s, p)

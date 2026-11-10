@@ -36,18 +36,36 @@ function M.transcript()
   return w
 end
 
----Show prompt buffer `pbuf` in the prompt window below `twin`, created (height 8) when missing.
+local function is_prompt_win(w)
+  return vim.startswith(api.nvim_buf_get_name(api.nvim_win_get_buf(w)), 'agent-ide://prompt/')
+end
+
+---Show prompt buffer `pbuf` in the prompt window of `twin`'s tab, created (height 8) below
+---`twin` when the tab has none. At most one prompt window per tab: extra ones are closed.
 ---@param pbuf integer
 ---@param twin integer
 ---@return integer win
 function M.show_prompt(pbuf, twin)
-  local pwin = W.prompt
-  if valid_win(pwin) and pwin ~= twin and api.nvim_win_get_tabpage(pwin) == api.nvim_win_get_tabpage(twin) then
+  local tab = api.nvim_win_get_tabpage(twin)
+  local pwin
+  if valid_win(W.prompt) and W.prompt ~= twin and api.nvim_win_get_tabpage(W.prompt) == tab then pwin = W.prompt end
+  for _, w in ipairs(api.nvim_tabpage_list_wins(tab)) do
+    if w ~= twin and w ~= pwin and api.nvim_win_get_config(w).relative == '' and is_prompt_win(w) then
+      if pwin then
+        pcall(api.nvim_win_close, w, false)
+      else
+        pwin = w
+      end
+    end
+  end
+  if pwin then
     if api.nvim_win_get_buf(pwin) ~= pbuf then api.nvim_win_set_buf(pwin, pbuf) end
   else
     pwin = api.nvim_open_win(pbuf, false, { split = 'below', win = twin, height = PROMPT_HEIGHT })
-    W.prompt = pwin
   end
+  -- the chat's own windows live in the Agents tab
+  local agents = drawer().state().tab
+  if not agents or tab == agents or not valid_win(W.prompt) then W.prompt = pwin end
   prompt.setup_win(pwin)
   return pwin
 end

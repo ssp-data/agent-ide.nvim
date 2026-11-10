@@ -111,6 +111,7 @@ end
 
 local function show_lines(buf, lines, row)
   api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modified = false
   local r = row == 'last' and #lines or 1
   pcall(api.nvim_win_set_cursor, 0, { r, #lines[r] })
 end
@@ -308,7 +309,8 @@ function M.setup_buf(buf, s)
 end
 
 ---Create the prompt buffer of session `s`: `agent-ide://prompt/<id>`, `acwrite`, markdown.
----`:w` only clears 'modified' (saving prompts comes later).
+---Nothing is saved yet (part 3), so the buffer is never 'modified': a draft never blocks `:q`,
+---`:qa`, `ZZ` or `:wq`, and hiding the window keeps it.
 ---@param s table Session
 ---@return integer buf
 function M.create(s)
@@ -318,8 +320,8 @@ function M.create(s)
   vim.bo[buf].swapfile = false
   api.nvim_buf_set_name(buf, 'agent-ide://prompt/' .. s.id)
   vim.bo[buf].filetype = 'markdown'
-  api.nvim_create_autocmd('BufWriteCmd', { buffer = buf,
-    callback = function(ev) vim.bo[ev.buf].modified = false end })
+  api.nvim_create_autocmd({ 'BufWriteCmd', 'TextChanged', 'TextChangedI', 'TextChangedP', 'InsertLeave' }, {
+    buffer = buf, callback = function(ev) vim.bo[ev.buf].modified = false end })
   M.setup_buf(buf, s)
   return buf
 end
@@ -353,6 +355,7 @@ function M.restore(buf, texts)
     vim.list_extend(lines, cur)
   end
   api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modified = false
 end
 
 return M

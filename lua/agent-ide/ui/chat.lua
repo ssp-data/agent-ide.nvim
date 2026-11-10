@@ -23,6 +23,7 @@ local ELSEWHERE = 'Agent-IDE: session is running in another Claude; use gp in th
 ---@field loading boolean a load runs: renderer updates wait for it
 ---@field dirty boolean events changed while loading (or the buffer is new): reset after the load
 ---@field send_after_load boolean the user sent while loading
+---@field stale table<string, integer> unloaded buffers ('tbuf'/'pbuf') whose wipe is pending
 local chats = {} -- session id -> Chat; never removed (buffers are recreated when wiped)
 local by_buf = {} -- buffer -> Chat
 local augroup = api.nvim_create_augroup('agent-ide.chat', { clear = true })
@@ -36,7 +37,7 @@ local function chat_keys()
   return type(keys) == 'table' and type(keys.chat) == 'table' and keys.chat or {}
 end
 
-local function valid_buf(b) return b ~= nil and api.nvim_buf_is_valid(b) end
+local function valid_buf(b) return b ~= nil and api.nvim_buf_is_valid(b) and api.nvim_buf_is_loaded(b) end
 
 -- Winbar ----------------------------------------------------------------------------------
 
@@ -146,6 +147,7 @@ local function send(c)
 end
 
 local function interrupt(c)
+  c.send_after_load = false -- a send held for a load is cancelled; its text stays in the prompt
   local dropped = c.s:interrupt()
   if #dropped == 0 then return end
   if valid_buf(c.pbuf) then prompt.restore(c.pbuf, dropped) end
@@ -188,7 +190,9 @@ local function help()
   rows[#rows + 1] = { key = '@', desc = 'prompt, after a space: pick a file to attach' }
   rows[#rows + 1] = { key = 'i / a / o', desc = 'in the transcript: write in the prompt' }
   rows[#rows + 1] = { key = 'za', desc = 'toggle fold' }
-  rows[#rows + 1] = { key = ':w', desc = 'save prompt (later; now only clears modified)' }
+  rows[#rows + 1] = { key = ':w', desc = 'save prompt (later; does nothing yet)' }
+  rows[#rows + 1] = { key = ':q / ZZ', desc = 'prompt: hide the window, the draft stays' }
+  rows[#rows + 1] = { key = ':q!', desc = 'prompt: hide the window and discard the draft' }
   require('agent-ide.ui.help').open('Agent-IDE chat', rows)
 end
 
@@ -211,40 +215,60 @@ end
 
 -- Buffers ----------------------------------------------------------------------------------
 
-local function forget_on_wipe(c, buf, field)
-  api.nvim_create_autocmd('BufWipeout', { group = augroup, buffer = buf, once = true, callback = function()
+local function wipe(buf)
+  if api.nvim_buf_is_valid(buf) then pcall(api.nvim_buf_delete, buf, { force = true }) end
+end
+
+-- `:bdelete`, `:bunload`, `:q!` (prompt) or `:bwipeout` on a chat buffer: an unloaded buffer
+-- has lost its options, maps and lines, so it is forgotten and wiped (it holds the name the
+-- next buffer needs) and a fresh one is made on the next open.
+local function forget_on_unload(c, buf, field)
+  api.nvim_create_autocmd('BufUnload', { group = augroup, buffer = buf, once = true, callback = function()
     by_buf[buf] = nil
-    if c[field] == buf then c[field] = nil end
+    if c[field] == buf then
+      c[field] = nil
+      c.stale[field] = buf
+    end
     if field == 'tbuf' and c.view then
       c.view:detach()
       c.view = nil
     end
+    vim.schedule(function() wipe(buf) end)
   end })
+end
+
+-- Wipe a forgotten buffer now if its scheduled wipe has not run yet (it holds the name).
+local function drop_stale(c, field)
+  local old = c.stale[field]
+  c.stale[field] = nil
+  if old then wipe(old) end
 end
 
 ---The chat of `s`, with both buffers; `fresh` when the transcript buffer was just created.
 function get_chat(s, project)
   local c = chats[s.id]
   if not c then
-    c = { s = s, loading = false, dirty = false, send_after_load = false }
+    c = { s = s, loading = false, dirty = false, send_after_load = false, stale = {} }
     chats[s.id] = c
   end
   c.project = project or c.project
   local fresh = false
   if not valid_buf(c.tbuf) then
+    drop_stale(c, 'tbuf')
     local buf = api.nvim_create_buf(false, true)
     api.nvim_buf_set_name(buf, 'agent-ide://chat/' .. s.id)
     c.tbuf, c.view, fresh = buf, live_render.attach(buf, s), true
     by_buf[buf] = c
     map_keys(c, buf, true)
-    forget_on_wipe(c, buf, 'tbuf')
+    forget_on_unload(c, buf, 'tbuf')
   end
   if not valid_buf(c.pbuf) then
+    drop_stale(c, 'pbuf')
     local buf = prompt.create(s)
     c.pbuf = buf
     by_buf[buf] = c
     map_keys(c, buf, false)
-    forget_on_wipe(c, buf, 'pbuf')
+    forget_on_unload(c, buf, 'pbuf')
   end
   return c, fresh
 end
@@ -307,6 +331,14 @@ function M.current()
     local b = api.nvim_win_get_buf(w)
     c = by_buf[b]
     if c and c.tbuf == b then return c.s end
+  end
+end
+
+---Refresh the winbar of every chat shown in the current tab (e.g. after a live poll: the
+---state of a session running elsewhere comes from the live map).
+function M.refresh_winbars()
+  for _, c in pairs(chats) do
+    if c.s.visible then update_winbar(c) end
   end
 end
 

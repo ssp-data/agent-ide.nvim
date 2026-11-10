@@ -269,15 +269,204 @@ T['ZZ hides the prompt, the session stays alive; i in the transcript brings it b
   eq(mode(), 'n')
 end
 
-T[':w in the prompt only clears modified'] = function()
+T['the prompt is never modified: a draft never blocks :w, :q, ZZ, :wq; the draft survives'] = function()
+  start()
+  open_new()
+  type_prompt('draft')
+  eq(child.lua_get('vim.bo.modified'), false) -- also while typing
+  child.type_keys('<Esc>')
+  eq(child.lua_get('vim.bo.modified'), false)
+  child.cmd('write')
+  eq(child.lua_get('vim.bo.modified'), false)
+  eq(prompt_lines(), { 'draft' })
+  local t = wins().transcript
+  for _, cmd in ipairs({ 'quit', 'ZZ', 'wq' }) do
+    if cmd == 'ZZ' then child.type_keys('ZZ') else child.cmd(cmd) end
+    eq(wins().prompt, nil)
+    child.lua('vim.api.nvim_set_current_win(...)', { t })
+    child.type_keys('i', '<Esc>')
+    eq(prompt_lines(), { 'draft' })
+  end
+end
+
+T[':qa with a draft in the prompt quits Neovim'] = function()
   start()
   open_new()
   type_prompt('draft')
   child.type_keys('<Esc>')
-  eq(child.lua_get('vim.bo.modified'), true)
-  child.cmd('write')
-  eq(child.lua_get('vim.bo.modified'), false)
-  eq(prompt_lines(), { 'draft' })
+  pcall(child.type_keys, ':qa<CR>') -- the child may exit before type_keys returns
+  -- the RPC channel closes once the child has exited
+  wait_for(function() return not pcall(child.lua_get, '1') end, 'Neovim to exit', 3000)
+end
+
+T[':q! in the prompt discards the draft; i brings an empty prompt back'] = function()
+  start()
+  open_new()
+  local t = wins().transcript
+  type_prompt('draft')
+  child.type_keys('<Esc>')
+  child.cmd('quit!')
+  vim.wait(50)
+  child.lua('vim.api.nvim_set_current_win(...)', { t })
+  child.type_keys('i', '<Esc>')
+  eq(prompt_lines(), { '' })
+  eq(child.lua_get('{ vim.bo.buftype, vim.bo.filetype, vim.fn.maparg("<C-CR>", "i") ~= "" }'), { 'acwrite', 'markdown', true })
+  eq(child.lua_get('vim.api.nvim_buf_get_name(0)'), 'agent-ide://prompt/' .. current().id)
+end
+
+-- Transcript of the current chat equals a full render of its session's events.
+local function equals_render()
+  return child.lua_get([[(function()
+    local s = require('agent-ide.ui.chat').current()
+    local w = require('agent-ide.ui.chat')._windows().transcript
+    local lines = vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(w), 0, -1, false)
+    return vim.deep_equal(lines, require('agent-ide.transcript.render').render(s.events).lines)
+  end)()]])
+end
+
+local function transcript_props()
+  return child.lua_get([[(function()
+    local w = require('agent-ide.ui.chat')._windows().transcript
+    local b = vim.api.nvim_win_get_buf(w)
+    local maps = {}
+    for _, m in ipairs(vim.api.nvim_buf_get_keymap(b, 'n')) do maps[m.lhs] = true end
+    return { name = vim.api.nvim_buf_get_name(b), bt = vim.bo[b].buftype, ft = vim.bo[b].filetype,
+      mod = vim.bo[b].modifiable, i = maps.i == true, fm = vim.wo[w].foldmethod }
+  end)()]])
+end
+
+T[':bd on the transcript, then reopen: a fresh buffer equal to a full render; live turns still render'] = function()
+  start(turn('After bd', 'Still rendering'))
+  open_fixture()
+  local id = current().id
+  child.lua('vim.api.nvim_set_current_win(...)', { wins().transcript })
+  child.cmd('bdelete')
+  vim.wait(50)
+  expand('repo')
+  drawer_cursor_to('Alpha basics')
+  child.type_keys('<CR>')
+  wait_for(function() return has_line(transcript(), '## You') ~= nil end, 'history again')
+  eq(transcript_props(), { name = 'agent-ide://chat/' .. id, bt = 'nofile', ft = 'markdown', mod = false, i = true, fm = 'expr' })
+  eq(equals_render(), true)
+  type_prompt('After bd')
+  child.type_keys('<C-CR>')
+  wait_for(function() return current().state == 'idle' and has_line(transcript(), 'Still rendering') ~= nil end, 'turn')
+  eq(equals_render(), true)
+  eq(#child.lua_get('_G.notes'), 0)
+end
+
+T[':bd on the prompt, then reopen: a fresh prompt buffer with its keys'] = function()
+  start(turn('New prompt buf', 'Fine'))
+  open_new()
+  type_prompt('lost draft')
+  child.type_keys('<Esc>')
+  child.cmd('bdelete')
+  vim.wait(50)
+  child.lua('vim.api.nvim_set_current_win(...)', { wins().transcript })
+  child.type_keys('i')
+  eq(prompt_lines(), { '' })
+  eq(child.lua_get('{ vim.bo.buftype, vim.bo.filetype, vim.fn.maparg("<C-CR>", "i") ~= "" }'), { 'acwrite', 'markdown', true })
+  child.type_keys('New prompt buf', '<C-CR>')
+  wait_for(function() return has_line(transcript(), 'Fine') ~= nil end, 'answer')
+  eq(prompt_lines(), { '' })
+end
+
+T[':bd on the transcript while a turn streams does not raise; the session goes on'] = function()
+  start(turn('Streaming', 'Long answer', { { sleep_ms = 400 } }))
+  open_new()
+  type_prompt('Streaming')
+  child.type_keys('<C-CR>', '<Esc>')
+  wait_for(function() return has_line(transcript(), 'Lon') ~= nil end, 'streaming')
+  child.lua('vim.api.nvim_set_current_win(...)', { wins().transcript })
+  child.cmd('bdelete')
+  wait_for(function() return child.lua_get('require("agent-ide.session").all()[1].state') ~= 'busy' end, 'turn end')
+  eq(child.lua_get('require("agent-ide.session").all()[1].owned'), true)
+  eq(child.lua_get('vim.v.errmsg'), '')
+  eq(#child.lua_get('_G.notes'), 0)
+  -- reopening shows the whole turn
+  expand('repo')
+  drawer_cursor_to('Streaming')
+  child.type_keys('<CR>')
+  wait_for(function() return has_line(transcript(), 'Long answer') ~= nil end, 'reopened')
+  eq(equals_render(), true)
+end
+
+T['<C-c> cancels a send held for a load; the text stays'] = function()
+  start(turn('Held', 'never'))
+  child.lua([[
+    local index = require('agent-ide.index')
+    local history = index.history
+    index.history = function(path, cb) _G.release = function() history(path, cb) end end
+  ]])
+  expand('repo')
+  drawer_cursor_to('Alpha basics')
+  child.type_keys('<CR>')
+  wait_for(function() return child.lua_get('_G.release ~= nil') end, 'load started')
+  type_prompt('Held')
+  child.type_keys('<C-CR>', '<Esc>', '<C-c>')
+  child.lua('_G.release()')
+  wait_for(function() return has_line(transcript(), '## You') ~= nil end, 'history')
+  vim.wait(200)
+  eq(fake.log(log), {})
+  eq(prompt_lines(), { 'Held' })
+end
+
+T['winbar of a session running elsewhere follows live polls'] = function()
+  local live_file = tmp .. '/live.json'
+  local function live(status)
+    vim.fn.writefile({ '[{"sessionId":"' .. FIXTURE_ID .. '","status":"' .. status .. '","pid":1,"cwd":"/x"}]' }, live_file)
+  end
+  live('busy')
+  start()
+  child.lua('require("agent-ide").setup(vim.tbl_deep_extend("force", require("agent-ide.config").get(), { live = { cmd = { "cat", ... } } }))', { live_file })
+  expand('repo')
+  drawer_cursor_to('B Alpha basics')
+  child.type_keys('<CR>')
+  wait_for(function() return has_line(transcript(), '## You') ~= nil end, 'history loaded')
+  eq(winbar(), 'repo · Alpha basics · model ? · mode:? · busy')
+  live('waiting')
+  wait_for(function() return winbar() == 'repo · Alpha basics · model ? · mode:? · waiting' end, 'winbar after poll')
+end
+
+T['+ New session on a project without a folder key is refused'] = function()
+  vim.fn.mkdir(projects .. '/-nocwd', 'p')
+  vim.fn.writefile({ vim.json.encode({ type = 'user', uuid = 'q', message = { role = 'user', content = 'No cwd here' } }) },
+    projects .. '/-nocwd/44444444-4444-4444-8444-444444444444.jsonl')
+  start()
+  expand('-nocwd')
+  drawer_cursor_to('    + New session')
+  child.type_keys('<CR>')
+  local notes = child.lua_get('_G.notes')
+  eq(notes[#notes], 'Agent-IDE: project folder not found: -nocwd')
+  eq(child.lua_get('#require("agent-ide.session").all()'), 0)
+end
+
+T['at most one prompt window per tab, also after the transcript is shown elsewhere'] = function()
+  start()
+  open_new()
+  local agents = child.lua_get('vim.api.nvim_get_current_tabpage()')
+  local function prompt_wins()
+    return child.lua_get([[#vim.tbl_filter(function(w)
+      return vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w)):find('agent-ide://prompt/', 1, true) ~= nil
+    end, vim.api.nvim_tabpage_list_wins(0))]])
+  end
+  -- a split of the transcript in the same tab
+  child.lua('vim.api.nvim_set_current_win(...)', { wins().transcript })
+  child.cmd('split')
+  child.type_keys('i', '<Esc>')
+  eq(prompt_wins(), 1)
+  -- the transcript in another tab gets its own prompt there
+  child.cmd('tab sbuffer ' .. child.lua_get('vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().transcript)'))
+  child.type_keys('i', '<Esc>')
+  eq(prompt_wins(), 1)
+  child.lua('vim.api.nvim_set_current_tabpage(...)', { agents })
+  -- a stray second prompt window in the Agents tab is closed on the next focus
+  child.cmd('split')
+  eq(prompt_wins(), 2)
+  child.lua('vim.api.nvim_set_current_win(...)', { wins().transcript })
+  child.type_keys('i', '<Esc>')
+  eq(prompt_wins(), 1)
+  eq(child.lua_get('vim.api.nvim_buf_get_name(0)'):find('agent-ide://prompt/', 1, true) ~= nil, true)
 end
 
 T['a second send while busy shows queued:1; <C-c> interrupts and returns the queue'] = function()
