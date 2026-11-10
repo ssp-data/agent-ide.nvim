@@ -49,6 +49,7 @@ So hook objects must be expected in real use, possibly before `init`.
 | interrupt | `{"type":"control_request","request_id":"r3","request":{"subtype":"interrupt"}}` |
 | answer an ask | `{"type":"control_response","response":{"subtype":"success","request_id":"<id from Claude>","response":{"behavior":"allow","updatedInput":{...}}}}` |
 | deny an ask | same with `"response":{"behavior":"deny","message":"<why>"}` |
+| allow and apply a suggestion | `"response":{"behavior":"allow","updatedInput":{...},"updatedPermissions":[<suggestion as received>]}` |
 
 Request ids we send are free-form strings (`r1`, ...). Ids Claude sends are UUIDs.
 
@@ -166,6 +167,25 @@ requires_user_interaction?}}`.
 - `AskUserQuestion` and `ExitPlanMode`: no `description`, no suggestions,
   `requires_user_interaction:true` (see scenarios).
 
+#### Applying a suggestion: `updatedPermissions`
+
+A suggestion takes effect when it is sent back, unchanged, in the allow answer's
+`updatedPermissions` array (next to `updatedInput`). A plain allow applies nothing.
+
+- `addRules` (`rules[{toolName, ruleContent}]`, `behavior:"allow"`, `destination`): the rule is
+  applied at once and saved according to `destination`. With `destination:"localSettings"`
+  Claude wrote `{"permissions":{"allow":["<toolName>(<ruleContent>)"]}}` to
+  `<project>/.claude/settings.local.json`; no file outside the project changed. The
+  `ruleContent` of a Bash suggestion was the exact command. Proof: the same command asked
+  again after a plain allow, and ran without an ask after an allow with the rule. Other
+  destinations (`session`, `projectSettings` = `<project>/.claude/settings.json`,
+  `userSettings` = the user's own settings file) were not exercised.
+- `setMode` (`mode`, `destination:"session"`): Claude switches the mode right away:
+  `system/status{status:null, permissionMode:"<mode>"}` follows the answer, the next `init`
+  carries the mode, and a second Write in `acceptEdits` ran without an ask. This replaces a
+  plain allow followed by `set_permission_mode`.
+- `addDirectories` was not exercised.
+
 ### `control_response` (from Claude)
 
 - To our requests: `{type:"control_response", response{subtype:"success", request_id,
@@ -222,6 +242,21 @@ and `result(is_error:false, permission_denials[{tool_name, tool_use_id, tool_inp
   error_code:"invalid_mode"}`. The status object can arrive after our next request was
   already sent (it is asynchronous).
 
+### `claude agents --json` and processes started headless
+
+A `claude -p` session started this way is listed while its process runs:
+`{sessionId, pid, cwd, kind, name, startedAt, status}` with `kind:"interactive"`. The listed
+`pid` is the pid of the process that was spawned, also when `claude` is a wrapper script that
+`exec`s the real binary (a wrapper that forks instead would list a different pid). `status`
+stayed `idle` during a turn in the sample taken, so the plugin's own state, not the list,
+says whether one of its sessions is busy. The entry disappears when the process exits.
+
+### `--resume <id>`
+
+A process started with `--resume <id>` (after the session's earlier process exited) answers
+from the earlier turns: asked for the first prompt of the session, it repeated it. `init`
+arrives with the first prompt as usual.
+
 ### Interrupt during a long answer
 
 After the first text deltas we sent `interrupt`:
@@ -260,6 +295,40 @@ local_command_run{command:"context", args:""}, local_command_source:
 `result{subtype:"success", is_error:false, num_turns:0, result:<same text>,
 local_command:"context"}`. No stream events.
 
+### Transcript records for commands and interrupts
+
+What Claude writes to the transcript file, compared with what the stream shows (the plugin's
+history view must equal the live view):
+
+- `set_model` between turns: three `user` records: `isMeta:true` with string content
+  `<local-command-caveat>...</local-command-caveat>`, then `<command-name>/model</command-name>
+  <command-message>model</command-message> <command-args><name></command-args>`, then
+  `<local-command-stdout>Set model to ...</local-command-stdout>`. The stream shows only the
+  last one (as a replayed user message). A `set_model` sent while a turn runs is applied, and
+  recorded, after that turn's `result`. Before the first prompt it writes and prints nothing.
+- `set_permission_mode`: no conversation records.
+- A local slash command sent as a prompt (`/context`): the caveat record, the
+  `<command-name>/context</command-name>` record, then `{type:"system",
+  subtype:"local_command", content:"<local-command-stdout><output>\n\n</local-command-stdout>",
+  level:"info"}`. The stream's `assistant` text (with `local_command_run`) equals `<output>`
+  without the trailing blank lines.
+- Interrupt: the aborted `assistant` text block (same text as streamed), then a `user` record
+  with `content[{type:"text", text:"[Request interrupted by user]"}]` and no `isMeta`.
+- `@` mentions: a mentioned file adds an `attachment` record `{type:"file", filename, content}`
+  after the prompt.
+
+The parser therefore drops the caveat records, reads `system/local_command` output as
+`command output`, and reads the interrupt marker as `meta`; the Session records a
+`/model <name>` prompt before the output of its own `set_model`.
+
+### `@` mentions with spaces
+
+`@my notes.txt` attaches nothing (the mention ends at the space; Claude answered that no
+file was attached), and neither does `@my\ notes.txt`. `@"my notes.txt"` attaches the file
+(an `attachment` record of type `file` follows the prompt). The plugin's `[attach] <path>`
+line becomes `@"<path>"` when the path holds whitespace. A path that itself contains `"`
+was not tried.
+
 ### User question (AskUserQuestion)
 
 Prompt asking for one multiple-choice question: `... A(tool_use AskUserQuestion,
@@ -269,6 +338,10 @@ tool_use_id, requires_user_interaction:true)`. Answer it with **allow** and
 `updatedInput` = the input plus `answers{"<question text>":"<chosen label>"}`. Then
 `control_response(echo)`, `user(tool_result content:"Your questions have been answered:
 \"<q>\"=\"<label>\". ...", tool_use_result{questions, answers})`, and the turn continues.
+
+For `multiSelect:true` the answer is the chosen labels joined by `", "` in one string
+(`answers{"<question>":"A, C"}`); Claude read both choices. An array of labels was accepted
+too but shown to the model joined by `","`. The plugin sends the `", "` string.
 
 ### Plan approval (`--permission-mode plan`)
 
@@ -280,6 +353,10 @@ mode without an ask — note: a real side effect outside the project), loads the
 `control_request(can_use_tool, tool_name:"ExitPlanMode", input{plan, planFilePath},
 tool_use_id, requires_user_interaction:true)`.
 
+- Approve and choose the next mode: add `updatedPermissions:[{type:"setMode",
+  mode:"acceptEdits", destination:"session"}]` to the allow answer. Plan mode then ends in
+  `acceptEdits` (`system/status{status:null, permissionMode:"acceptEdits"}`) and the
+  implementing Write ran without an ask. The ask itself carries no `permission_suggestions`.
 - Approve: answer `allow` with `updatedInput` = input. Then `control_response(echo)`,
   `system/status{status:null, permissionMode:"default"}` (plan mode ends, back to manual),
   `user(tool_result "User has approved your plan. ...", tool_use_result{plan, isAgent,
@@ -326,7 +403,7 @@ non-table object gives `unknown`.
 | `stream_event` other inner type / delta type | `unknown{label "stream_event/<type>" or "stream_event/content_block_delta/<delta type>", raw}` |
 | `assistant` | `event` per content block through `transcript/parse.lua` block rules (`text`, `thinking` if non-empty, `tool_call`, `unknown`). A `text` event whose block was streamed carries `streamed = true` on the action. A `tool_use` id already reported is not reported again. `parent_tool_use_id` a string → `sidechain = true`. With `local_command_run` (slash command output) the text becomes `event{meta, label "command output"}`. API error messages (`error` field) are plain `text` events; the failure is in `result.is_error` |
 | `user` with `isReplay:true`, not command output | `echo{text}` |
-| `user` with string content `<local-command-stdout>…` (replayed or not) | `event{meta, label "command output", text}` |
+| `user` with string content `<local-command-stdout>…` (replayed or not) | `event{meta, label "command output", text}` with `command_stdout = true` on the action (the Session puts a `/model <name>` prompt before it when its own `set_model` is pending) |
 | `user` tool results | `event{tool_result}` (sidechain when `parent_tool_use_id` is a string) |
 | `user` other text (interrupt marker) | `event{meta, label "meta", text}` — never `prompt` |
 | `control_request/can_use_tool` (incl. AskUserQuestion, ExitPlanMode) | `permission{request_id, tool_name, input, description, suggestions (permission_suggestions)}` |
@@ -368,11 +445,10 @@ actions; the Session tells them apart by `tool_name` (`AskUserQuestion`, `ExitPl
   so dropping them is safe only if their full `assistant` object always follows.
 - Exact values of `hook_response.outcome` (only the field names were looked at); the
   decoder treats `"error"` or a non-zero `exit_code` as a failure.
-- Whether approving `ExitPlanMode` can pick the following mode (e.g. `acceptEdits`
-  through `updatedPermissions`); only plain allow was tried, which returned to `default`.
-- What an AskUserQuestion with `multiSelect:true` expects in `answers` (only single
-  choice was tried), and how "Other / free text" is answered.
+- How an AskUserQuestion "Other / free text" answer is expected (only option labels were
+  tried).
+- `addRules` with destinations other than `localSettings`, `addDirectories`, and rules with
+  `behavior:"deny"`.
 - Thinking text: always empty here (`thinking_display:"updates"`); whether another
   setting delivers thinking text was not explored.
 - Other `control_request` subtypes from Claude (hooks, MCP) were not seen.
-- Behaviour of `--resume <id>` was not captured in this task.
