@@ -37,7 +37,10 @@ function M.open(title, rows)
     title = ' ' .. title .. ' ', title_pos = 'center', style = 'minimal',
   })
   vim.wo[win].list = false
-  for _, lhs in ipairs({ 'q', '<Esc>', '?' }) do
+  vim.wo[win].cursorline = true
+  vim.wo[win].wrap = false
+  -- q and <Esc> close; `/` and `?` search the help (n / N step), the command line keeps it open
+  for _, lhs in ipairs({ 'q', '<Esc>' }) do
     vim.keymap.set('n', lhs, function() close() end, { buffer = buf, nowait = true, silent = true })
   end
   local mine = win

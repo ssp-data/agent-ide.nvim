@@ -107,7 +107,7 @@ T['drawer window has list off even when listchars is set'] = function()
   eq(child.lua_get('vim.wo[require("agent-ide.ui.drawer").state().win].list'), false)
 end
 
-T['? opens the shortcut help, q closes it, / is not mapped'] = function()
+T['? opens the shortcut help, q closes it, / is not mapped; in the help ? searches'] = function()
   start()
   child.lua('require("agent-ide").toggle()')
   local drawer_win = child.lua_get('require("agent-ide.ui.drawer").state().win')
@@ -119,10 +119,8 @@ T['? opens the shortcut help, q closes it, / is not mapped'] = function()
     eq(text:find(key, 1, true) ~= nil, true)
   end
   eq(child.lua_get('vim.bo.modifiable'), false)
-  child.type_keys('?') -- opening again from the float's own key closes; no stacking
-  wait_for(function() return child.lua_get('vim.api.nvim_win_get_config(0).relative') == '' end, 'help closed by ?')
-  child.type_keys('?')
-  wait_for(function() return child.lua_get('vim.api.nvim_win_get_config(0).relative') ~= '' end, 'help float again')
+  eq(child.lua_get('{ vim.wo.cursorline, vim.wo.wrap }'), { true, false })
+  eq(child.lua_get('vim.fn.maparg("?", "n")'), '') -- backward search inside the help
   child.type_keys('q')
   wait_for(function() return child.lua_get('vim.api.nvim_get_current_win()') == drawer_win end, 'help closed by q')
   child.type_keys('?')
@@ -130,6 +128,28 @@ T['? opens the shortcut help, q closes it, / is not mapped'] = function()
   child.type_keys('<Esc>')
   wait_for(function() return child.lua_get('vim.api.nvim_get_current_win()') == drawer_win end, 'help closed by Esc')
   eq(child.lua_get('#vim.tbl_filter(function(w) return vim.api.nvim_win_get_config(w).relative ~= "" end, vim.api.nvim_list_wins())'), 0)
+end
+
+T['/ searches inside the help: the cursor lands on the word, n / N step, the float stays'] = function()
+  start()
+  child.lua([[require('agent-ide.ui.help').open('Test help', {
+    { key = 'a', desc = 'alpha first' }, { key = 'b', desc = 'beta' }, { key = 'c', desc = 'gamma alpha' },
+    { key = 'd', desc = 'delta alpha' } })]])
+  local float = child.lua_get('vim.api.nvim_get_current_win()')
+  child.type_keys('/', 'gamma', '<CR>')
+  eq(child.lua_get('vim.api.nvim_get_current_win()'), float)
+  eq(child.lua_get('vim.api.nvim_win_get_cursor(0)'), { 3, 3 })
+  child.type_keys('/', 'alpha', '<CR>')
+  eq(child.lua_get('vim.api.nvim_win_get_cursor(0)'), { 3, 9 })
+  child.type_keys('n')
+  eq(child.lua_get('vim.api.nvim_win_get_cursor(0)'), { 4, 9 })
+  child.type_keys('N')
+  eq(child.lua_get('vim.api.nvim_win_get_cursor(0)'), { 3, 9 })
+  child.type_keys('?', 'beta', '<CR>')
+  eq(child.lua_get('vim.api.nvim_win_get_cursor(0)'), { 2, 3 })
+  eq(child.lua_get('vim.api.nvim_win_is_valid(...)', { float }), true)
+  child.type_keys('<Esc>')
+  eq(child.lua_get('vim.api.nvim_win_is_valid(...)', { float }), false)
 end
 
 T['help.open twice does not stack floats'] = function()
