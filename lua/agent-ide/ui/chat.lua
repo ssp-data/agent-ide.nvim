@@ -43,7 +43,7 @@ local function winbar_text(c)
     s.title and (s.title:gsub('[\r\n]+', ' ')) or 'new session',
     model,
     mode,
-    drawer().state_of(s.id),
+    require('agent-ide.ui.handoff').away(s) and 'in native Claude (tmux pane)' or drawer().state_of(s.id),
   }
   if #s.queue > 0 then parts[#parts + 1] = 'queued:' .. #s.queue end
   return (table.concat(parts, ' · '):gsub('%%', '%%%%'))
@@ -130,6 +130,10 @@ local function send(c)
   if not valid_buf(c.pbuf) then return end
   local text = prompt.text_to_send(api.nvim_buf_get_lines(c.pbuf, 0, -1, false))
   if not text:find('%S') then return end
+  if require('agent-ide.ui.handoff').away(c.s) then
+    return notify('Agent-IDE: this session is open in native Claude (tmux pane); quit it there to continue here',
+      vim.log.levels.WARN)
+  end
   if c.loading then
     c.send_after_load = true
     return
@@ -255,6 +259,28 @@ local function load(c, fresh)
       send(c)
     end
   end)
+end
+
+---Continue the session in native Claude in a tmux pane; when that Claude exits, reload it from
+---disk and show it (in place when it is on screen; opened when the user is in normal mode).
+function ACT.native(c)
+  require('agent-ide.ui.handoff').start(c.s, {
+    away = function()
+      update_winbar(c)
+      drawer().refresh()
+    end,
+    back = function(s)
+      if valid_buf(c.tbuf) and s.visible then
+        load(c, false)
+      elseif api.nvim_get_mode().mode == 'n' then
+        M.open(s, c.project)
+      else
+        notify('Agent-IDE: native Claude ended; the session is parked and can be opened from the drawer')
+      end
+      update_winbar(c)
+      drawer().refresh()
+    end,
+  })
 end
 
 -- Public -------------------------------------------------------------------------------------

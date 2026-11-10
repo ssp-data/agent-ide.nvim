@@ -19,6 +19,7 @@ local HELP = {
   { 'model', 'pick the model' },
   { 'raw', 'transcript: raw view of the wire lines (>> sent, << received), not the rendered answer; q or the same key returns' },
   { 'raw_event', 'transcript: raw view at the line of the unknown fold under the cursor' },
+  { 'native', 'continue in native Claude in a tmux pane (parks here; reloads when it exits)' },
   { 'help', 'this help' },
   { 'history_prev', 'prompt: older prompt (also <Up>) on the first line' },
   { 'history_next', 'prompt: newer prompt (also <Down>) on the last line' },
@@ -51,7 +52,7 @@ end
 ---@param c table Chat (`c.s` is its Session)
 ---@param buf integer
 ---@param is_transcript boolean
----@param act { send: fun(c), interrupt: fun(c), focus_prompt: fun(c, insert: boolean) }
+---@param act { send: fun(c), interrupt: fun(c), focus_prompt: fun(c, insert: boolean), native: fun(c) }
 function M.map(c, buf, is_transcript, act)
   local keys = M.keys()
   local function map(modes, lhs, fn, desc)
@@ -66,6 +67,7 @@ function M.map(c, buf, is_transcript, act)
   map('n', keys.answer, function() require('agent-ide.ui.permission').answer(c.s) end, 'answer Claude')
   map('n', keys.mode, function() require('agent-ide.ui.mode').cycle(c.s) end, 'next permission mode')
   map('n', keys.model, function() require('agent-ide.ui.mode').pick_model(c.s) end, 'pick model')
+  map('n', keys.native, function() act.native(c) end, 'continue in native Claude (tmux)')
   if is_transcript then
     map('n', keys.raw, function() require('agent-ide.ui.raw').open(c.s) end, 'raw view')
     map('n', keys.raw_event, function() require('agent-ide.ui.raw').open_at_cursor(c.s, buf) end, 'raw view at event')

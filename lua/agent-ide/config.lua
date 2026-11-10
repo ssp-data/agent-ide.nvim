@@ -21,7 +21,8 @@ local function defaults()
       chat = { send = '<C-CR>', send_alt = '<leader><CR>', interrupt = '<C-c>', prompt = '<leader>ap', help = '?',
         history_prev = '<C-p>', history_next = '<C-n>', attach = '<leader>af',
         answer_inner = 'ir', answer_outer = 'ar', mode = '<S-Tab>', model = '<leader>aM', answer = '<leader>ay',
-        raw = 'gr', raw_event = 'gR' },
+        raw = 'gr', raw_event = 'gR',
+        native = '<leader>at' }, -- continue the session in native Claude in a tmux pane
     },
     -- prompt buffer: `/` opens the command menu, `@` opens the file picker
     chat = { auto_slash = true, at_picker = true },
