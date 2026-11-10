@@ -31,9 +31,11 @@ T['unreadable file gives untitled meta'] = function()
 end
 T['index facade'] = function()
   local index = require('agent-ide.index')
+  require('agent-ide.config').setup({ helper = { enabled = false } })
   eq(index.backend(), 'lua')
   local out; index.scan(function(s) out = s end, dir); vim.wait(2000, function() return out ~= nil end)
   eq(#out, 4)
+  require('agent-ide.config').setup({})
 end
 T['history returns the same events as parse_text'] = function()
   local p = by_id(run(dir), '1111').path

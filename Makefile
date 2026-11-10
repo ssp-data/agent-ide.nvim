@@ -3,7 +3,7 @@
 deps:
 	@test -d deps/mini.nvim || git clone --depth 1 https://github.com/echasnovski/mini.nvim deps/mini.nvim
 
-test: deps
+test: deps $(if $(shell command -v cargo),helper)
 	nvim --headless --noplugin -u tests/minimal_init.lua -c "luafile tests/run.lua"
 
 helper:

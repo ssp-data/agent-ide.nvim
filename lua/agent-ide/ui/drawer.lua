@@ -170,12 +170,14 @@ local function open_drawer()
     wrap = false, cursorline = true, foldenable = false }) do
     set_opt(S.win, name, value)
   end
+  index.set_visible(true)
   render()
 end
 
 local function teardown()
   live.stop()
   index.on_change(nil)
+  index.set_visible(false)
   if debounce then debounce:stop() end
   S.tab, S.win = nil, nil
 end
@@ -224,6 +226,7 @@ function M.close()
   if api.nvim_get_current_win() == win and main then api.nvim_set_current_win(main) end
   api.nvim_win_close(win, false)
   S.win = nil
+  index.set_visible(false)
 end
 
 function M.toggle()
