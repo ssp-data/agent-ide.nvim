@@ -246,7 +246,8 @@ function actions.open()
   if not node then return end
   if node.type == 'session' then
     local m, p = node.session, node.project
-    local s = session.open({ id = m.id, cwd = m.cwd or p.root or p.key, path = m.path, title = m.title })
+    local s = session.open({ id = m.id, cwd = m.cwd or p.root or p.key, path = m.path, title = m.title,
+      agent = m.agent, agent_session_id = m.agent_session_id })
     require('agent-ide.ui.chat').open(s, p)
   elseif node.type == 'new' then
     local p = node.project

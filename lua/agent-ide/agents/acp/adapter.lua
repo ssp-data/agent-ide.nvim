@@ -30,8 +30,38 @@ function Handle:stop(cb, now) return self.client:stop(cb, now) end
 
 -- Turns -------------------------------------------------------------------------------------
 
+---The earlier conversation as plain text, for an agent session that starts without it
+---(`replay_context`): the prompts and answers before the prompt being sent, tool calls by name.
+---@param events table[]
+---@param current string the prompt about to be sent (left out when it is the last event)
+---@return string|nil
+function M.context_text(events, current)
+  local n = #events
+  for i = n, 1, -1 do -- the prompt being sent (events after it are the start's own notices)
+    if events[i].kind == 'prompt' then
+      if events[i].text == current then n = i - 1 end
+      break
+    end
+  end
+  local parts = {}
+  for i = 1, n do
+    local ev = events[i]
+    if ev.kind == 'prompt' then parts[#parts + 1] = 'User: ' .. tostring(ev.text)
+    elseif ev.kind == 'text' and ev.text ~= '' then parts[#parts + 1] = 'Assistant: ' .. tostring(ev.text)
+    elseif ev.kind == 'tool_call' then parts[#parts + 1] = '[tool: ' .. tostring(ev.name) .. ']' end
+  end
+  if #parts == 0 then return nil end
+  return 'Earlier conversation, for context (this agent session is new):\n\n' .. table.concat(parts, '\n\n') .. '\n\n---\n\n'
+end
+
 function Handle:_prompt(text)
-  return self.client:request('session/prompt', { sessionId = self.sid, prompt = { { type = 'text', text = text } } },
+  local wire = text
+  if self.preamble then
+    local ctx = M.context_text(self.s.events, text)
+    self.preamble = false
+    if ctx then wire = ctx .. text end
+  end
+  return self.client:request('session/prompt', { sessionId = self.sid, prompt = { { type = 'text', text = wire } } },
     function(err, result)
       if err and err.code == 'exit' then return end -- the exit path ends the turn
       self:_actions(self.translator:result(err, result))
@@ -162,7 +192,10 @@ end
 function Handle:_ready(r, loaded)
   local s = self.s
   r = type(r) == 'table' and r or {}
-  if not loaded and str(r.sessionId) then s.agent_session_id = r.sessionId end
+  if not loaded and str(r.sessionId) then
+    s.agent_session_id = r.sessionId
+    if s.log then s.log:meta({ agent_session_id = r.sessionId }) end -- the log can name it for a later load
+  end
   self.sid = s.agent_session_id
   local mode, model
   if type(r.modes) == 'table' then
@@ -200,9 +233,22 @@ function Handle:_ready(r, loaded)
   for _, text in ipairs(waiting) do self:_prompt(text) end
 end
 
+-- The agent starts a new session where an earlier one was: the transcript says so (a stored
+-- event, so the history shows the break too), and with `replay_context` the next prompt
+-- carries the earlier conversation.
+function Handle:_fresh_session(why)
+  local s = self.s
+  s.agent_session_id = nil
+  local text = ('New %s session: the agent cannot reload the earlier conversation'):format(self.label)
+  if why then text = text .. ' (' .. why .. ')' end
+  self.sink.action({ type = 'event', event = { kind = 'meta', label = 'new session', text = text } })
+  if self.cfg.replay_context == true then self.preamble = true end
+end
+
 function Handle:_open_session()
   local s = self.s
   local load = s.agent_session_id ~= nil and s.capabilities.resume
+  if s.agent_session_id ~= nil and not load then self:_fresh_session() end
   local method = load and 'session/load' or 'session/new'
   local params = { cwd = s.cwd, mcpServers = {} }
   if load then params.sessionId = s.agent_session_id end
@@ -211,8 +257,7 @@ function Handle:_open_session()
     self.replaying = false
     if err and load then
       -- the agent cannot bring the session back: a new one, with the history from the log
-      s.agent_session_id = nil
-      if self.on_load_failed then self.on_load_failed(err) end
+      self:_fresh_session(tostring(err.message or err.code))
       return self:_open_session()
     end
     if err then return self:_fail(method, err) end
@@ -294,8 +339,13 @@ function M.new(name, cfg)
   function A.start(s, sink)
     local fs_scope = cfg.fs == nil and 'cwd' or cfg.fs
     local handle = setmetatable({ s = s, sink = sink, translator = translate.new(), ready = false, waiting = {},
-      deferred = {}, asks = {}, ask_n = 0, config_ids = {} }, Handle)
+      deferred = {}, asks = {}, ask_n = 0, config_ids = {}, label = A.label, cfg = cfg }, Handle)
     local function mine() return s.proc == handle end
+    -- the plugin's own record of this session (agents/log.lua): every stored event from here on
+    if not s.log then
+      local l, lerr = require('agent-ide.agents.log').open(s)
+      if l then s.log = l else vim.notify('Agent-IDE: ' .. tostring(lerr), vim.log.levels.WARN) end
+    end
     local c, err = client_mod.start(cfg.cmd, {
       cwd = s.cwd,
       env = child_env(cfg.env),
