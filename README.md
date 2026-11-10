@@ -216,7 +216,7 @@ In the drawer:
 
 | Key | Action |
 |---|---|
-| `<CR>`, `o` | Expand or collapse a project; open a session; start a new session (`+ New session`); use a prompt |
+| `<CR>`, `o` | Expand or collapse a project; open a session; start a new session (`+ New session`; pressed again while that one has sent nothing, it comes back with its draft; `2<CR>` starts a separate one); use a prompt |
 | `za` | Expand or collapse the node under the cursor |
 | `zM` | Collapse all: only the top-level rows remain (a project opened again shows its sessions) |
 | `zR` | Expand all projects with their `Sessions`; `Changes`, `Commits`, `Saved prompts`, `Hidden` and the Prompts node stay as they are (opening them loads git or prompts for every project). `zR` again, with nothing changed in between, opens everything (a commit's own file list excepted). Git counts of closed sections load a few projects at a time |

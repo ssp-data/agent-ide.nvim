@@ -229,8 +229,12 @@ function actions.open()
     local dir = p.root or p.key
     -- only an absolute key is a folder: a project without cwd is keyed by a bare directory name
     if dir:sub(1, 1) ~= '/' or vim.fn.isdirectory(dir) ~= 1 then return notify('project folder not found: ' .. dir) end
-    local s = session.open({ cwd = dir })
-    model.add_unsaved(s.id, p.key)
+    -- an unsent new session of the project comes back with its draft; a count: a separate one
+    local s = vim.v.count == 0 and model.unsent_new(p.key) or nil
+    if not s then
+      s = session.open({ cwd = dir })
+      model.add_unsaved(s.id, p.key)
+    end
     require('agent-ide.ui.chat').open(s, p)
   elseif node.open then
     local ok, err = pcall(node.open, node)

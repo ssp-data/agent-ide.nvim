@@ -149,11 +149,12 @@ local function expand(project)
   end
 end
 
--- Open a new session in the `repo` project from the drawer.
-local function open_new()
+-- Open a new session in the `repo` project from the drawer (`keys`: default `<CR>`; `2<CR>`
+-- makes a separate one while an unsent new session exists).
+local function open_new(keys)
   expand('repo')
   drawer_cursor_to('    + New session')
-  child.type_keys('<CR>')
+  child.type_keys(keys or '<CR>')
   wait_for(function() return current() ~= vim.NIL end, 'chat open')
 end
 
@@ -753,7 +754,7 @@ T['visible follows the transcript window and the focused tab'] = function()
   -- the transcript window shows another buffer
   child.lua('vim.api.nvim_win_set_buf(require("agent-ide.ui.chat")._windows().transcript, vim.api.nvim_create_buf(false, true))')
   eq(vis(), false)
-  open_new() -- a second new session reuses the same two windows
+  open_new('2<CR>') -- a second new session reuses the same two windows
   eq(child.lua_get('#require("agent-ide.session").all()'), 2)
   eq(child.lua_get('{ require("agent-ide.session").all()[1].visible, require("agent-ide.session").all()[2].visible }'), { false, true })
   eq(child.lua_get('#vim.api.nvim_tabpage_list_wins(0)'), 3)

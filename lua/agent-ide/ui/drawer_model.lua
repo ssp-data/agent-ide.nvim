@@ -6,13 +6,17 @@ local session = require('agent-ide.session')
 
 local M = {}
 
--- Sessions started from "+ New session" that no scan has listed yet: id -> { key, activity }
+-- Sessions started from "+ New session" that no scan has listed yet: id -> { key, activity, n }
 local unsaved = {}
+local unsaved_n = 0 -- order of `add_unsaved` calls (activity has whole seconds only)
 
 ---Remember a session started from "+ New session" in project `key` until a scan lists it.
 ---@param id string
 ---@param key string project key
-function M.add_unsaved(id, key) unsaved[id] = { key = key, activity = os.time() } end
+function M.add_unsaved(id, key)
+  unsaved_n = unsaved_n + 1
+  unsaved[id] = { key = key, activity = os.time(), n = unsaved_n }
+end
 
 ---State shown for a session: its Session's state when this Neovim has one that is not
 ---parked, else the live state (another Claude, e.g. in a tmux pane).
@@ -125,6 +129,22 @@ function M.with_unsaved(projects)
     end
   end
   return out
+end
+
+---The newest session started from "+ New session" in project `key` that has sent nothing yet
+---(no prompt, no process): pressing the row again shows it, with its draft. Nil when none.
+---@param key string project key
+---@return table|nil Session
+function M.unsent_new(key)
+  local best, best_n
+  for id, u in pairs(unsaved) do
+    local s = session.get(id)
+    if u.key == key and s and not s.sent_before and #s.events == 0 and not s:_alive()
+      and (not best_n or u.n > best_n) then
+      best, best_n = s, u.n
+    end
+  end
+  return best
 end
 
 -- States in which a hidden session counts as visible: hiding never swallows an ask or a result.
