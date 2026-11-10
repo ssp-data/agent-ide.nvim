@@ -1,0 +1,20 @@
+[
+  { "kind": "prompt", "text": "Please add a greeting to main." },
+  { "kind": "thinking", "text": "Need to look at main first." },
+  { "kind": "text", "text": "I will check the file." },
+  { "kind": "tool_call", "id": "t1", "name": "Bash", "input": { "command": "ls" } },
+  { "kind": "tool_result", "id": "t1", "text": "main.lua\nREADME.md", "is_error": false },
+  { "kind": "tool_call", "id": "t2", "name": "Edit", "input": { "file_path": "main.lua", "old_string": "a", "new_string": "b" } },
+  { "kind": "tool_result", "id": "t2", "text": "Edit failed\nno match\n[image]", "is_error": true },
+  { "kind": "prompt", "text": "Try again with more context." },
+  { "kind": "prompt", "text": "/compact keep it short" },
+  { "kind": "prompt", "text": "/clear" },
+  { "kind": "meta", "label": "command output", "text": "Compacted" },
+  { "kind": "meta", "label": "meta", "text": "Caveat: local commands below." },
+  { "kind": "meta", "label": "meta", "text": "meta block" },
+  { "kind": "meta", "label": "meta", "text": "<system-reminder>be careful</system-reminder>" },
+  { "kind": "unknown", "label": "image", "raw": "{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"image/png\",\"data\":\"AAAA\"}}" },
+  { "kind": "unknown", "label": "future-thing", "raw": "{\"type\":\"future-thing\",\"cwd\":\"/home/u/git/alpha\",\"gitBranch\":\"feat/x\",\"payload\":{\"k\":1}}" },
+  { "kind": "prompt", "text": "Subagent: find usages.", "sidechain": true },
+  { "kind": "text", "text": "Found two usages.", "sidechain": true }
+]

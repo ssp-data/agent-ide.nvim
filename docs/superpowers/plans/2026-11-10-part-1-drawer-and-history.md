@@ -103,7 +103,7 @@ Record-to-event rules:
 | `type=assistant`: `thinking` block | `thinking` if text non-empty, otherwise nothing |
 | `type=assistant`: `tool_use` block | `tool_call` |
 | any other content block type | `unknown`, label = block type |
-| bookkeeping record types: `last-prompt`, `mode`, `permission-mode`, `atis-latch`, `attachment`, `file-history-snapshot`, `file-history-delta`, `ai-title`, `api-request`, `api-request-shape`, `api-request-blob`, `system`, `summary`, `queue-operation` | none |
+| bookkeeping record types: `last-prompt`, `mode`, `permission-mode`, `atis-latch`, `attachment`, `file-history-snapshot`, `file-history-delta`, `ai-title`, `api-request`, `api-request-shape`, `api-request-blob`, `system`, `summary`, `queue-operation`, `cost-state`, `pr-link`, `frame-link`, `artifact-autoreact-ledger`, `artifact-comment-monitor` | none |
 | any other record type | `unknown`, label = record type |
 | `isSidechain=true` on a record | its events get `sidechain = true` |
 
