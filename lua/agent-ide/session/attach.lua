@@ -63,8 +63,8 @@ function M.attach(s, info, cb)
       return cb(true)
     end
     local decoder = stream.new()
-    local client, greeted
-    local function mine() return s.proc == client end
+    local client, handle, greeted
+    local function mine() return handle ~= nil and s.proc == handle end
     -- before the keeper said hello it is not ours yet: a keeper that is gone (a stale file, a
     -- crash) is forgotten and the caller carries on as without one
     local function gone(code, tail)
@@ -87,7 +87,9 @@ function M.attach(s, info, cb)
       end,
       on_hello = function(h)
         greeted = true
-        s.proc, s.owned, s.pid = client, true, h.claude_pid
+        handle = require('agent-ide.agents.claude').wrap(s, client, s:_sink())
+        handle.pid = h.claude_pid
+        s.proc, s.owned, s.pid = handle, true, h.claude_pid
         s.parking, s.interrupted, s.sent_before = false, false, true
         s.requests, s.deferred, s.park_cbs = {}, {}, {}
         s.replaying = true

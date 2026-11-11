@@ -35,6 +35,10 @@ local function from_cwd()
   return { key = key, name = basename(key), root = root, is_git = root ~= nil }
 end
 
+---The project of Neovim's working directory, whatever the scope is.
+---@return table { key, name, root, is_git }
+function M.cwd_project() return from_cwd() end
+
 ---@return 'all'|'project'
 function M.get()
   if kind then return kind end

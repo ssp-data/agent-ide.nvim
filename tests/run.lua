@@ -58,6 +58,8 @@ local function filter_cases(case)
     -- prefs.json (the model last used, the legend toggle) is kept across restarts on purpose;
     -- between cases it would leak one case's choices into the next
     vim.fn.delete(xdg_root .. '/state/nvim/agent-ide/prefs.json')
+    -- the plugin's own logs of other agents' sessions (agents/log.lua): each case starts without any
+    vim.fn.delete(xdg_root .. '/state/nvim/agent-ide/sessions', 'rf')
     if package.loaded['agent-ide.prefs'] then package.loaded['agent-ide.prefs']._reset() end
     kill_keepers()
     local ok, e = pcall(test, ...)

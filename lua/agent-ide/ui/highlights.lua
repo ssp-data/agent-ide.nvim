@@ -28,6 +28,7 @@ local GROUPS = {
   AgentIdeAge = M.dim,
   AgentIdeSection = { link = 'Directory' },
   AgentIdeAnswerMark = { link = 'AgentIdeLevel1' }, -- the ● before Claude's own text in a transcript (green)
+  AgentIdeAgent = { link = 'Identifier' }, -- the agent's name before a non-Claude session (drawer row, winbar)
   -- chat winbar: the model in italic (Normal's foreground), the permission mode as a badge; a
   -- mode other than the default one in a warning colour
   AgentIdeModel = function()

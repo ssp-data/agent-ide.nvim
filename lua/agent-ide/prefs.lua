@@ -55,6 +55,9 @@ end
 ---@param s table Session
 ---@return string|nil
 function M.start_model(s)
+  -- `claude.model` and the remembered model are Claude's names: another agent's session starts
+  -- with what was asked for or picked for it only
+  if s.agent ~= nil and s.agent ~= 'claude' then return s.model_requested or s.model_chosen end
   local cfg = require('agent-ide.config').get().claude
   local fixed = type(cfg) == 'table' and type(cfg.model) == 'string' and cfg.model ~= '' and cfg.model or nil
   return s.model_requested or s.model_chosen or fixed or M.get('model')

@@ -87,6 +87,22 @@ function M.graph(opts)
   graph.open_context()
 end
 
+---Start a new session with agent `name` (nil or '': pick one) in the current project: the
+---chat's, else the scope's, else the repository of the working directory.
+---@param name? string
+function M.new_session(name)
+  require('agent-ide.ui.highlights').setup()
+  local drawer = require('agent-ide.ui.drawer')
+  local st = drawer.state()
+  if not st.tab or vim.api.nvim_get_current_tabpage() ~= st.tab then drawer.toggle() end
+  local chat = require('agent-ide.ui.chat')
+  local sc = require('agent-ide.scope')
+  local cur = chat.current()
+  local project = cur and chat.project_of(cur) or sc.project() or sc.cwd_project()
+  if name and name ~= '' then return drawer.new_session(project, name, true) end
+  drawer.pick_agent(project)
+end
+
 ---@return string text for a statusline (percent signs doubled)
 function M.statusline() return require('agent-ide.status').statusline() end
 

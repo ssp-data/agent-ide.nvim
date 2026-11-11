@@ -1,33 +1,23 @@
--- The Session object: one Claude conversation driven from this Neovim. Owns at most one
--- `claude -p` process, keeps the transcript events, the state, a prompt queue and open
--- permission asks. Stream actions and process exit are handled in session/actions.lua.
-local process = require('agent-ide.claude.process')
-local stream = require('agent-ide.claude.stream')
+-- The Session object: one conversation with an agent, driven from this Neovim. Owns at most
+-- one agent process (through its adapter, lua/agent-ide/agents), keeps the transcript events,
+-- the state, a prompt queue and open permission asks. Stream actions and process exit are
+-- handled in session/actions.lua.
 local actions = require('agent-ide.session.actions')
+local agents = require('agent-ide.agents')
 
 local M = {}
 
 local RAW_KEEP = 5000
 M.RAW_KEEP = RAW_KEEP
-local DENY_MESSAGE = 'Denied by user in Neovim'
-
-local request_n = 0 -- ids of control requests we send: r1, r2, ...
-local init_n = 0 -- ids of the `initialize` requests: i1, i2, ... (apart, so r1 stays the first setting)
 
 local Session = {}
 Session.__index = Session
 M.Session = Session
 
-function M._reset_ids() request_n, init_n = 0, 0 end
-
----A request id replayed from a keeper (`r12`, `i3`): the counters move past it.
----@param id any
-function M._bump_ids(id)
-  local kind, n = tostring(id):match('^([ri])(%d+)$')
-  if not kind then return end
-  n = tonumber(n)
-  if kind == 'r' then request_n = math.max(request_n, n) else init_n = math.max(init_n, n) end
-end
+-- The Claude adapter numbers its control requests; a keeper replay moves the counters past
+-- the ids it replays (session/attach.lua).
+function M._reset_ids() require('agent-ide.agents.claude')._reset_ids() end
+function M._bump_ids(id) require('agent-ide.agents.claude')._bump_ids(id) end
 
 function Session:_emit(what) require('agent-ide.session')._emit(self, what) end
 
@@ -39,6 +29,7 @@ end
 
 function Session:_append(ev)
   self.events[#self.events + 1] = ev
+  if self.log and not ev.live_only then self.log:append(ev) end
   self:_emit('events')
 end
 
@@ -56,20 +47,10 @@ end
 
 function Session:_alive() return self.proc ~= nil and self.proc:alive() end
 
----Write one object to Claude's stdin and record it.
+---Write one object to the agent's stdin and record it (Claude's wire; tests use it).
 function Session:_write(obj)
-  if not self:_alive() then return false end
-  if not self.proc:send(obj) then return false end
-  self:_raw('out', vim.json.encode(obj))
-  return true
-end
-
-function Session:_control(request)
-  request_n = request_n + 1
-  local id = 'r' .. request_n
-  if not self:_write({ type = 'control_request', request_id = id, request = request }) then return false end
-  self.requests[id] = request
-  return true
+  if not self:_alive() or not self.proc.write then return false end
+  return self.proc:write(obj)
 end
 
 ---Empty the queue; returns the prompts dropped.
@@ -103,48 +84,29 @@ function Session:_has_transcript()
   return self.path ~= nil and vim.uv.fs_stat(self.path) ~= nil
 end
 
-function Session:_start_process()
-  local resume = self.sent_before or self:_has_transcript()
-  local decoder = stream.new()
-  local proc
-  local function mine() return self.proc == proc end
-  local err
-  proc, err = process.start({
-    cwd = self.cwd,
-    session_id = self.id,
-    resume = resume,
-    path = self.path,
-    model = require('agent-ide.prefs').start_model(self),
-    on_object = function(obj, raw)
-      if not mine() then return end
-      self:_raw('in', raw)
-      for _, a in ipairs(decoder:feed(obj, raw)) do actions.handle(self, a) end
-    end,
-    on_garbage = function(line)
-      if not mine() then return end
+---What the adapter feeds this session: wire lines, Actions, the exit. The adapter ignores
+---callbacks of a process that is no longer `self.proc`.
+function Session:_sink()
+  return {
+    raw = function(dir, line) self:_raw(dir, line) end,
+    action = function(a) actions.handle(self, a) end,
+    garbage = function(line)
       self:_raw('in', line)
       self:_append({ kind = 'unknown', label = 'not JSON', raw = line, live_only = true })
     end,
-    on_exit = function(code, _, tail)
-      if mine() then actions.on_exit(self, code, tail) end
-    end,
-    on_pid = function(pid) -- a keeper names Claude's pid once it is up
-      if mine() then self.pid = pid end
-    end,
-  })
-  if not proc then return false, 'cannot start Claude: ' .. tostring(err) end
-  self.proc, self.owned, self.parking, self.interrupted, self.requests = proc, true, false, false, {}
-  self.pid = proc.handle and proc.handle.pid
-  proc.queue_source = function() return self.queue end -- handed to a keeper when Neovim quits
-  -- the very first line of every new process: Claude answers with its models and commands,
-  -- without a turn (docs/protocol.md); the prompt is written after it
-  init_n = init_n + 1
-  local iid = 'i' .. init_n
-  if self:_write({ type = 'control_request', request_id = iid, request = { subtype = 'initialize' } }) then
-    self.requests[iid] = { subtype = 'initialize' }
-  end
-  require('agent-ide.claude.version').check() -- first start only; see claude/version.lua
-  for _, req in ipairs(self.deferred) do self:_control(req) end
+    exit = function(code, tail) actions.on_exit(self, code, tail) end,
+    pid = function(pid) self.pid = pid end,
+  }
+end
+
+function Session:_start_process()
+  self.requests = {}
+  local handle, err = self.adapter.start(self, self:_sink())
+  if not handle then return false, err end
+  self.proc, self.owned, self.parking, self.interrupted = handle, true, false, false
+  self.pid = handle.pid
+  -- mode and model changes asked for before the process ran
+  for _, req in ipairs(self.deferred) do handle:send_setting(req) end
   self.deferred = {}
   return true
 end
@@ -161,7 +123,7 @@ function Session:_start_turn(text)
   self:_set_state('busy')
   -- The process died before it could read the prompt: make sure it exits, so the exit
   -- path marks this turn failed.
-  if not self:_write({ type = 'user', message = { role = 'user', content = text } }) and self.proc then
+  if not self.proc:prompt(text) and self.proc then
     self.proc:stop(nil, true)
   end
   return true
@@ -169,29 +131,30 @@ end
 
 -- Public methods -------------------------------------------------------------------------
 
----A send now would start a Claude process (none runs here, none is being stopped, no keeper
----holds one to attach to).
+---A send now would start the agent's process (none runs here, none is being stopped, no
+---keeper holds one to attach to).
 function Session:needs_start()
-  return not self:_alive() and not self.parking and not require('agent-ide.keeper').info(self.id)
+  return not self:_alive() and not self.parking and not (self.capabilities.live and require('agent-ide.keeper').info(self.id))
 end
 
 ---Another Claude (a terminal) runs this session. The stale live entry of our own dead
 ---process (same pid) does not count, nor does a live map not refreshed for two poll intervals,
 ---nor a Claude a keeper of this plugin holds (that one is attached to, not driven elsewhere).
+---Only Claude sessions can be elsewhere (`capabilities.live`).
 function Session:_elsewhere()
-  if self:_alive() then return false end
+  if self:_alive() or not self.capabilities.live then return false end
   local e = require('agent-ide.live').fresh()[self.id]
   return e ~= nil and (self.pid == nil or e.pid ~= self.pid) and not require('agent-ide.keeper').claude_pids()[e.pid]
 end
 
----A keeper holds a Claude for this session and nothing runs here: attach to it; `cb(ok)`.
----False when there is nothing to attach to (or it is attached, or attaching).
+---A keeper holds a process for this session and nothing runs here: attach to it; `cb(ok)`.
+---False when there is nothing to attach to (or it is attached, or attaching, or the agent has
+---no keepers).
 ---@param cb? fun(ok: boolean, why?: string)
 ---@return boolean
 function Session:attach(cb)
-  local info = require('agent-ide.keeper').info(self.id)
-  if not info or self:_alive() or self.parking then return false end
-  return require('agent-ide.session.attach').attach(self, info, cb or function() end)
+  if not self.adapter.attach then return false end
+  return self.adapter.attach(self, cb or function() end)
 end
 
 ---The next queued prompt starts a turn when none runs (after an attach).
@@ -216,8 +179,8 @@ function Session:send(text)
     self:_emit('meta')
     return true
   end
-  -- a keeper holds this session's Claude: attach, then the queue goes on
-  if not self:_alive() and require('agent-ide.keeper').info(self.id) then
+  -- a keeper holds this session's process: attach, then the queue goes on
+  if not self:_alive() and self.capabilities.live and require('agent-ide.keeper').info(self.id) then
     self:_emit('meta')
     self:attach(function(ok) if ok then self:_resume_queue() end end)
     return true
@@ -236,35 +199,36 @@ end
 ---Interrupt the running turn and drop the queue.
 ---@return string[] dropped prompts, boolean sent
 function Session:interrupt()
-  local sent = self:_alive() and self:_control({ subtype = 'interrupt' }) or false
+  local sent = self:_alive() and self.proc:interrupt() or false
   -- only a running turn ends with a result that must not start the next prompt
   if sent and (self.state == 'busy' or self.state == 'waiting') then self.interrupted = true end
   return self:_drop_queue(), sent
 end
 
--- Mode and model changes before a process runs are sent right after it starts.
-function Session:_setting(request)
-  if self:_alive() then return self:_control(request) end
-  self.deferred[#self.deferred + 1] = request
+-- Mode and model changes before a process runs are sent right after it starts (`deferred`
+-- holds them in the adapter's own shape).
+function Session:_setting(op, value)
+  if self:_alive() then return self.proc[op](self.proc, value) end
+  self.deferred[#self.deferred + 1] = self.adapter.setting(op, value)
   return true
 end
 
----Ask Claude for another mode. Until Claude confirms or refuses, `mode_requested` holds the
+---Ask the agent for another mode. Until it confirms or refuses, `mode_requested` holds the
 ---mode asked for (plugin name: `manual` for Claude's `default`).
----@param mode string Claude's mode name ('plan', 'acceptEdits', 'default', ...)
+---@param mode string the agent's mode name (Claude: 'plan', 'acceptEdits', 'default', ...)
 ---@return boolean
 function Session:set_mode(mode)
-  if not self:_setting({ subtype = 'set_permission_mode', mode = mode }) then return false end
-  self.mode_requested = mode == 'default' and 'manual' or mode
+  if not self:_setting('set_mode', mode) then return false end
+  self.mode_requested = self.adapter.plugin_mode(mode)
   self:_emit('meta')
   return true
 end
 
----Ask Claude for another model; `model_requested` holds it until Claude answers.
+---Ask the agent for another model; `model_requested` holds it until it answers.
 ---@param model string
 ---@return boolean
 function Session:set_model(model)
-  if not self:_setting({ subtype = 'set_model', model = model }) then return false end
+  if not self:_setting('set_model', model) then return false end
   self.model_requested = model
   self:_emit('meta')
   return true
@@ -286,17 +250,10 @@ function Session:answer(request_id, allow, opts)
   end
   if not idx then return false end
   local p = self.pending_permissions[idx]
-  local response = allow and { behavior = 'allow', updatedInput = opts.updated_input or p.input }
-    or { behavior = 'deny', message = opts.message or DENY_MESSAGE }
-  local updates = allow and opts.updated_permissions or nil
-  if updates and #updates > 0 then response.updatedPermissions = updates end
-  if not self:_write({ type = 'control_response',
-    response = { subtype = 'success', request_id = request_id, response = response } }) then
-    return false
-  end
-  for _, u in ipairs(updates or {}) do
+  if not self:_alive() or not self.proc:answer(p, allow, opts) then return false end
+  for _, u in ipairs(allow and opts.updated_permissions or {}) do
     if u.type == 'setMode' and type(u.mode) == 'string' then
-      self.mode_requested = u.mode == 'default' and 'manual' or u.mode
+      self.mode_requested = self.adapter.plugin_mode(u.mode)
       self.mode_by_answer = self.mode_requested -- given up at the end of the turn if unconfirmed
       self:_emit('meta')
     end
@@ -313,7 +270,7 @@ end
 function Session:park(cb)
   cb = cb or function() end
   if self.state == 'busy' or self.state == 'waiting' then
-    local choice = vim.fn.confirm('Claude is still working in this session. Stop it?', '&Stop\n&Cancel', 2)
+    local choice = vim.fn.confirm(self.adapter.confirm_stop_text, '&Stop\n&Cancel', 2)
     if choice ~= 1 then return vim.schedule(function() cb(false) end) end
   end
   local dropped = self:_drop_queue()
@@ -332,41 +289,26 @@ function Session:mark_seen()
   if self.state == 'done' or self.state == 'failed' then self:_set_state('idle') end
 end
 
----Load the transcript's history into `events`. Reloads only when the file changed and no
----process runs; always calls `cb` (scheduled). Events added while loading are kept after
----the history.
+---Load the session's history into `events` (the adapter's: Claude's transcript file, the
+---plugin's own log for other agents); always calls `cb` (scheduled). A keeper that holds this
+---session's process is attached to instead: the history comes with the attach.
 ---@param cb? fun()
 function Session:load(cb)
   cb = cb or function() end
-  -- a keeper holds this session's Claude: the history comes with the attach
   if self:attach(function(ok) if not ok then self:load(cb) else cb() end end) then return end
-  if not self.path then return vim.schedule(cb) end
-  vim.uv.fs_stat(self.path, vim.schedule_wrap(function(_, st)
-    local key = st and (st.mtime.sec .. '.' .. st.mtime.nsec .. ':' .. st.size)
-    if not st or self:_alive() or key == self.loaded_key then return cb() end
-    local count = #self.events
-    require('agent-ide.index').history(self.path, function(history)
-      local extra = vim.list_slice(self.events, count + 1)
-      local ts = self.turn_start
-      if #extra > 0 and ts > count then
-        ts = ts - count + #history -- the turn started during the load: follow its prompt
-      else
-        ts = math.max(ts, #history + 1) -- never backwards
-        self.streaming = ''
-      end
-      self.events = vim.list_extend(history, extra)
-      self.turn_start, self.loaded_key = ts, key
-      self:_emit('events')
-      cb()
-    end)
-  end))
+  self.adapter.history(self, cb)
 end
 
----@param opts { id?: string, cwd: string, path?: string, title?: string }
+---@param opts { id?: string, cwd: string, path?: string, title?: string, agent?: string, agent_session_id?: string }
 ---@param id string
 function M.new(opts, id)
+  local name = opts.agent or agents.default()
+  local adapter, err = agents.get(name)
+  if not adapter then error('agent-ide: ' .. tostring(err), 2) end
   return setmetatable({
     id = id, cwd = opts.cwd, path = opts.path, title = opts.title,
+    agent = name, adapter = adapter, capabilities = vim.deepcopy(adapter.capabilities),
+    agent_session_id = opts.agent_session_id,
     state = opts.id and 'parked' or 'idle',
     events = {}, streaming = '', turn_start = 1, pending_permissions = {}, queue = {}, raw = {}, raw_dropped = 0,
     unread = false, owned = false, visible = false,

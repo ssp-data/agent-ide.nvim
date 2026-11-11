@@ -29,9 +29,12 @@ end
 
 function H.init(s, a)
   s.model, s.slash_commands = a.model, a.slash_commands
-  require('agent-ide.prefs').set('model', a.model) -- the model last used: new sessions start with it
-  if s.cwd and type(a.slash_commands) == 'table' and #a.slash_commands > 0 then
-    require('agent-ide.session.commands').record(s.cwd, a.slash_commands) -- for new sessions
+  -- prefs.json and commands.json are Claude's (its model names, its command list per project)
+  if s.agent == 'claude' then
+    require('agent-ide.prefs').set('model', a.model) -- the model last used: new sessions start with it
+    if s.cwd and type(a.slash_commands) == 'table' and #a.slash_commands > 0 then
+      require('agent-ide.session.commands').record(s.cwd, a.slash_commands) -- for new sessions
+    end
   end
   mode_is(s, a.mode)
   s:_emit('meta')
@@ -84,10 +87,18 @@ function H.echo(s, a)
   end
 end
 
+-- The agent's command list changed (ACP `available_commands_update`): the `/` menu follows.
+function H.commands(s, a)
+  s.slash_commands = a.slash_commands
+  s.capabilities.commands = type(a.slash_commands) == 'table' and #a.slash_commands > 0
+  s:_emit('meta')
+end
+
 function H.permission(s, a)
   s.pending_permissions[#s.pending_permissions + 1] = {
     request_id = a.request_id, tool_name = a.tool_name, input = a.input,
     description = a.description, suggestions = a.suggestions,
+    options = a.options, -- an ACP agent's own choices (`{ optionId, name, kind }`)
   }
   s:_emit('permission')
   s:_set_state('waiting')
@@ -220,7 +231,7 @@ function M.on_exit(s, code, tail)
   if parking then
     s:_set_state('parked')
   elseif s.state == 'busy' or s.state == 'waiting' then
-    local text = ('Claude exited (code %s)'):format(tostring(code))
+    local text = ('%s exited (code %s)'):format(s.adapter.label, tostring(code))
     tail = vim.trim(tail or '')
     if tail ~= '' then text = text .. '\n' .. tail end
     s:_append(live_meta('error', text))

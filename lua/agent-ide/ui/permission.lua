@@ -132,14 +132,31 @@ local function select(items, prompt, done)
   end)
 end
 
+-- An ACP agent's own choices beyond the one Allow and Deny send (`allow_always`, `reject_always`,
+-- …): offered with the agent's labels, answered with its option ids.
+local function option_items(s, p)
+  local items = {}
+  local translate = require('agent-ide.agents.acp.translate')
+  local used = { [translate.pick_option(p.options, true) or ''] = true, [translate.pick_option(p.options, false) or ''] = true }
+  for _, o in ipairs(type(p.options) == 'table' and p.options or {}) do
+    if type(o) == 'table' and o.optionId ~= nil and not used[o.optionId] then
+      local allow = type(o.kind) == 'string' and o.kind:find('^allow') ~= nil
+      items[#items + 1] = { label = tostring(o.name or o.optionId), run = function()
+        s:answer(p.request_id, allow, { option_id = o.optionId })
+      end }
+    end
+  end
+  return items
+end
+
 ---Ask the user about `p`; `finish(cancelled, choice)` once the select (chain) is over.
 local function ask_permission(s, p, finish)
   local items = {
     { label = 'Allow', run = function() s:answer(p.request_id, true) end },
     { label = 'Deny', run = function() s:answer(p.request_id, false) end },
   }
-  vim.list_extend(items, suggestion_items(s, p))
-  local prompt = ('Claude wants to use %s: %s'):format(tostring(p.tool_name), ask.summary(p))
+  vim.list_extend(items, p.options and option_items(s, p) or suggestion_items(s, p))
+  local prompt = ('%s wants to use %s: %s'):format(s.adapter.label, tostring(p.tool_name), ask.summary(p))
   if type(p.description) == 'string' and p.description ~= '' then prompt = prompt .. ' (' .. p.description .. ')' end
   select(items, prompt, function(choice) finish(choice == nil, choice) end)
 end
@@ -253,7 +270,7 @@ local function open_now(s, force)
       vim.defer_fn(function() M.maybe_prompt(s) end, BLOCKED_RETRY_MS)
     elseif typing_in_prompt(s, m.mode) and not c.echoed[p.request_id] then
       c.echoed[p.request_id] = true
-      echo(('Claude asks: %s: %s  (%s to answer)'):format(first_line(p.tool_name), first_line(ask.summary(p)), answer_key()))
+      echo(('%s asks: %s: %s  (%s to answer)'):format(s.adapter.label, first_line(p.tool_name), first_line(ask.summary(p)), answer_key()))
     end
     return
   end

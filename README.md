@@ -59,7 +59,7 @@ Although it's not the same, the agents-IDE does an fraction of it. What's compar
 
 ## Status
 
-Everything above is built and in daily use: the drawer, chat with Claude Code from Neovim, reusable prompts, git review with the diff view and the commit graph, search across all sessions, and the Omarchy indicator (see `omarchy/io.github.sspaeti.agent-ide/README.md`). Other agents (Codex, Gemini, opencode) are planned and not available yet.
+Everything above is built and in daily use: the drawer, chat with Claude Code from Neovim, reusable prompts, git review with the diff view and the commit graph, search across all sessions, and the Omarchy indicator (see `omarchy/io.github.sspaeti.agent-ide/README.md`). Claude Code is the main agent; Gemini CLI and opencode run in the same drawer and chat through the Agent Client Protocol (see [Other agents](#other-agents)); Codex has no ACP mode yet.
 
 ## Prerequisites
 
@@ -170,7 +170,7 @@ require('agent-ide').setup({
     drawer = { open = { '<CR>', 'o' }, fold = 'za', collapse_all = 'z0', expand_all = 'z9', refresh = 'R',
       tmux = { 'gT', '<leader>aT' }, search = { 'S', '<leader>ff', '<leader>S' }, park = 'sP', hide = 'H',
       delete = 'D', yank = 'y', lazygit = 'glg', close = 'q', help = { '?', 'g?' }, graph = 'G', scope = '<S-Tab>',
-      legend = { 'gL', '<leader>aL' }, close_tmux = 'X' },
+      legend = { 'gL', '<leader>aL' }, close_tmux = 'X', agent = 'A' },
     -- drawer, on prompt rows (elsewhere these keys keep their normal meaning)
     prompts = { edit = 'e', rename = 'r', delete = 'D', yank = 'y', to_library = 'sL' },
   },
@@ -193,6 +193,16 @@ require('agent-ide').setup({
   -- idle Claude with no Neovim attached is closed after that long (false: never).
   -- enabled = false: Claude is a child of Neovim and ends with it, as before
   keeper = { enabled = true, idle_minutes = 30 },
+  -- other agents (see Other agents): any entry besides claude is an ACP agent; `name = false`
+  -- removes a default. fs: which files the agent may read and write through the plugin
+  -- ('cwd': the session's folder and below, 'any', false); replay_context: when the agent
+  -- cannot reload a session, send the earlier conversation with the next prompt
+  agents = {
+    claude = {},
+    gemini = { kind = 'acp', cmd = { 'gemini', '--acp' }, label = 'Gemini', fs = 'cwd', replay_context = false },
+    opencode = { kind = 'acp', cmd = { 'opencode', 'acp' }, label = 'opencode', fs = 'cwd', replay_context = false },
+  },
+  default_agent = 'claude', -- what `+ New session` starts
   icons_style = 'nerd', -- 'nerd' (needs a Nerd Font) or 'plain' (characters of any monospace font)
   icons = {}, -- override single icons of that set, for example { busy = '*', changes = '' }; '' hides one
 })
@@ -287,6 +297,7 @@ In the drawer (`keys.drawer`; the prompt row keys are `keys.prompts`, the sessio
 | `gL`, `<leader>aL` | Show or hide the legend of the state marks (remembered) |
 | `G` | Commit graph of the row's repository (a worktree session: that worktree; see [Commit graph](#commit-graph)) |
 | `glg` | Open lazygit for the row's repository (a worktree row or session: that worktree) |
+| `A` | A new session of the row's project with another agent: a picker of the configured ones, unavailable ones marked (see [Other agents](#other-agents)); `:AgentsNew [agent]` does the same for the current project |
 | `<S-Tab>` | Scope: only the row's project (else the working directory's), or back to all projects (see [Project scope](#project-scope)) |
 | `?`, `g?` | Help: a list of every key you can filter by typing; `<CR>` on a row presses that key (see [Help](#help)) |
 | `e` | Prompt row: edit its file in the main window (Claude's commands and skills open read-only) |
@@ -365,6 +376,39 @@ A new Neovim finds the keepers (their files in the runtime folder) and shows the
 An idle Claude with no Neovim attached is closed by its keeper after `keeper.idle_minutes` (30; `false` keeps it forever); the session resumes from disk the next time you send to it. Parking (`sP`, `<leader>ax`) and the quit of a keeper's Claude work as before: the keeper closes Claude's input and, after half a second, ends the process; then the keeper exits. If a keeper itself dies, Claude loses its pipes and exits on its own; the session is parked with an `error` line saying `keeper lost`.
 
 Rules that still hold: the keeper is the plugin's own process, started with the same command, folder and environment (the API key stripped) as a direct Claude would be; nothing is ever sent to a Claude the plugin did not start; the keeper's files are in the plugin's runtime folder, 0600 in 0700, and go with the keeper. `keeper = { enabled = false }` returns to Claude as a child of Neovim.
+
+## Other agents
+
+Claude Code is what this plugin is built around. Other agents run beside it through the [Agent Client Protocol](https://agentclientprotocol.com) (ACP), in the same drawer, chat, prompt buffer, permission flow and footer; nothing about Claude sessions changes. `A` on a row of a project in the drawer (or `:AgentsNew [agent]`) starts a session with one of the configured agents; `+ New session` starts `default_agent`. A session of another agent carries its name: `gemini · <title>` on its drawer row, `Gemini · …` at the start of the chat header.
+
+| | Claude Code | Gemini CLI (`gemini --acp`) | opencode (`opencode acp`) | Codex |
+|---|---|---|---|---|
+| Chat, streaming, tool calls, thinking | yes | yes | yes | no ACP mode in `codex` 0.163 |
+| Permission asks answered in Neovim | yes | yes (the agent's own choices) | only if its own config makes it ask | |
+| Interrupt | yes | yes | yes | |
+| Resume after parking or a restart | yes | yes (`session/load`) | yes (`session/load`) | |
+| Permission modes (`<S-Tab>`) | yes | its modes (default, autoEdit, yolo, plan) | its agents (build, plan) | |
+| Model picker | yes | its models | its models | |
+| `/` commands | yes | the ones it lists | the ones it lists | |
+| Quota in the footer | yes | no (not reported) | no | |
+| Background sessions (keepers), native hand-over to tmux | yes | no: a child of Neovim, ends with it | no | |
+| Search across sessions | yes | not indexed yet | not indexed yet | |
+
+A control an agent does not offer is not shown, and its key says so in one line. Checked against the real agents with `make test-real-acp`: Gemini CLI 0.65 passes every check (answer, allowed and denied edit, interrupt, park, resume); opencode 2.2.7 was driven the same way while its provider was logged in. What was observed of each agent's protocol is in `docs/protocol-acp.md`.
+
+**History.** ACP agents keep their conversations in their own formats, so the plugin logs every session it runs with them itself: `stdpath('state')/agent-ide/sessions/<agent>/<session id>.jsonl`, one event per line. The drawer lists those sessions and the chat shows their history from that file; sessions you ran in the agent's own terminal UI are not listed. `D` does not delete such a session (the trash handles what Claude keeps); it names the log file, which you can remove by hand, and `H` hides the row.
+
+**Files.** An agent may ask the plugin to read or write a file for it; by default only below the session's folder (`fs = 'cwd'`; `'any'` lifts that, `false` declines every such request). Terminal requests are declined.
+
+**Billing and logins.** Each agent runs with your own login and configuration for it; the plugin adds or removes no API key for ACP agents (for Claude it still strips `ANTHROPIC_API_KEY`). An agent that is not logged in says so in the transcript.
+
+**Adding an agent.** Any program that speaks ACP over stdio:
+
+```lua
+opts = { agents = { myagent = { kind = 'acp', cmd = { 'myagent', '--acp' }, label = 'My agent' } } }
+```
+
+`gemini = false` (or `opencode = false`) removes a default from the picker.
 
 ## Footer
 
@@ -538,6 +582,7 @@ What it writes, all of it private (new files `0600`, folders it creates `0700`, 
 | `hidden.json` | `stdpath('data')/agent-ide/` | the ids of the sessions you hid with `H` |
 | Trash (`<YYYYMMDD-HHMMSS>-<id>/` per deleted session) | `stdpath('data')/agent-ide/trash/` | everything `D` moved out of Claude's folder (transcripts, file history, the session's `history.jsonl` lines) and a manifest, until `:AgentsTrash empty` or `trash.keep_days` |
 | `commands.json` | `stdpath('state')/agent-ide/` | Claude's command names last seen per project (at most 50), keyed by a short hash of the project folder, for the `/` menu |
+| Session logs of other agents (`<agent>/<session id>.jsonl`) | `stdpath('state')/agent-ide/sessions/` | every event of a session run with an ACP agent (your prompts, its answers, tool calls), so the drawer and the chat have its history; see [Other agents](#other-agents) |
 | `models.json` | `stdpath('state')/agent-ide/` | the models Claude Code last listed (value, name, description, full id), its version and when; nothing about your account |
 | `prefs.json` | `stdpath('state')/agent-ide/` | the model last used (new sessions start with it) and whether the legend is shown |
 | Drafts (`<session id>.md` per prompt buffer) | `stdpath('state')/agent-ide/drafts/` | the text of a prompt buffer as you type it, until it is sent or discarded (see Drafts under [Chat](#chat)) |

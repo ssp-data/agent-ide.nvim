@@ -61,7 +61,8 @@ defaults = function()
         tmux = { 'gT', '<leader>aT' }, -- jump to the session's tmux pane, or continue it in native Claude there
         search = { 'S', '<leader>ff', '<leader>S' }, park = 'sP', hide = 'H', delete = 'D', yank = 'y',
         lazygit = 'glg', close = 'q', help = { '?', 'g?' }, graph = 'G', scope = '<S-Tab>',
-        legend = { 'gL', '<leader>aL' }, close_tmux = 'X' },
+        legend = { 'gL', '<leader>aL' }, close_tmux = 'X',
+        agent = 'A' }, -- a new session of the row's project with another agent (a picker)
       -- drawer, on prompt rows (elsewhere these keys keep their normal meaning)
       prompts = { edit = 'e', rename = 'r', delete = 'D', yank = 'y', to_library = 'sL' },
       -- commit graph view, buffer-local; each a key, a list of keys, or false
@@ -91,6 +92,20 @@ defaults = function()
     -- leaves it running and a new Neovim reattaches; idle_minutes: an idle Claude with no Neovim
     -- attached is closed after that long (false: never). enabled = false: a child of Neovim
     keeper = { enabled = true, idle_minutes = 30 },
+    -- the agents a session can run (see Other agents in the README): `claude` is built in and
+    -- configured under `claude` above; any other entry is an ACP agent `{ kind = 'acp', cmd = {…},
+    -- env = {}, fs = 'cwd'|'any'|false, replay_context = false }`. default_agent: what
+    -- `+ New session` starts
+    agents = {
+      claude = {},
+      -- label: what the UI calls it; fs: which files the agent may read and write through the
+      -- plugin ('cwd': the session's folder and below; 'any'; false); replay_context: when the
+      -- agent cannot reload a session, send the earlier conversation with the next prompt
+      gemini = { kind = 'acp', cmd = { 'gemini', '--acp' }, label = 'Gemini', fs = 'cwd', replay_context = false },
+      opencode = { kind = 'acp', cmd = { 'opencode', 'acp' }, label = 'opencode', fs = 'cwd', replay_context = false },
+      -- codex: no ACP mode in codex 0.163.0; add { kind = 'acp', cmd = { '<an ACP adapter for Codex>' } } once one exists
+    },
+    default_agent = 'claude',
     -- 'nerd' (needs a Nerd Font in the terminal) or 'plain'; `icons` overrides single entries
     -- of that set (see ui/icons.lua for the keys); an empty string hides an icon
     icons_style = 'nerd',

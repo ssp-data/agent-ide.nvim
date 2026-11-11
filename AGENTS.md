@@ -21,7 +21,8 @@ A Neovim plugin that manages Claude Code sessions from inside Neovim: a drawer w
 | `lua/agent-ide/sound.lua` | the chime when a session needs you (`chime.wav` in the cache folder, a system player) |
 | `lua/agent-ide/claude/` | starting Claude Code (directly or through a keeper), stream parsing, version guard |
 | `lua/agent-ide/keeper/` | the keeper (`main.lua`, run by `nvim -l`, owns a Claude's pipes and outlives Neovim), its client, discovery; `session/attach.lua` reattaches a Session |
-| `lua/agent-ide/session/` | session object, states, prompt queue, actions |
+| `lua/agent-ide/agents/` | the adapters a Session drives an agent through: `claude.lua` (Claude's wire, keepers), `acp/` (any agent speaking the Agent Client Protocol: JSON-RPC client, translation to Actions, client-side file methods), `log.lua` (the plugin's own event log for sessions without a Claude transcript); `init.lua` is the registry (`config.agents`, `default_agent`) |
+| `lua/agent-ide/session/` | session object, states, prompt queue, actions; agent-agnostic (`s.adapter`, `s.capabilities`) |
 | `lua/agent-ide/transcript/` | parsing transcripts into events, rendering events into lines and folds |
 | `lua/agent-ide/index/`, `search/` | talking to the helper, Lua fallbacks |
 | `lua/agent-ide/git*.lua` | read-only, asynchronous git queries, parsing, cache |
@@ -54,6 +55,7 @@ make test-helper   # Rust tests
 make helper        # build the helper after changing helper/ or pulling
 make test-omarchy  # widget tests (node)
 make test-real     # real Claude on the subscription; not part of `make test`, run on purpose only
+make test-real-acp # real gemini --acp and opencode acp (their own logins); run on purpose only
 make release-notes # print the changelog section that would be released
 make demo          # Neovim on the synthetic demo (demo/): sessions, repos, prompts under /tmp/agent-ide-demo; for screenshots
 make release VERSION=x.y.z   # see "Releasing"
@@ -110,7 +112,7 @@ Small, known:
 - Delete (`D`): the "history file is open" check exists on Linux only; `todos/` and `debug/` files of a session are not moved.
 - `make test-real` has not been run against the features added after the chat was built (`initialize`, `--resume` with `--model`).
 
-From the design, not built: an idle-timeout setting for parked processes (design section 12); prebuilt helper binaries (section 9.2); other agents through ACP (part 6, `docs/superpowers/plans/2026-11-10-part-6-other-agents.md`), deferred until the owner asks. The owner's feedback rounds are `docs/superpowers/plans/2026-11-10-feedback-round-1.md` and `docs/superpowers/specs/2026-11-10-feedback-round-2-design.md`; the appendix of round 1 lists mock views (permission float, slash float, richer fold headers) that were not built.
+From the design, not built: prebuilt helper binaries (section 9.2). Other agents (part 6, `docs/superpowers/plans/2026-11-10-part-6-other-agents.md`) are built for ACP agents; open there: Codex (no ACP mode), keepers and search for ACP sessions, opencode's permission asks (only seen with its own config), an agent that is not logged in (shown as its error, never retried). The owner's feedback rounds are `docs/superpowers/plans/2026-11-10-feedback-round-1.md` and `docs/superpowers/specs/2026-11-10-feedback-round-2-design.md`; the appendix of round 1 lists mock views (permission float, slash float, richer fold headers) that were not built.
 
 Decisions taken on the owner's behalf, recorded as `Ruling:` lines in the build ledger; the ones that shape behaviour: a hidden session that needs attention is shown as normal while that lasts; in project scope the footer counts only that project, the status file for the bar stays global; `<C-c>` on a drawer session row asks first, in the chat it interrupts at once; quota is never read through credentials or the network; over-long lines are cut for display with a counted marker, the raw view keeps everything; templates and saved prompts are loaded and saved byte for byte; permission rules are offered only where Claude suggests them; `<S-Tab>` in the drawer is the scope key on every row, so the chat's mode cycle is not on a session row; `y` on a session row yanks its last prompt.
 

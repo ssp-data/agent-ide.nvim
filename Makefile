@@ -26,6 +26,12 @@ test-real: deps $(if $(shell command -v cargo),helper)
 demo: $(if $(shell command -v cargo),helper)
 	scripts/demo.sh
 
+# Real ACP agents (gemini --acp, opencode acp; their own logins) in temporary git repositories;
+# not part of `test`. REAL_ACP_AGENTS="gemini" limits it.
+.PHONY: test-real-acp
+test-real-acp: deps
+	timeout 1800 nvim --headless --noplugin -u tests/minimal_init.lua -c "luafile tests/real/acp.lua"
+
 bench: deps
 	BENCH_DIR="$(DIR)" nvim --headless --noplugin -u tests/minimal_init.lua -c "luafile tests/bench.lua" -c "qa!"
 

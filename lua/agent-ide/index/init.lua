@@ -81,16 +81,25 @@ end
 
 ---@param cb fun(sessions: table[])
 ---@param projects_dir? string defaults to the `projects_dir` setting
+---@param cb fun(sessions: table[])
+---@param dir? string
 function M.scan(cb, dir)
   dir = dir or projects_dir()
-  if M.backend() ~= 'helper' then return lua_scan.scan(dir, cb) end
+  -- the sessions of other agents come from the plugin's own logs (agents/log.lua), after
+  -- Claude's transcripts, whichever backend read those
+  local function with_logs(sessions)
+    require('agent-ide.agents.log').scan(function(extra)
+      cb(#extra > 0 and vim.list_extend(sessions, extra) or sessions)
+    end)
+  end
+  if M.backend() ~= 'helper' then return lua_scan.scan(dir, with_logs) end
   rearm()
   helper.request('scan', { projects_dir = dir }, function(err, result)
     if err then
       if err ~= 'stopped' then fail(err) end
-      return lua_scan.scan(dir, cb)
+      return lua_scan.scan(dir, with_logs)
     end
-    cb(result.sessions or {})
+    with_logs(result.sessions or {})
   end)
 end
 

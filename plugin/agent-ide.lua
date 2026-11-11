@@ -30,6 +30,13 @@ vim.api.nvim_create_user_command('AgentsChime', function(o) require('agent-ide.s
       return vim.tbl_filter(function(w) return vim.startswith(w, lead) end, require('agent-ide.sound').NAMES)
     end })
 
+-- A new session of the current project (the chat's, else the working directory's) with an agent.
+vim.api.nvim_create_user_command('AgentsNew', function(o) require('agent-ide').new_session(o.args) end,
+  { nargs = '?', desc = 'Agent-IDE: start a new session with an agent (no name: pick one)',
+    complete = function(lead)
+      return vim.tbl_filter(function(w) return vim.startswith(w, lead) end, require('agent-ide.agents').names())
+    end })
+
 -- AGENT_IDE_WATCHDOG=1 nvim: log where Lua is when Neovim freezes (util/watchdog.lua)
 if vim.env.AGENT_IDE_WATCHDOG and vim.env.AGENT_IDE_WATCHDOG ~= '' and vim.env.AGENT_IDE_WATCHDOG ~= '0' then
   require('agent-ide.util.watchdog').start(tonumber(vim.env.AGENT_IDE_WATCHDOG) or 5)
