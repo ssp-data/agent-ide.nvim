@@ -43,11 +43,37 @@ local GROUPS = {
   AgentIdeModeHot = { link = 'WarningMsg' },
 }
 
+-- the terminal's 16 colours when the colorscheme sets none (`g:terminal_color_<n>`)
+local TERMINAL = { '#15161e', '#f7768e', '#9ece6a', '#e0af68', '#7aa2f7', '#bb9af7', '#7dcfff', '#a9b1d6',
+  '#414868', '#f7768e', '#9ece6a', '#e0af68', '#7aa2f7', '#bb9af7', '#7dcfff', '#c0caf5' }
+
+local function palette(n)
+  if n < 16 then return vim.g['terminal_color_' .. n] or TERMINAL[n + 1] end
+  return require('agent-ide.transcript.ansi').xterm(math.min(n, 255))
+end
+
+local ansi_groups = {} -- name -> true: the colour-code groups defined so far
+
+local function define_ansi(name)
+  local spec = require('agent-ide.transcript.ansi').spec(name, palette, M.dim().fg)
+  vim.api.nvim_set_hl(0, name, vim.tbl_extend('force', spec, { default = true }))
+end
+
+---Define colour-code group `name` (`transcript/ansi.lua` names them by their style) the first
+---time it is used; it is defined again after every colorscheme change, like the others.
+---@param name string
+function M.ansi(name)
+  if ansi_groups[name] then return end
+  ansi_groups[name] = true
+  define_ansi(name)
+end
+
 local function apply()
   for name, def in pairs(GROUPS) do
     if type(def) == 'function' then def = def() end
     vim.api.nvim_set_hl(0, name, vim.tbl_extend('force', def, { default = true }))
   end
+  for name in pairs(ansi_groups) do define_ansi(name) end
 end
 
 ---Define the groups, and again after every colorscheme change (`:hi clear` drops them).

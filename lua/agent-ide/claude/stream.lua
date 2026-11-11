@@ -22,8 +22,9 @@ local QUIET_STREAM = {
   message_start = true, content_block_stop = true, message_delta = true, message_stop = true,
 }
 local QUIET_DELTA = { input_json_delta = true, thinking_delta = true, signature_delta = true }
--- System subtypes that carry nothing to show (a running estimate, an announcement).
-local QUIET_SYSTEM = { thinking_tokens = true }
+-- System subtypes that carry nothing to show (a running estimate, an announcement; the list of
+-- background tasks repeats what their own task_* objects say).
+local QUIET_SYSTEM = { thinking_tokens = true, background_tasks_changed = true }
 
 local Decoder = {}
 Decoder.__index = Decoder
@@ -31,7 +32,8 @@ Decoder.__index = Decoder
 function M.new()
   -- streamed: a text delta of the current content block has been delivered.
   -- tool_ids: ids of tool_use blocks already reported.
-  return setmetatable({ streamed = false, tool_ids = {} }, Decoder)
+  -- tasks: task id -> { name, quiet } for the task_* objects (quiet: a foreground task).
+  return setmetatable({ streamed = false, tool_ids = {}, tasks = {} }, Decoder)
 end
 
 local function unknown(label, raw)
@@ -56,6 +58,65 @@ local function event_actions(evs, sidechain, streamed)
     out[#out + 1] = a
   end
   return out
+end
+
+local function duration(ms)
+  if ms < 1000 then return ('%dms'):format(ms) end
+  local secs = math.floor(ms / 1000)
+  if secs < 60 then return ('%ds'):format(secs) end
+  return ('%dm %ds'):format(math.floor(secs / 60), secs % 60)
+end
+
+local function task_event(label, lines)
+  return { { type = 'event', event = { kind = 'meta', label = label, text = table.concat(lines, '\n') } } }
+end
+
+-- task_started, task_updated, task_notification: a background task (an async subagent, a shell
+-- run in the background) as folds named by its description. A foreground task is a tool call
+-- whose own fold shows it, so it and its later objects are quiet.
+function Decoder:task(obj, st)
+  local id = str(obj.task_id) or '?'
+  if st == 'task_started' then
+    local quiet = obj.is_backgrounded == false
+    local name = str(obj.description) or id
+    self.tasks[id] = { name = name, quiet = quiet }
+    if quiet then return {} end
+    local kind, notes = str(obj.subagent_type), {}
+    if kind and obj.task_type then notes[#notes + 1] = tostring(obj.task_type) end
+    kind = kind or str(obj.task_type) or 'task'
+    if obj.is_backgrounded == true then notes[#notes + 1] = 'in the background' end
+    if type(obj.spawn_depth) == 'number' and obj.spawn_depth > 0 then
+      notes[#notes + 1] = 'depth ' .. obj.spawn_depth
+    end
+    local lines = { #notes > 0 and ('%s (%s)'):format(kind, table.concat(notes, ', ')) or kind }
+    if str(obj.prompt) then lines[#lines + 1] = 'prompt: ' .. obj.prompt end
+    local ids = { 'task ' .. id }
+    if str(obj.run_id) then ids[#ids + 1] = 'run ' .. obj.run_id end
+    if str(obj.tool_use_id) then ids[#ids + 1] = 'tool call ' .. obj.tool_use_id end
+    lines[#lines + 1] = table.concat(ids, ', ')
+    return task_event('task started: ' .. name, lines)
+  end
+  local task = self.tasks[id] or { name = id }
+  if task.quiet then return {} end
+  if st == 'task_updated' then
+    local patch = type(obj.patch) == 'table' and obj.patch or {}
+    local lines, keys = {}, vim.tbl_keys(patch)
+    table.sort(keys)
+    for _, k in ipairs(keys) do
+      if k ~= 'status' then lines[#lines + 1] = ('%s: %s'):format(k, (vim.inspect(patch[k]):gsub('^"(.*)"$', '%1'))) end
+    end
+    return task_event(('task %s: %s'):format(str(patch.status) or 'updated', task.name), lines)
+  end
+  local lines = {}
+  if str(obj.summary) then lines[#lines + 1] = obj.summary end
+  local u = type(obj.usage) == 'table' and obj.usage or {}
+  local usage = {}
+  if type(u.total_tokens) == 'number' then usage[#usage + 1] = u.total_tokens .. ' tokens' end
+  if type(u.tool_uses) == 'number' then usage[#usage + 1] = u.tool_uses .. ' tool uses' end
+  if type(u.duration_ms) == 'number' then usage[#usage + 1] = duration(u.duration_ms) end
+  if #usage > 0 then lines[#lines + 1] = table.concat(usage, ', ') end
+  if str(obj.output_file) then lines[#lines + 1] = 'output: ' .. obj.output_file end
+  return task_event(('task %s: %s'):format(str(obj.status) or 'done', task.name), lines)
 end
 
 function Decoder:system(obj, raw)
@@ -84,6 +145,8 @@ function Decoder:system(obj, raw)
     end
     local name = str(obj.hook_name) or 'hook'
     return { { type = 'event', event = { kind = 'meta', label = 'hook', text = name .. ': ' .. detail } } }
+  elseif st == 'task_started' or st == 'task_updated' or st == 'task_notification' then
+    return self:task(obj, st)
   elseif QUIET_SYSTEM[st] then
     return {}
   end

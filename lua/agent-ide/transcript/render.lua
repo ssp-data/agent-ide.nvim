@@ -1,7 +1,12 @@
 -- Renders transcript events into buffer lines plus fold ranges, and the lines where Claude's own
 -- text (an answer, a remark between tool calls) starts: the view marks them with a `●`. The
--- removed and added lines of an `Edit` are listed too: the view colours them.
+-- removed and added lines of an `Edit`, the command of a `Bash` and the colour codes of tool
+-- output (`ansi`, the codes left out of the text) are listed too: the view colours them.
+local ansi = require('agent-ide.transcript.ansi')
+
 local M = {}
+
+local GUTTER = '│ '
 
 local CAP_INPUT, CAP_RESULT, CAP_UNKNOWN, CAP_EDIT_SIDE = 60, 200, 20, 30
 
@@ -32,10 +37,10 @@ end
 ---that is yanked (the `ir`/`ar` answer text objects copy buffer text) yanks in its cut form.
 ---@param line string
 ---@param max integer
----@return string
+---@return string line, integer kept bytes of `line`
 local function cut_line(line, max)
   local n = #line
-  if n <= max then return line end
+  if n <= max then return line, n end
   local keep = max
   -- back up over continuation bytes (10xxxxxx) so no character is split
   while keep > 0 do
@@ -43,13 +48,13 @@ local function cut_line(line, max)
     if b < 0x80 or b >= 0xC0 then break end
     keep = keep - 1
   end
-  return line:sub(1, keep) .. (' … +%d bytes (gr shows the raw line)'):format(n - keep)
+  return line:sub(1, keep) .. (' … +%d bytes (gr shows the raw line)'):format(n - keep), keep
 end
 
 ---`cut_line` for every line of a list (the same count of lines comes back).
 local function cut_lines(lines, max)
   for i, l in ipairs(lines) do
-    if #l > max then lines[i] = cut_line(l, max) end
+    if #l > max then lines[i] = (cut_line(l, max)) end
   end
   return lines
 end
@@ -111,19 +116,47 @@ local function call_body(call)
   return cut_lines(cap(lines, CAP_INPUT), M.MAX_FOLD_LINE)
 end
 
+---Lines of a tool result without their colour codes, and the coloured spans per line index
+---(`ansi.parse`, clipped to what a cut line still shows).
+---@return string[] lines, table<integer, table[]> spans
 local function result_lines(res)
-  local lines = split(res.text)
-  if res.is_error then lines[1] = 'ERROR ' .. lines[1] end
-  return cut_lines(cap(lines, CAP_RESULT), M.MAX_FOLD_LINE)
+  local lines, spans, state = cap(split(res.text), CAP_RESULT), {}, nil
+  for i = 1, math.min(#lines, CAP_RESULT) do
+    local sp
+    lines[i], sp, state = ansi.parse(lines[i], state)
+    if #sp > 0 then spans[i] = sp end
+  end
+  if res.is_error then
+    lines[1] = 'ERROR ' .. lines[1]
+    for _, s in ipairs(spans[1] or {}) do s[1], s[2] = s[1] + 6, s[2] + 6 end
+  end
+  for i, l in ipairs(lines) do
+    if #l > M.MAX_FOLD_LINE then
+      local keep
+      lines[i], keep = cut_line(l, M.MAX_FOLD_LINE)
+      local kept = {}
+      for _, s in ipairs(spans[i] or {}) do
+        if s[1] < keep then kept[#kept + 1] = { s[1], math.min(s[2], keep), s[3] } end
+      end
+      spans[i] = kept
+    end
+  end
+  return lines, spans
 end
 
----Emit rendered events into `out` ({lines, folds, answers, added, removed, commands}); `results` maps id -> results, `known` is the set of call ids; `nested` renders a sidechain group's own events without regrouping.
+---Emit rendered events into `out` ({lines, folds, answers, added, removed, commands, ansi}); `results` maps id -> results, `known` is the set of call ids; `nested` renders a sidechain group's own events without regrouping.
 local function emit(events, results, known, out, nested)
-  local function block(header, body)
+  -- `spans`: the coloured spans of body lines, by index into `body` (from `result_lines`)
+  local function block(header, body, spans)
     local first = #out.lines + 1
-    out.lines[first] = cut_line(header, M.MAX_FOLD_LINE)
-    for _, l in ipairs(body) do out.lines[#out.lines + 1] = '│ ' .. l end
+    out.lines[first] = (cut_line(header, M.MAX_FOLD_LINE))
+    for _, l in ipairs(body) do out.lines[#out.lines + 1] = GUTTER .. l end
     out.folds[#out.folds + 1] = { first = first, last = #out.lines }
+    for k, list in pairs(spans or {}) do
+      for _, s in ipairs(list) do
+        out.ansi[#out.ansi + 1] = { line = first + k, col = #GUTTER + s[1], end_col = #GUTTER + s[2], hl = s[3] }
+      end
+    end
     return first
   end
   local function plain(lines)
@@ -151,12 +184,15 @@ local function emit(events, results, known, out, nested)
         local j = i
         while j <= #events and events[j].sidechain do j = j + 1 end
         local group = vim.list_slice(events, i, j - 1)
-        local inner = { lines = {}, folds = {}, answers = {}, added = {}, removed = {}, commands = {} }
+        local inner = { lines = {}, folds = {}, answers = {}, added = {}, removed = {}, commands = {}, ansi = {} }
         emit(group, results, known, inner, true)
         local first = block(('▸ subagent (%d events)'):format(#group), inner.lines)
         for _, l in ipairs(inner.added) do out.added[#out.added + 1] = first + l end
         for _, l in ipairs(inner.removed) do out.removed[#out.removed + 1] = first + l end
         for _, l in ipairs(inner.commands) do out.commands[#out.commands + 1] = first + l end
+        for _, a in ipairs(inner.ansi) do
+          out.ansi[#out.ansi + 1] = { line = first + a.line, col = #GUTTER + a.col, end_col = #GUTTER + a.end_col, hl = a.hl }
+        end
         i = j
       else
         if ev.kind == 'text' then
@@ -165,11 +201,13 @@ local function emit(events, results, known, out, nested)
           plain({ '' })
         elseif ev.kind == 'tool_call' then
           local body, signs = call_body(ev)
-          local n = #body
+          local n, spans = #body, {}
           for _, res in ipairs(results[ev.id] or {}) do
-            vim.list_extend(body, result_lines(res))
+            local lines, sp = result_lines(res)
+            for k, list in pairs(sp) do spans[#body + k] = list end
+            vim.list_extend(body, lines)
           end
-          local first = block(('▸ %s: %s'):format(first_line(ev.name or '?'), summary(ev.input)), body)
+          local first = block(('▸ %s: %s'):format(first_line(ev.name or '?'), summary(ev.input)), body, spans)
           for k = 1, signs and n or 0 do
             if signs[k] == '+' then
               out.added[#out.added + 1] = first + k
@@ -233,10 +271,12 @@ end
 ---`answers`: the first line of every main-thread `text` event (a subagent's text is not one).
 ---`added`, `removed`: the `+` and `-` lines of every `Edit`, a subagent's included.
 ---`commands`: the command lines of every `Bash` call, a subagent's included.
+---`ansi`: the coloured spans of tool results (0-based byte columns, end exclusive), with the
+---highlight group `ansi.spec` defines.
 ---@param events table[]
----@return { lines: string[], folds: { first: integer, last: integer }[], answers: integer[], added: integer[], removed: integer[], commands: integer[] }
+---@return { lines: string[], folds: { first: integer, last: integer }[], answers: integer[], added: integer[], removed: integer[], commands: integer[], ansi: { line: integer, col: integer, end_col: integer, hl: string }[] }
 function M.render(events)
-  local out = { lines = {}, folds = {}, answers = {}, added = {}, removed = {}, commands = {} }
+  local out = { lines = {}, folds = {}, answers = {}, added = {}, removed = {}, commands = {}, ansi = {} }
   local first = 1
   for i = 2, #events + 1 do
     if i > #events or M.starts_turn(events[i]) then

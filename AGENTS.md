@@ -22,7 +22,7 @@ A Neovim plugin that manages Claude Code sessions from inside Neovim: a drawer w
 | `lua/agent-ide/claude/` | starting Claude Code (directly or through a keeper), stream parsing, version guard |
 | `lua/agent-ide/keeper/` | the keeper (`main.lua`, run by `nvim -l`, owns a Claude's pipes and outlives Neovim), its client, discovery; `session/attach.lua` reattaches a Session |
 | `lua/agent-ide/session/` | session object, states, prompt queue, actions |
-| `lua/agent-ide/transcript/` | parsing transcripts into events, rendering events into lines and folds |
+| `lua/agent-ide/transcript/` | parsing transcripts into events, rendering events into lines and folds; `ansi.lua` reads the colour codes of tool output |
 | `lua/agent-ide/index/`, `search/` | talking to the helper, Lua fallbacks |
 | `lua/agent-ide/git*.lua` | read-only, asynchronous git queries, parsing, cache |
 | `lua/agent-ide/prompts/` | prompt library, skills and commands, saved prompts |
@@ -63,7 +63,7 @@ Run one file or case: `TEST_FILE=tests/test_tree.lua make test`, `TEST_CASE='tex
 
 ## Rules that are not negotiable
 
-1. **Fidelity.** What Claude sent is what the user sees. Nothing is dropped or altered silently; unknown events are shown as `unknown` folds; anything cut for display carries a counted marker and the raw view (`gr`) keeps everything. The Lua parser (`transcript/parse.lua`) and the Rust parser (`helper/src/events.rs`) must produce the same events: change both, bump `RULES_VERSION` in both, and keep the parity tests green.
+1. **Fidelity.** What Claude sent is what the user sees. Nothing is dropped or altered silently; unknown events are shown as `unknown` folds; anything cut for display carries a counted marker and the raw view (`gr`) keeps everything. Colour codes (SGR) in tool output are shown as the colours they stand for, as a terminal would; other escape sequences stay in the text. The Lua parser (`transcript/parse.lua`) and the Rust parser (`helper/src/events.rs`) must produce the same events: change both, bump `RULES_VERSION` in both, and keep the parity tests green.
 2. **Prompts are sent verbatim.** Templates and saved prompts are loaded and saved byte for byte.
 3. **Never interrupt typing.** No focus changes, no pop-ups while the user types; permission requests and results wait. Nothing synchronous on a keystroke.
 4. **Speed.** The budget tests (`tests/test_budget.lua`, `test_git_budget.lua`, `test_graph_budget.lua`, `test_search_budget.lua`, with `budget_lib.lua`, and the helper's search budgets in `make test-helper`) are requirements; never weaken them. No synchronous git or file scanning on the UI thread.
@@ -112,7 +112,7 @@ Small, known:
 
 From the design, not built: an idle-timeout setting for parked processes (design section 12); prebuilt helper binaries (section 9.2); other agents through ACP (part 6, `docs/superpowers/plans/2026-11-10-part-6-other-agents.md`), deferred until the owner asks. The owner's feedback rounds are `docs/superpowers/plans/2026-11-10-feedback-round-1.md` and `docs/superpowers/specs/2026-11-10-feedback-round-2-design.md`; the appendix of round 1 lists mock views (permission float, slash float, richer fold headers) that were not built.
 
-Decisions taken on the owner's behalf, recorded as `Ruling:` lines in the build ledger; the ones that shape behaviour: a hidden session that needs attention is shown as normal while that lasts; in project scope the footer counts only that project, the status file for the bar stays global; `<C-c>` on a drawer session row asks first, in the chat it interrupts at once; quota is never read through credentials or the network; over-long lines are cut for display with a counted marker, the raw view keeps everything; templates and saved prompts are loaded and saved byte for byte; permission rules are offered only where Claude suggests them; `<S-Tab>` in the drawer is the scope key on every row, so the chat's mode cycle is not on a session row; `y` on a session row yanks its last prompt.
+Decisions taken on the owner's behalf, recorded as `Ruling:` lines in the build ledger; the ones that shape behaviour: a hidden session that needs attention is shown as normal while that lasts; in project scope the footer counts only that project, the status file for the bar stays global; `<C-c>` on a drawer session row asks first, in the chat it interrupts at once; quota is never read through credentials or the network; over-long lines are cut for display with a counted marker, the raw view keeps everything; templates and saved prompts are loaded and saved byte for byte; permission rules are offered only where Claude suggests them; `<S-Tab>` in the drawer is the scope key on every row, so the chat's mode cycle is not on a session row; `y` on a session row yanks its last prompt. A foreground task's `task_*` stream objects (and `background_tasks_changed`) add no fold: the task's own tool call shows it.
 
 ## Releasing
 

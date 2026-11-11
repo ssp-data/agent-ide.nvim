@@ -106,7 +106,7 @@ end
 SEQ.turns300 = many_turns(300)
 
 local function concat_turns(events)
-  local lines, folds, answers, added, removed = {}, {}, {}, {}, {}
+  local lines, folds, answers, added, removed, commands, ansi = {}, {}, {}, {}, {}, {}, {}
   local seg = {}
   local function flush()
     if #seg == 0 then return end
@@ -115,6 +115,10 @@ local function concat_turns(events)
     for _, a in ipairs(r.answers) do answers[#answers + 1] = a + #lines end
     for _, l in ipairs(r.added) do added[#added + 1] = l + #lines end
     for _, l in ipairs(r.removed) do removed[#removed + 1] = l + #lines end
+    for _, l in ipairs(r.commands) do commands[#commands + 1] = l + #lines end
+    for _, a in ipairs(r.ansi) do
+      ansi[#ansi + 1] = { line = a.line + #lines, col = a.col, end_col = a.end_col, hl = a.hl }
+    end
     vim.list_extend(lines, r.lines)
     seg = {}
   end
@@ -123,7 +127,7 @@ local function concat_turns(events)
     seg[#seg + 1] = ev
   end
   flush()
-  return { lines = lines, folds = folds, answers = answers, added = added, removed = removed }
+  return { lines = lines, folds = folds, answers = answers, added = added, removed = removed, commands = commands, ansi = ansi }
 end
 
 T['render is compositional over turns'] = function()
@@ -622,6 +626,33 @@ T['command marks: the command of a Bash fold is coloured after the gutter, its o
   eq(marked(), want)
   view:sync('reset')
   eq(marked(), want)
+end
+
+T['ansi marks: colour codes in a result are coloured in the buffer, kept through a reload'] = function()
+  local s, buf = stub(), new_buf()
+  local view = live_render.attach(buf, s)
+  api.nvim_set_current_buf(buf)
+  local history = require('agent-ide.ui.history')
+  local function marked()
+    local out = {}
+    for _, m in ipairs(history.diff_marks(buf)) do
+      local line = api.nvim_buf_get_lines(buf, m.line - 1, m.line, false)[1]
+      if m.hl:find('^AgentIdeAnsi') then out[#out + 1] = { line:sub(m.col + 1, m.end_col), m.hl } end
+    end
+    return out
+  end
+  push(s, { kind = 'prompt', text = 'one' })
+  push(s, { kind = 'tool_call', id = 'b', name = 'Bash', input = { command = 'make test' } })
+  push(s, { kind = 'tool_result', id = 'b', text = '\27[1mFails (0)\27[0m and \27[32mok' })
+  view:sync('events')
+  local want = { { 'Fails (0)', 'AgentIdeAnsi_B' }, { 'ok', 'AgentIdeAnsi_F2' } }
+  eq(marked(), want)
+  eq(vim.tbl_contains(api.nvim_buf_get_lines(buf, 0, -1, false), '│ Fails (0) and ok'), true)
+  view:sync('reset')
+  eq(marked(), want)
+  -- the group exists, with the colourscheme's terminal colour or the default one
+  eq(api.nvim_get_hl(0, { name = 'AgentIdeAnsi_B' }).bold, true)
+  eq(api.nvim_get_hl(0, { name = 'AgentIdeAnsi_F2' }).fg ~= nil, true)
 end
 
 return T

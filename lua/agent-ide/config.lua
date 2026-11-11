@@ -13,10 +13,11 @@ defaults = function()
     drawer = { width = 44, side = 'right', legend = true }, -- legend: the state marks at the bottom (gL)
     live = { interval_ms = 5000, cmd = { 'claude', 'agents', '--json' } },
     helper = { enabled = true, path = nil }, -- nil: <plugin root>/helper/target/release/agent-ide-helper
-    -- modes: what <S-Tab> cycles through (plugin names; `manual` is Claude's `default`);
-    -- default_mode: where the cycle starts before Claude reports a mode (nil: as if manual)
+    -- modes: what <S-Tab> cycles through (plugin names; `manual` is Claude's `default`; plan has
+    -- its own key, keys.chat.plan); default_mode: where the cycle starts before Claude reports a
+    -- mode (nil: as if manual)
     claude = { cmd = { 'claude' }, strip_api_key = true, model = nil, version_check = true,
-      modes = { 'manual', 'acceptEdits', 'plan', 'auto' }, default_mode = nil,
+      modes = { 'manual', 'acceptEdits', 'auto' }, default_mode = nil,
       -- nil: the models Claude Code offers; a list of strings: exactly those
       models = nil },
     tcd = true,
@@ -39,7 +40,7 @@ defaults = function()
       -- chat view, buffer-local in the transcript and the prompt
       chat = { send = '<C-CR>', send_alt = '<leader><CR>', interrupt = '<C-c>', prompt = '<leader>ap', help = 'g?',
         history_prev = '<C-p>', history_next = '<C-n>', attach = '<leader>af',
-        answer_inner = 'ir', answer_outer = 'ar', mode = '<S-Tab>', model = { '<leader>aM', '<leader>M' },
+        answer_inner = 'ir', answer_outer = 'ar', mode = '<S-Tab>', plan = '<leader>am', model = { '<leader>aM', '<leader>M' },
         answer = '<leader>ay', raw = 'gr', raw_event = 'gR',
         -- continue the session in native Claude in a tmux pane (a typed key such as gT only in the
         -- transcript: the prompt buffer is where you edit text, gT stays Vim's there)
@@ -48,8 +49,8 @@ defaults = function()
         diff = { 'gd', '<leader>gd' },
         save_library = '<leader>W', -- prompt: save the prompt to the library (asks for a name)
         queue = { 'Q', '<leader>aQ' }, -- show or hide the queue panel (Q: Ex mode, which the prompt does not need)
-        -- next / previous session of the project, in the drawer's order (in the prompt
-        -- buffer this takes over Vim's ]s / [s spelling motions)
+        -- next / previous session of the project, in the drawer's order (also in the drawer;
+        -- in the prompt buffer this takes over Vim's ]s / [s spelling motions)
         next_session = ']s', prev_session = '[s',
         prompts = '<leader>al' }, -- pick a prompt (skills, commands, library, saved)
       -- diff view, buffer-local on both sides; a one-character key (q, ?, R) only on the plugin's
@@ -64,7 +65,8 @@ defaults = function()
         tmux = { 'gT', '<leader>aT' }, -- jump to the session's tmux pane, or continue it in native Claude there
         search = { 'S', '<leader>ff', '<leader>S' }, park = 'sP', hide = 'H', delete = 'D', yank = 'y',
         lazygit = 'glg', close = 'q', help = { '?', 'g?' }, graph = 'G', scope = '<S-Tab>',
-        legend = { 'gL', '<leader>aL' }, close_tmux = 'X' },
+        legend = { 'gL', '<leader>aL' }, close_tmux = 'X',
+        next_session = ']s', prev_session = '[s' }, -- open the next / previous session of the project
       -- drawer, on prompt rows (elsewhere these keys keep their normal meaning)
       prompts = { edit = 'e', rename = 'r', delete = 'D', yank = 'y', to_library = 'sL' },
       -- commit graph view, buffer-local; each a key, a list of keys, or false
