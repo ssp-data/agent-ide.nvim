@@ -261,6 +261,39 @@ T['commands: the command lines of a Bash call, not its output, cut marker or oth
   eq(t[#t], '│ echo 60')
 end
 
+T['ansi: colour codes in a result become coloured spans after the gutter, also nested and on ERROR'] = function()
+  local out = render.render({
+    { kind = 'tool_call', id = 'b', name = 'Bash', input = { command = 'make test' } },
+    { kind = 'tool_result', id = 'b', text = '\27[1mFails (0)\27[0m ok\n\27[31mred' },
+    { kind = 'tool_call', id = 'c', name = 'Bash', input = { command = 'x' } },
+    { kind = 'tool_result', id = 'c', is_error = true, text = '\27[31mboom' },
+    { kind = 'prompt', text = 'hi' },
+    { kind = 'tool_call', id = 'd', name = 'Bash', sidechain = true, input = { command = 'y' } },
+    { kind = 'tool_result', id = 'd', sidechain = true, text = '\27[32mgreen' },
+  })
+  local got = {}
+  for _, a in ipairs(out.ansi) do got[#got + 1] = { out.lines[a.line]:sub(a.col + 1, a.end_col), a.hl } end
+  eq(got, {
+    { 'Fails (0)', 'AgentIdeAnsi_B' },
+    { 'red', 'AgentIdeAnsi_F1' },
+    { 'boom', 'AgentIdeAnsi_F1' },
+    { 'green', 'AgentIdeAnsi_F2' },
+  })
+  eq(vim.tbl_contains(out.lines, '│ Fails (0) ok'), true)
+  eq(vim.tbl_contains(out.lines, '│ ERROR boom'), true)
+  eq(vim.tbl_contains(out.lines, '│ │ green'), true)
+end
+
+T['ansi: a line cut for display keeps its spans inside what is shown'] = function()
+  local long = '\27[31m' .. string.rep('a', render.MAX_FOLD_LINE + 10)
+  local out = render.render({
+    { kind = 'tool_call', id = 'b', name = 'Bash', input = { command = 'x' } },
+    { kind = 'tool_result', id = 'b', text = long },
+  })
+  local a = out.ansi[1]
+  eq({ a.col, a.end_col }, { #'│ ', #'│ ' + render.MAX_FOLD_LINE })
+end
+
 T['commands: a Bash call inside a subagent fold is marked on its nested lines'] = function()
   local out = render.render({
     { kind = 'prompt', text = 'hi' },

@@ -11,6 +11,8 @@ All notable changes to Agent-IDE.nvim are listed here. The format follows [Keep 
 
 - The removed and added lines of an `Edit` fold in a transcript are red and green (`AgentIdeDiffDel`, `AgentIdeDiffAdd`), also inside a subagent fold and in the search preview. `gd` on the fold opens the file's branch diff, as before.
 - The command in a `Bash` fold has its own colour (`AgentIdeCommand`, linked to `Special`), so it stands apart from its output.
+- Colour codes in tool output (`make test`, `git`, `cargo`) are shown as colours and bold, as a terminal shows them, instead of `^[[1m` noise. The colours follow the colorscheme's terminal palette; the raw view (`gr`) keeps the exact bytes.
+- Background tasks (an async subagent, a shell run in the background) show as `task started: <description>` and `task completed: <description>` folds with the summary, tokens, tool uses and duration, instead of `unknown: system/task_started` folds of raw JSON. Foreground tasks no longer add a fold: their tool call already shows them.
 
 ### Changed
 

@@ -152,12 +152,45 @@ T['system objects: hooks, thinking tokens, status, other subtypes'] = function()
     '{"type":"system","subtype":"hook_response","hook_id":"h2","hook_name":"SessionStart","hook_event":"SessionStart","outcome":"error","exit_code":1,"output":"","stdout":"","stderr":"boom"}',
     '{"type":"system","subtype":"thinking_tokens","estimated_tokens":50,"estimated_tokens_delta":50}',
     '{"type":"system","subtype":"status","status":null,"permissionMode":"acceptEdits"}',
-    '{"type":"system","subtype":"task_started","task_id":"k"}',
+    '{"type":"system","subtype":"future_thing","x":1}',
   })
   eq(a[1], { type = 'event', event = { kind = 'meta', label = 'hook', text = 'SessionStart: boom' } })
   eq(a[2], { type = 'status', mode = 'acceptEdits' })
-  eq({ a[3].type, a[3].label }, { 'unknown', 'system/task_started' })
+  eq({ a[3].type, a[3].label }, { 'unknown', 'system/future_thing' })
   eq(#a, 3)
+end
+
+T['background tasks: started, updated and done as readable folds named by their description'] = function()
+  local a = feed_lines({
+    '{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"k","description":"Scan repo"}],"uuid":"u","session_id":"s"}',
+    '{"type":"system","subtype":"task_started","task_id":"k","run_id":"r","tool_use_id":"t","description":"Scan repo","subagent_type":"Explore","is_backgrounded":true,"task_type":"local_agent","prompt":"Find\\nthings","uuid":"u","session_id":"s"}',
+    '{"type":"system","subtype":"task_updated","task_id":"k","run_id":"r","patch":{"status":"completed","end_time":5}}',
+    '{"type":"system","subtype":"task_notification","task_id":"k","run_id":"r","tool_use_id":"t","status":"completed","output_file":"/tmp/o","summary":"Found 3 files","usage":{"total_tokens":1234,"tool_uses":4,"duration_ms":65000}}',
+  })
+  eq(events(a), {
+    { kind = 'meta', label = 'task started: Scan repo',
+      text = 'Explore (local_agent, in the background)\nprompt: Find\nthings\ntask k, run r, tool call t' },
+    { kind = 'meta', label = 'task completed: Scan repo', text = 'end_time: 5' },
+    { kind = 'meta', label = 'task completed: Scan repo',
+      text = 'Found 3 files\n1234 tokens, 4 tool uses, 1m 5s\noutput: /tmp/o' },
+  })
+  eq(#a, 3)
+end
+
+T['background tasks: a foreground task is its own tool fold already, so it and its updates are quiet'] = function()
+  local a = feed_lines({
+    '{"type":"system","subtype":"task_started","task_id":"f","description":"Run tests","is_backgrounded":false,"task_type":"local_bash"}',
+    '{"type":"system","subtype":"task_updated","task_id":"f","patch":{"status":"completed"}}',
+    '{"type":"system","subtype":"task_notification","task_id":"f","status":"completed","summary":"ok"}',
+  })
+  eq(a, {})
+end
+
+T['background tasks: an update for a task never seen starting is still shown, by its id'] = function()
+  local a = feed_lines({
+    '{"type":"system","subtype":"task_notification","task_id":"z","status":"failed","summary":"boom"}',
+  })
+  eq(events(a), { { kind = 'meta', label = 'task failed: z', text = 'boom' } })
 end
 
 T['sidechain deltas are dropped; known stream events yield nothing'] = function()

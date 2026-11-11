@@ -128,19 +128,18 @@ function M.answer_marks(buf)
   return out
 end
 
----Colour the removed and added lines of the `Edit` folds (`render.render().removed` and
----`.added`, 1-based) red and green, and the command lines of the `Bash` folds (`.commands`)
----after their `│ ` gutter, over the markdown highlighting. Marks from line `from` (1-based) on
----are replaced; earlier ones stay.
+---Colour, over the markdown highlighting, what `render.render()` lists (lines 1-based in `buf`):
+---the removed and added lines of the `Edit` folds (`removed`, `added`) red and green, the command
+---lines of the `Bash` folds (`commands`) after their `│ ` gutter, and the colour codes of tool
+---output (`ansi`). Marks from line `from` (1-based) on are replaced; earlier ones stay.
 ---@param buf integer
 ---@param from integer
----@param added integer[]
----@param removed integer[]
----@param commands integer[]|nil
-function M.mark_diff(buf, from, added, removed, commands)
+---@param marks { added: integer[]|nil, removed: integer[]|nil, commands: integer[]|nil, ansi: table[]|nil }
+function M.mark_diff(buf, from, marks)
   api.nvim_buf_clear_namespace(buf, ns_diff, from - 1, -1)
   local count = api.nvim_buf_line_count(buf)
-  for hl, lines in pairs({ AgentIdeDiffAdd = added, AgentIdeDiffDel = removed, AgentIdeCommand = commands or {} }) do
+  local whole = { AgentIdeDiffAdd = marks.added, AgentIdeDiffDel = marks.removed, AgentIdeCommand = marks.commands }
+  for hl, lines in pairs(whole) do
     for _, l in ipairs(lines) do
       if l >= from and l <= count then
         local text = api.nvim_buf_get_lines(buf, l - 1, l, false)[1]
@@ -149,6 +148,17 @@ function M.mark_diff(buf, from, added, removed, commands)
           while text:sub(col + 1, col + #GUTTER) == GUTTER do col = col + #GUTTER end
         end
         api.nvim_buf_set_extmark(buf, ns_diff, l - 1, col, { end_col = #text, hl_group = hl, priority = 200 })
+      end
+    end
+  end
+  local highlights = require('agent-ide.ui.highlights')
+  for _, a in ipairs(marks.ansi or {}) do
+    if a.line >= from and a.line <= count then
+      highlights.ansi(a.hl)
+      local len = #api.nvim_buf_get_lines(buf, a.line - 1, a.line, false)[1]
+      if a.col < len then
+        api.nvim_buf_set_extmark(buf, ns_diff, a.line - 1, a.col,
+          { end_col = math.min(a.end_col, len), hl_group = a.hl, priority = 150 })
       end
     end
   end
@@ -162,7 +172,7 @@ function M.diff_marks(buf)
   for _, m in ipairs(api.nvim_buf_get_extmarks(buf, ns_diff, 0, -1, { details = true })) do
     out[#out + 1] = { line = m[2] + 1, col = m[3], end_col = m[4].end_col, hl = m[4].hl_group }
   end
-  table.sort(out, function(a, b) return a.line < b.line end)
+  table.sort(out, function(a, b) return a.line < b.line or (a.line == b.line and a.col < b.col) end)
   return out
 end
 

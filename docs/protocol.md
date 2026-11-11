@@ -428,9 +428,12 @@ non-table object gives `unknown`.
 |---|---|
 | `system/init` | `init{session_id, model, mode (permissionMode, default→manual), slash_commands, version (claude_code_version)}` |
 | `system/status` | `status{mode? (default→manual), busy = true when status == "requesting"}` |
-| `system/thinking_tokens` | nothing (only a token estimate) |
+| `system/thinking_tokens`, `system/background_tasks_changed` | nothing (a token estimate; the task list repeats the task_* objects) |
+| `system/task_started` | `is_backgrounded:false` (a foreground task, shown by its own tool call): nothing, and nothing for that task's later objects. Otherwise `event{meta, label "task started: <description>", text "<subagent_type or task_type> (<task_type>, in the background)", "prompt: …", "task <id>, run <id>, tool call <id>"}` |
+| `system/task_updated` | `event{meta, label "task <patch.status>: <description or task id>", text: the other patch fields as "key: value"}`; nothing for a foreground task |
+| `system/task_notification` | `event{meta, label "task <status>: <description or task id>", text: summary, "<n> tokens, <n> tool uses, <duration>", "output: <output_file>"}`; nothing for a foreground task |
 | `system/hook_started`, `system/hook_response` | nothing; if `outcome == "error"`, a non-zero `exit_code` or an `error` field: `event{meta, label "hook", text "<hook_name>: <stderr or output or error>"}` |
-| any other `system/<subtype>` (task_*, background_tasks_changed, ...) | `unknown{label "system/<subtype>", raw}` |
+| any other `system/<subtype>` | `unknown{label "system/<subtype>", raw}` |
 | `stream_event` text_delta, main thread | `delta{text}`; marks the current content block as streamed |
 | `stream_event` text_delta whose `parent_tool_use_id` is a string | nothing (dropped). Not observed: subagent messages came only whole. Main-thread blocks were always followed by their full `assistant` object, so the full message is expected to follow; see Open questions |
 | `stream_event` content_block_start | nothing; a main-thread one resets the streamed mark (a subagent's does not) |
