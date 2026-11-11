@@ -51,11 +51,16 @@ window_for_pid() {
 }
 
 # Newer Hyprland parses dispatch arguments as Lua; older ones take the classic syntax.
+# The Lua focus does not leave the current workspace, so the window's workspace comes first
+# (the classic focuswindow switches on its own).
 focus_window() {
-  local out
-  out=$(hyprctl dispatch "hl.dsp.focus({ window = \"address:$1\" })" 2>&1)
+  local addr=$1 ws out
+  ws=$(jq -r --arg a "$addr" '.[] | select(.address == $a) | .workspace.id' <<<"$clients" 2>/dev/null | head -n1)
+  case "$ws" in '' | null | -*) ws="" ;; esac
+  [ -n "$ws" ] && hyprctl dispatch "hl.dsp.focus({ workspace = \"$ws\" })" >/dev/null 2>&1
+  out=$(hyprctl dispatch "hl.dsp.focus({ window = \"address:$addr\" })" 2>&1)
   [ "$out" = "ok" ] && return 0
-  hyprctl dispatch focuswindow "address:$1" >/dev/null 2>&1
+  hyprctl dispatch focuswindow "address:$addr" >/dev/null 2>&1
 }
 
 # A tmux client with a visible window, preferring one already on the pane's session.

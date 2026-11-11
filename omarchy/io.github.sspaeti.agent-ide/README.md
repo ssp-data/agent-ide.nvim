@@ -19,7 +19,7 @@ Left click opens it. Rows are sorted by urgency (waiting with the tool name as r
 running), then by project, and grouped by source: one block per Neovim (labelled `Neovim · <project>`, `Neovim · <a>, <b>` or `Neovim · <n> projects`), then `tmux / other`.
 Each row shows project, session title and state. `j`/`k` move, `Enter` or a click focuses the tmux pane of that
 session (same steps as the Neovim plugin: `ps -o tty=`, `tmux list-panes -a`, `tmux switch-client`), `r`
-refreshes, `Esc` closes. Jumping focuses the terminal window of a tmux client in Hyprland (one already on that session if there is one, found through `hyprctl` and `jq`), then switches that client to the session, window and pane. Without Hyprland only tmux's selection changes. Middle click on the dot refreshes. The panel shows at most 20 rows.
+refreshes, `Esc` closes. Jumping switches to the workspace of, and focuses, the terminal window of a tmux client in Hyprland (one already on that session if there is one, found through `hyprctl` and `jq`), then switches that client to the session, window and pane. Without Hyprland only tmux's selection changes. Middle click on the dot refreshes. The panel shows at most 20 rows.
 
 ## Install
 
