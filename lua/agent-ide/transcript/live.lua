@@ -12,8 +12,9 @@ local M = {}
 local View = {}
 View.__index = View
 
--- `marks`: the answer-start lines (1-based, relative to `lines`) of what was rendered.
-local function render_range(events, first, last, lines, levels, marks)
+-- `marks`: the answer-start lines (1-based, relative to `lines`) of what was rendered; `diff`:
+-- its added and removed lines.
+local function render_range(events, first, last, lines, levels, marks, diff)
   if last < first then return end
   local out = render.render(vim.list_slice(events, first, last))
   local lv = render.fold_levels(out.folds, #out.lines)
@@ -21,12 +22,15 @@ local function render_range(events, first, last, lines, levels, marks)
   vim.list_extend(lines, out.lines)
   vim.list_extend(levels, lv)
   for _, a in ipairs(out.answers) do marks[#marks + 1] = base + a end
+  for _, l in ipairs(out.added) do diff.added[#diff.added + 1] = base + l end
+  for _, l in ipairs(out.removed) do diff.removed[#diff.removed + 1] = base + l end
 end
 
 ---Replace the buffer lines from `row` (0-based) on, where the view last wrote `old`/`old_lv`,
 ---with `new`/`new_lv`; only lines from the first difference in text or level are written, and
----the answer marks (`new_marks`, 1-based in `new`) of the rewritten part are set again.
-function View:write(row, old, old_lv, new, new_lv, new_marks)
+---the answer marks (`new_marks`, 1-based in `new`) and the diff colours (`new_diff`) of the
+---rewritten part are set again.
+function View:write(row, old, old_lv, new, new_lv, new_marks, new_diff)
   local k = 1
   while k <= #old and k <= #new and old[k] == new[k] and old_lv[k] == new_lv[k] do k = k + 1 end
   if k > #old and k > #new then return end
@@ -42,6 +46,10 @@ function View:write(row, old, old_lv, new, new_lv, new_marks)
   local abs = {}
   for _, m in ipairs(new_marks or {}) do abs[#abs + 1] = row + m end
   history.mark_answers(buf, start + 1, abs)
+  local added, removed = {}, {}
+  for _, l in ipairs(new_diff and new_diff.added or {}) do added[#added + 1] = row + l end
+  for _, l in ipairs(new_diff and new_diff.removed or {}) do removed[#removed + 1] = row + l end
+  history.mark_diff(buf, start + 1, added, removed)
 end
 
 ---Windows showing the buffer whose cursor is on its last line, or on a closed fold that
@@ -106,10 +114,10 @@ function View:sync_events()
   end
   self.seen = #events
   -- completed turns (rendered for the last time) then the current one
-  local lines, levels, marks = {}, {}, {}
-  render_range(events, self.start, start - 1, lines, levels, marks)
+  local lines, levels, marks, diff = {}, {}, {}, { added = {}, removed = {} }
+  render_range(events, self.start, start - 1, lines, levels, marks, diff)
   local done = #lines
-  render_range(events, start, #events, lines, levels, marks)
+  render_range(events, start, #events, lines, levels, marks, diff)
   local below = vim.list_extend(vim.list_slice(self.stream), self.tail)
   local old = vim.list_extend(vim.list_slice(self.turn), below)
   local old_lv = vim.list_extend(vim.list_slice(self.turn_lv), zeros(#below))
@@ -123,7 +131,7 @@ function View:sync_events()
   vim.list_extend(lines, below)
   vim.list_extend(levels, zeros(#below))
   local follow = self:followers()
-  self:write(self.offset, old, old_lv, lines, levels, marks)
+  self:write(self.offset, old, old_lv, lines, levels, marks, diff)
   self:close_new_folds(self.offset, old_lv, levels)
   self:follow(follow)
   self.offset = self.offset + done

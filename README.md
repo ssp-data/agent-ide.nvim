@@ -2,6 +2,8 @@
 
 A Neovim plugin to run and review all your Claude Code sessions from one place: a drawer lists every session grouped by git repository, you chat in native buffers (a prompt buffer to write, a markdown buffer to read), and you review what the agent changed with git diffs, without leaving Neovim.
 
+[!NOTE]
+> There's a branch to support Gemini, Codex through the `zed-industries/codex-acp`, but the effort and integration to ao all the features for Claude Code is not worth yet, as I myself use Claude Code exclusively for now. But the architecture and everything is prepared for adding other Agents, too.
 
 ## Why I built Agent-IDE?
 
@@ -326,7 +328,7 @@ In the chat (transcript and prompt buffer, unless noted):
 | `:q!` | Prompt: hide the window and discard the draft |
 | `g?` | Help, filterable (`?` stays Vim's backward search) |
 
-The history buffer is markdown with folds for tool calls, results and thinking. Claude's own words, an answer or a remark between two tool calls, start with a green `●` (`AgentIdeAnswerMark`; virtual text, so yanks and the `ir` / `ar` text objects copy the words only), while it streams too. Anything the viewer does not understand is shown as a fold marked `unknown`, never dropped, and truncated output says how many lines are hidden.
+The history buffer is markdown with folds for tool calls, results and thinking. Claude's own words, an answer or a remark between two tool calls, start with a green `●` (`AgentIdeAnswerMark`; virtual text, so yanks and the `ir` / `ar` text objects copy the words only), while it streams too. In an `Edit` fold the removed lines are red and the added ones green (`AgentIdeDiffDel`, `AgentIdeDiffAdd`), and `gd` on the fold opens the branch diff of that file. Anything the viewer does not understand is shown as a fold marked `unknown`, never dropped, and truncated output says how many lines are hidden.
 
 ### Help
 

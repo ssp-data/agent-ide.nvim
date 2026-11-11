@@ -4,6 +4,12 @@ All notable changes to Agent-IDE.nvim are listed here. The format follows [Keep 
 
 ## [Unreleased]
 
+### Added
+
+- Omarchy bar widget: clicking a session also focuses the terminal window that shows tmux, and switches that tmux client to the session's exact session, window and pane.
+
+- The removed and added lines of an `Edit` fold in a transcript are red and green (`AgentIdeDiffDel`, `AgentIdeDiffAdd`), also inside a subagent fold and in the search preview. `gd` on the fold opens the file's branch diff, as before.
+
 ## [0.1.0] - 2026-11-10
 
 First public version.

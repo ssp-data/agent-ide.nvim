@@ -226,4 +226,39 @@ T['answers: the first line of every main-thread text event; a subagent text is n
   eq(#out.answers, 3)
 end
 
+T['added and removed: the + and - lines of an Edit, not its cut markers, results or look-alikes'] = function()
+  local out = render.render({
+    { kind = 'tool_call', id = 'b', name = 'Bash', input = { command = 'git diff' } },
+    { kind = 'tool_result', id = 'b', text = '- not an edit\n+ neither' },
+    { kind = 'tool_call', id = 'e', name = 'Edit',
+      input = { file_path = '/f', old_string = string.rep('o\n', 30) .. 'o', new_string = 'n1\nn2' } },
+    { kind = 'tool_result', id = 'e', text = '+ done' },
+    { kind = 'tool_call', id = 'w', name = 'Write', input = { file_path = '/g', content = '- x\n+ y' } },
+  })
+  local function texts(list)
+    local t = {}
+    for _, l in ipairs(list) do t[#t + 1] = out.lines[l] end
+    return t
+  end
+  eq(#out.removed, 30)
+  for _, l in ipairs(texts(out.removed)) do eq(l, '│ - o') end
+  eq(texts(out.added), { '│ + n1', '│ + n2' })
+end
+
+T['added and removed: an Edit inside a subagent fold is marked on its nested lines'] = function()
+  local out = render.render({
+    { kind = 'prompt', text = 'hi' },
+    { kind = 'text', text = 'sub', sidechain = true },
+    { kind = 'tool_call', id = 'e', name = 'Edit', sidechain = true,
+      input = { file_path = '/f', old_string = 'a', new_string = 'b\nc' } },
+  })
+  local function texts(list)
+    local t = {}
+    for _, l in ipairs(list) do t[#t + 1] = out.lines[l] end
+    return t
+  end
+  eq(texts(out.removed), { '│ │ - a' })
+  eq(texts(out.added), { '│ │ + b', '│ │ + c' })
+end
+
 return T
