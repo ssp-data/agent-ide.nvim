@@ -1,5 +1,6 @@
 -- Renders transcript events into buffer lines plus fold ranges, and the lines where Claude's own
--- text (an answer, a remark between tool calls) starts: the view marks them with a `●`.
+-- text (an answer, a remark between tool calls) starts: the view marks them with a `●`. The
+-- removed and added lines of an `Edit` are listed too: the view colours them.
 local M = {}
 
 local CAP_INPUT, CAP_RESULT, CAP_UNKNOWN, CAP_EDIT_SIDE = 60, 200, 20, 30
@@ -81,6 +82,9 @@ local function summary(input)
   return ''
 end
 
+---Body lines of a tool call; for an `Edit` also which of them are removed (`-`) or added (`+`)
+---lines, by index (the `… n more lines` markers are neither).
+---@return string[] lines, table<integer, string>|nil signs
 local function call_body(call)
   local input = type(call.input) == 'table' and call.input or {}
   local lines
@@ -88,9 +92,13 @@ local function call_body(call)
     lines = split('$ ' .. tostring(input.command or ''))
   elseif call.name == 'Edit' then
     -- each side capped on its own, so a long removal never hides the added lines
-    lines = cap(prefixed(split(input.old_string), '- '), CAP_EDIT_SIDE)
-    vim.list_extend(lines, cap(prefixed(split(input.new_string), '+ '), CAP_EDIT_SIDE))
-    return cut_lines(lines, M.MAX_FOLD_LINE)
+    local old, new = split(input.old_string), split(input.new_string)
+    lines = cap(prefixed(old, '- '), CAP_EDIT_SIDE)
+    local signs, plus = {}, #lines
+    for i = 1, math.min(#old, CAP_EDIT_SIDE) do signs[i] = '-' end
+    vim.list_extend(lines, cap(prefixed(new, '+ '), CAP_EDIT_SIDE))
+    for i = 1, math.min(#new, CAP_EDIT_SIDE) do signs[plus + i] = '+' end
+    return cut_lines(lines, M.MAX_FOLD_LINE), signs
   elseif call.name == 'Write' then
     lines = split(input.content)
   else
@@ -105,13 +113,14 @@ local function result_lines(res)
   return cut_lines(cap(lines, CAP_RESULT), M.MAX_FOLD_LINE)
 end
 
----Emit rendered events into `out` ({lines, folds}); `results` maps id -> results, `known` is the set of call ids; `nested` renders a sidechain group's own events without regrouping.
+---Emit rendered events into `out` ({lines, folds, answers, added, removed}); `results` maps id -> results, `known` is the set of call ids; `nested` renders a sidechain group's own events without regrouping.
 local function emit(events, results, known, out, nested)
   local function block(header, body)
     local first = #out.lines + 1
     out.lines[first] = cut_line(header, M.MAX_FOLD_LINE)
     for _, l in ipairs(body) do out.lines[#out.lines + 1] = '│ ' .. l end
     out.folds[#out.folds + 1] = { first = first, last = #out.lines }
+    return first
   end
   local function plain(lines)
     for _, l in ipairs(lines) do out.lines[#out.lines + 1] = l end
@@ -138,9 +147,11 @@ local function emit(events, results, known, out, nested)
         local j = i
         while j <= #events and events[j].sidechain do j = j + 1 end
         local group = vim.list_slice(events, i, j - 1)
-        local inner = { lines = {}, folds = {}, answers = {} }
+        local inner = { lines = {}, folds = {}, answers = {}, added = {}, removed = {} }
         emit(group, results, known, inner, true)
-        block(('▸ subagent (%d events)'):format(#group), inner.lines)
+        local first = block(('▸ subagent (%d events)'):format(#group), inner.lines)
+        for _, l in ipairs(inner.added) do out.added[#out.added + 1] = first + l end
+        for _, l in ipairs(inner.removed) do out.removed[#out.removed + 1] = first + l end
         i = j
       else
         if ev.kind == 'text' then
@@ -148,11 +159,19 @@ local function emit(events, results, known, out, nested)
           plain(cut_lines(split(ev.text), M.MAX_TEXT_LINE))
           plain({ '' })
         elseif ev.kind == 'tool_call' then
-          local body = call_body(ev)
+          local body, signs = call_body(ev)
+          local n = #body
           for _, res in ipairs(results[ev.id] or {}) do
             vim.list_extend(body, result_lines(res))
           end
-          block(('▸ %s: %s'):format(first_line(ev.name or '?'), summary(ev.input)), body)
+          local first = block(('▸ %s: %s'):format(first_line(ev.name or '?'), summary(ev.input)), body)
+          for k = 1, signs and n or 0 do
+            if signs[k] == '+' then
+              out.added[#out.added + 1] = first + k
+            elseif signs[k] == '-' then
+              out.removed[#out.removed + 1] = first + k
+            end
+          end
         elseif ev.kind == 'tool_result' then
           block('▸ result (no matching call)', result_lines(ev))
         elseif ev.kind == 'thinking' then
@@ -174,7 +193,7 @@ end
 ---@param input any
 ---@return string summary, string[] body
 function M.tool_parts(name, input)
-  return summary(input), call_body({ name = name, input = input })
+  return summary(input), (call_body({ name = name, input = input }))
 end
 
 ---First line of `s` (`\n`, `\r\n` or `\r` end a line).
@@ -205,10 +224,11 @@ end
 
 ---Render events turn by turn; the result is the concatenation of each turn rendered alone.
 ---`answers`: the first line of every main-thread `text` event (a subagent's text is not one).
+---`added`, `removed`: the `+` and `-` lines of every `Edit`, a subagent's included.
 ---@param events table[]
----@return { lines: string[], folds: { first: integer, last: integer }[], answers: integer[] }
+---@return { lines: string[], folds: { first: integer, last: integer }[], answers: integer[], added: integer[], removed: integer[] }
 function M.render(events)
-  local out = { lines = {}, folds = {}, answers = {} }
+  local out = { lines = {}, folds = {}, answers = {}, added = {}, removed = {} }
   local first = 1
   for i = 2, #events + 1 do
     if i > #events or M.starts_turn(events[i]) then

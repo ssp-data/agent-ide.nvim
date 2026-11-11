@@ -6,6 +6,7 @@ local M = {}
 
 local augroup = api.nvim_create_augroup('agent-ide.history', { clear = true })
 local ns = api.nvim_create_namespace('agent-ide.history.answers')
+local ns_diff = api.nvim_create_namespace('agent-ide.history.diff')
 
 M.ANSWER_MARK = '● '
 
@@ -123,6 +124,38 @@ function M.answer_marks(buf)
   local out = {}
   for _, m in ipairs(api.nvim_buf_get_extmarks(buf, ns, 0, -1, {})) do out[#out + 1] = m[2] + 1 end
   table.sort(out)
+  return out
+end
+
+---Colour the removed and added lines of the `Edit` folds (`render.render().removed` and
+---`.added`, 1-based) red and green, over the markdown highlighting. Marks from line `from`
+---(1-based) on are replaced; earlier ones stay.
+---@param buf integer
+---@param from integer
+---@param added integer[]
+---@param removed integer[]
+function M.mark_diff(buf, from, added, removed)
+  api.nvim_buf_clear_namespace(buf, ns_diff, from - 1, -1)
+  local count = api.nvim_buf_line_count(buf)
+  for hl, lines in pairs({ AgentIdeDiffAdd = added, AgentIdeDiffDel = removed }) do
+    for _, l in ipairs(lines) do
+      if l >= from and l <= count then
+        local text = api.nvim_buf_get_lines(buf, l - 1, l, false)[1]
+        api.nvim_buf_set_extmark(buf, ns_diff, l - 1, 0, { end_col = #text, hl_group = hl, priority = 200 })
+      end
+    end
+  end
+end
+
+---Coloured diff lines of `buf`, in line order (tests).
+---@param buf integer
+---@return { line: integer, col: integer, end_col: integer, hl: string }[]
+function M.diff_marks(buf)
+  local out = {}
+  for _, m in ipairs(api.nvim_buf_get_extmarks(buf, ns_diff, 0, -1, { details = true })) do
+    out[#out + 1] = { line = m[2] + 1, col = m[3], end_col = m[4].end_col, hl = m[4].hl_group }
+  end
+  table.sort(out, function(a, b) return a.line < b.line end)
   return out
 end
 

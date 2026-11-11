@@ -96,7 +96,7 @@ local function start(steps, opts)
     helper = { enabled = false },
     live = { interval_ms = 50, cmd = opts.live_cmd or { 'echo', '[]' } },
     icons_style = 'plain', icons = ICONS,
-    claude = { cmd = cmd },
+    claude = { cmd = opts.claude_cmd or cmd },
   }, opts.poll_ms or 60000 })
 end
 
@@ -241,6 +241,20 @@ T['a working session asks first; declining hands nothing over'] = function()
   eq(tmux_calls(), {})
   eq(current().state, 'busy')
   eq(winbar():find(AWAY, 1, true), nil)
+end
+
+T['a bare command word is resolved through this Neovim\'s PATH for the pane'] = function()
+  -- tmux starts the pane with the server's environment, whose PATH may resolve a bare
+  -- `claude` to a different binary than this Neovim sees (a version manager's wrapper,
+  -- say); the pane must run the one this Neovim would run
+  vim.fn.writefile({ '#!/bin/sh', 'exit 0' }, tmux_dir .. '/bin/claude-fake')
+  vim.fn.setfperm(tmux_dir .. '/bin/claude-fake', 'rwxr-xr-x')
+  start(nil, { claude_cmd = { 'claude-fake' } })
+  open_fixture()
+  child.type_keys('\\aT')
+  wait_for(function() return #tmux_calls() == 2 end, 'tmux calls')
+  local script = tmux_calls()[2][10]:match("^sh %-c '(.*)'$")
+  eq(script:find('"' .. tmux_dir .. '/bin/claude-fake" "--resume"', 1, true) ~= nil, true)
 end
 
 T['outside tmux: parks and tells the command to run by hand'] = function()

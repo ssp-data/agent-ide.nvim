@@ -38,6 +38,13 @@ local function dq(word) return '"' .. tostring(word):gsub('[\\"$`]', '\\%0') .. 
 function M.pane_command(s, channel)
   local cfg = require('agent-ide.config').get().claude
   local argv = vim.deepcopy(cfg.cmd)
+  -- tmux starts the pane with the server's environment, whose PATH may resolve a bare
+  -- `claude` to a different binary than this Neovim sees (a version manager's wrapper,
+  -- say); run the one this Neovim would run
+  if argv[1] and not argv[1]:find('/', 1, true) then
+    local full = vim.fn.exepath(argv[1])
+    if full ~= '' then argv[1] = full end
+  end
   vim.list_extend(argv, { '--resume', s.id })
   local words = vim.tbl_map(dq, argv)
   if cfg.strip_api_key then table.insert(words, 1, 'env -u ANTHROPIC_API_KEY') end

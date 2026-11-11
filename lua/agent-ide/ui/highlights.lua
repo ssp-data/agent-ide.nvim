@@ -28,6 +28,9 @@ local GROUPS = {
   AgentIdeAge = M.dim,
   AgentIdeSection = { link = 'Directory' },
   AgentIdeAnswerMark = { link = 'AgentIdeLevel1' }, -- the ● before Claude's own text in a transcript (green)
+  -- the removed and added lines of an Edit fold in a transcript (red, green)
+  AgentIdeDiffAdd = { fg = '#9ece6a', ctermfg = 114 },
+  AgentIdeDiffDel = { fg = '#f7768e', ctermfg = 204 },
   -- chat winbar: the model in italic (Normal's foreground), the permission mode as a badge; a
   -- mode other than the default one in a warning colour
   AgentIdeModel = function()

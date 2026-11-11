@@ -106,13 +106,15 @@ end
 SEQ.turns300 = many_turns(300)
 
 local function concat_turns(events)
-  local lines, folds, answers = {}, {}, {}
+  local lines, folds, answers, added, removed = {}, {}, {}, {}, {}
   local seg = {}
   local function flush()
     if #seg == 0 then return end
     local r = render.render(seg)
     for _, f in ipairs(r.folds) do folds[#folds + 1] = { first = f.first + #lines, last = f.last + #lines } end
     for _, a in ipairs(r.answers) do answers[#answers + 1] = a + #lines end
+    for _, l in ipairs(r.added) do added[#added + 1] = l + #lines end
+    for _, l in ipairs(r.removed) do removed[#removed + 1] = l + #lines end
     vim.list_extend(lines, r.lines)
     seg = {}
   end
@@ -121,7 +123,7 @@ local function concat_turns(events)
     seg[#seg + 1] = ev
   end
   flush()
-  return { lines = lines, folds = folds, answers = answers }
+  return { lines = lines, folds = folds, answers = answers, added = added, removed = removed }
 end
 
 T['render is compositional over turns'] = function()
@@ -559,6 +561,44 @@ T['answer marks: a ● before every text block, the streaming one included; none
   eq(m[4].virt_text, { { '● ', 'AgentIdeAnswerMark' } })
   eq(m[4].virt_text_pos, 'inline')
   for _, l in ipairs(api.nvim_buf_get_lines(buf, 0, -1, false)) do eq(l:find('●', 1, true), nil) end
+end
+
+T['diff marks: the - and + lines of an Edit are coloured, kept through later updates and a reload'] = function()
+  local s, buf = stub(), new_buf()
+  local view = live_render.attach(buf, s)
+  api.nvim_set_current_buf(buf)
+  local history = require('agent-ide.ui.history')
+  local function marked()
+    local out = {}
+    for _, m in ipairs(history.diff_marks(buf)) do
+      out[#out + 1] = { api.nvim_buf_get_lines(buf, m.line - 1, m.line, false)[1], m.hl }
+    end
+    return out
+  end
+  local want = { { '│ - old', 'AgentIdeDiffDel' }, { '│ + new', 'AgentIdeDiffAdd' }, { '│ + more', 'AgentIdeDiffAdd' } }
+  push(s, { kind = 'prompt', text = 'one' })
+  push(s, { kind = 'tool_call', id = 'e', name = 'Edit',
+    input = { file_path = '/f', old_string = 'old', new_string = 'new\nmore' } })
+  view:sync('events')
+  eq(marked(), want)
+  push(s, { kind = 'tool_result', id = 'e', text = '- ok' })
+  push(s, { kind = 'text', text = 'Done.' })
+  view:sync('events')
+  eq(marked(), want)
+  s.streaming = 'Str'
+  view:sync('delta')
+  eq(marked(), want)
+  s.streaming = ''
+  push(s, { kind = 'prompt', text = 'two' })
+  push(s, { kind = 'tool_call', id = 'f', name = 'Edit', input = { file_path = '/f', old_string = 'x', new_string = 'y' } })
+  view:sync('events')
+  local both = vim.list_extend(vim.deepcopy(want), { { '│ - x', 'AgentIdeDiffDel' }, { '│ + y', 'AgentIdeDiffAdd' } })
+  eq(marked(), both)
+  view:sync('reset')
+  eq(marked(), both)
+  -- the whole line is coloured, the text itself is untouched
+  local m = history.diff_marks(buf)[1]
+  eq({ m.col, m.end_col }, { 0, #'│ - old' })
 end
 
 return T
