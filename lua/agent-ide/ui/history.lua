@@ -7,6 +7,7 @@ local M = {}
 local augroup = api.nvim_create_augroup('agent-ide.history', { clear = true })
 local ns = api.nvim_create_namespace('agent-ide.history.answers')
 local ns_diff = api.nvim_create_namespace('agent-ide.history.diff')
+local GUTTER = '│ ' -- before every line of a fold body, once per level of nesting
 
 M.ANSWER_MARK = '● '
 
@@ -128,20 +129,26 @@ function M.answer_marks(buf)
 end
 
 ---Colour the removed and added lines of the `Edit` folds (`render.render().removed` and
----`.added`, 1-based) red and green, over the markdown highlighting. Marks from line `from`
----(1-based) on are replaced; earlier ones stay.
+---`.added`, 1-based) red and green, and the command lines of the `Bash` folds (`.commands`)
+---after their `│ ` gutter, over the markdown highlighting. Marks from line `from` (1-based) on
+---are replaced; earlier ones stay.
 ---@param buf integer
 ---@param from integer
 ---@param added integer[]
 ---@param removed integer[]
-function M.mark_diff(buf, from, added, removed)
+---@param commands integer[]|nil
+function M.mark_diff(buf, from, added, removed, commands)
   api.nvim_buf_clear_namespace(buf, ns_diff, from - 1, -1)
   local count = api.nvim_buf_line_count(buf)
-  for hl, lines in pairs({ AgentIdeDiffAdd = added, AgentIdeDiffDel = removed }) do
+  for hl, lines in pairs({ AgentIdeDiffAdd = added, AgentIdeDiffDel = removed, AgentIdeCommand = commands or {} }) do
     for _, l in ipairs(lines) do
       if l >= from and l <= count then
         local text = api.nvim_buf_get_lines(buf, l - 1, l, false)[1]
-        api.nvim_buf_set_extmark(buf, ns_diff, l - 1, 0, { end_col = #text, hl_group = hl, priority = 200 })
+        local col = 0
+        if hl == 'AgentIdeCommand' then
+          while text:sub(col + 1, col + #GUTTER) == GUTTER do col = col + #GUTTER end
+        end
+        api.nvim_buf_set_extmark(buf, ns_diff, l - 1, col, { end_col = #text, hl_group = hl, priority = 200 })
       end
     end
   end

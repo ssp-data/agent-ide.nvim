@@ -48,6 +48,9 @@ defaults = function()
         diff = { 'gd', '<leader>gd' },
         save_library = '<leader>W', -- prompt: save the prompt to the library (asks for a name)
         queue = { 'Q', '<leader>aQ' }, -- show or hide the queue panel (Q: Ex mode, which the prompt does not need)
+        -- next / previous session of the project, in the drawer's order (in the prompt
+        -- buffer this takes over Vim's ]s / [s spelling motions)
+        next_session = ']s', prev_session = '[s',
         prompts = '<leader>al' }, -- pick a prompt (skills, commands, library, saved)
       -- diff view, buffer-local on both sides; a one-character key (q, ?, R) only on the plugin's
       -- side, since the right side is your own file (there: macro, search, Replace stay yours).

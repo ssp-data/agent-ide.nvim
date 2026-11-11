@@ -25,6 +25,8 @@ local HELP = {
   { 'prompts', 'pick a prompt (skills, commands, library, saved); insert mode only for a non-printing key' },
   { 'save_library', 'prompt: save the prompt to the library (asks for a name; group/name for a folder)' },
   { 'queue', 'show or hide the queue panel: prompts sent, running and queued (x there takes one back)' },
+  { 'next_session', 'next session of the project (drawer order, wraps; hidden ones skipped)' },
+  { 'prev_session', 'previous session of the project' },
   { 'help', 'this help' },
   { 'history_prev', 'prompt: older prompt (also <Up>) on the first line' },
   { 'history_next', 'prompt: newer prompt (also <Down>) on the last line' },
@@ -82,6 +84,8 @@ function M.map(c, buf, is_transcript, act)
   map('n', native, function() act.native(c) end, 'continue in native Claude (tmux)')
   map('n', keys.park, function() require('agent-ide.ui.chat').park(c.s) end, 'park the session')
   map('n', keys.queue, function() require('agent-ide.ui.queue').toggle() end, 'queue panel')
+  map('n', keys.next_session, function() require('agent-ide.ui.chat').cycle(c.s, 1) end, 'next session of the project')
+  map('n', keys.prev_session, function() require('agent-ide.ui.chat').cycle(c.s, -1) end, 'previous session of the project')
   require('agent-ide.prompts.actions').map_chat(buf, is_transcript, keys)
   if is_transcript then
     map('n', keys.raw, function() require('agent-ide.ui.raw').open(c.s) end, 'raw view')

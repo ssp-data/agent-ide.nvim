@@ -714,4 +714,30 @@ T['raw is capped at the newest 5000 lines'] = function()
   eq(s.raw[#s.raw].line:find('"result"') ~= nil, true)
 end
 
+T['load: a keeper driven by another Neovim warns once, then the history comes from disk'] = function()
+  local keeper = require('agent-ide.keeper')
+  local orig_info, orig_attach = keeper.info, keeper.attach
+  local attaches = 0
+  keeper.info = function(id) if id == FIXTURE_ID then return { path = FIXTURE, offset = 0 } end end
+  keeper.attach = function(_, h)
+    attaches = attaches + 1
+    vim.schedule(function() h.on_busy() end)
+    return {}
+  end
+  index.history = function(_, cb) vim.schedule(function() cb({ { kind = 'prompt', text = 'from disk' } }) end) end
+  local ok_run, err = pcall(function()
+    local s = new({ id = FIXTURE_ID, path = FIXTURE })
+    local done = false
+    s:load(function() done = true end)
+    assert(wait(function() return done end, 2000), 'load never finished')
+    vim.wait(100)
+    eq(attaches, 1)
+    local warns = vim.tbl_filter(function(n) return n.msg:find('another Neovim') end, notes)
+    eq(#warns, 1)
+    eq(s.events[1].text, 'from disk')
+  end)
+  keeper.info, keeper.attach = orig_info, orig_attach
+  if not ok_run then error(err, 0) end
+end
+
 return T

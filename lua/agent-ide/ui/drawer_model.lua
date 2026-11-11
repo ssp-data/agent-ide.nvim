@@ -229,4 +229,24 @@ function M.with_hidden(projects, is_hidden, state_of)
   return vim.tbl_map(function(o) return o.p end, out)
 end
 
+---The session `offset` steps (1: next, -1: previous) from `id` in `sessions` (the drawer's
+---order), wrapping around; sessions hidden by `is_hidden` are skipped, the one of `id` never.
+---Nil when `id` is not listed or no other session remains.
+---@param sessions table[] SessionMeta
+---@param id string
+---@param offset integer
+---@param is_hidden? fun(id: string): boolean
+---@return table|nil SessionMeta
+function M.neighbor(sessions, id, offset, is_hidden)
+  local list, at = {}, nil
+  for _, m in ipairs(sessions) do
+    if m.id == id or not (is_hidden and is_hidden(m.id)) then
+      list[#list + 1] = m
+      if m.id == id then at = #list end
+    end
+  end
+  if not at or #list < 2 then return nil end
+  return list[(at - 1 + offset) % #list + 1]
+end
+
 return M

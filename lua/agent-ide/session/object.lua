@@ -336,10 +336,12 @@ end
 ---process runs; always calls `cb` (scheduled). Events added while loading are kept after
 ---the history.
 ---@param cb? fun()
-function Session:load(cb)
+---@param no_attach? boolean read from disk only (the attach was refused or failed)
+function Session:load(cb, no_attach)
   cb = cb or function() end
-  -- a keeper holds this session's Claude: the history comes with the attach
-  if self:attach(function(ok) if not ok then self:load(cb) else cb() end end) then return end
+  -- a keeper holds this session's Claude: the history comes with the attach; when it is refused
+  -- (another Neovim drives it) the transcript on disk is read once, never attached again
+  if not no_attach and self:attach(function(ok) if not ok then self:load(cb, true) else cb() end end) then return end
   if not self.path then return vim.schedule(cb) end
   vim.uv.fs_stat(self.path, vim.schedule_wrap(function(_, st)
     local key = st and (st.mtime.sec .. '.' .. st.mtime.nsec .. ':' .. st.size)

@@ -758,6 +758,14 @@ function M.rescan() if S.tab then rescan() end end
 ---Re-render the drawer (e.g. after a session changed state); keeps focus and other cursors.
 function M.refresh() render() end
 
+---Put the drawer's cursor on the row of session `id` (its project's row when that is
+---collapsed), without focusing the drawer.
+---@param id string
+---@param project_key? string
+function M.reveal(id, project_key)
+  render({ 'x:' .. id, project_key and ('p:' .. project_key) or nil })
+end
+
 ---Re-decide live polling while the drawer is hidden (e.g. a session started or ended here).
 function M.live_policy() live_policy() end
 

@@ -83,13 +83,17 @@ local function summary(input)
 end
 
 ---Body lines of a tool call; for an `Edit` also which of them are removed (`-`) or added (`+`)
----lines, by index (the `… n more lines` markers are neither).
+---lines, for a `Bash` which are the command (`$`), by index (the `… n more lines` markers are
+---none of these).
 ---@return string[] lines, table<integer, string>|nil signs
 local function call_body(call)
   local input = type(call.input) == 'table' and call.input or {}
   local lines
   if call.name == 'Bash' then
     lines = split('$ ' .. tostring(input.command or ''))
+    local signs = {}
+    for i = 1, math.min(#lines, CAP_INPUT) do signs[i] = '$' end
+    return cut_lines(cap(lines, CAP_INPUT), M.MAX_FOLD_LINE), signs
   elseif call.name == 'Edit' then
     -- each side capped on its own, so a long removal never hides the added lines
     local old, new = split(input.old_string), split(input.new_string)
@@ -113,7 +117,7 @@ local function result_lines(res)
   return cut_lines(cap(lines, CAP_RESULT), M.MAX_FOLD_LINE)
 end
 
----Emit rendered events into `out` ({lines, folds, answers, added, removed}); `results` maps id -> results, `known` is the set of call ids; `nested` renders a sidechain group's own events without regrouping.
+---Emit rendered events into `out` ({lines, folds, answers, added, removed, commands}); `results` maps id -> results, `known` is the set of call ids; `nested` renders a sidechain group's own events without regrouping.
 local function emit(events, results, known, out, nested)
   local function block(header, body)
     local first = #out.lines + 1
@@ -147,11 +151,12 @@ local function emit(events, results, known, out, nested)
         local j = i
         while j <= #events and events[j].sidechain do j = j + 1 end
         local group = vim.list_slice(events, i, j - 1)
-        local inner = { lines = {}, folds = {}, answers = {}, added = {}, removed = {} }
+        local inner = { lines = {}, folds = {}, answers = {}, added = {}, removed = {}, commands = {} }
         emit(group, results, known, inner, true)
         local first = block(('▸ subagent (%d events)'):format(#group), inner.lines)
         for _, l in ipairs(inner.added) do out.added[#out.added + 1] = first + l end
         for _, l in ipairs(inner.removed) do out.removed[#out.removed + 1] = first + l end
+        for _, l in ipairs(inner.commands) do out.commands[#out.commands + 1] = first + l end
         i = j
       else
         if ev.kind == 'text' then
@@ -170,6 +175,8 @@ local function emit(events, results, known, out, nested)
               out.added[#out.added + 1] = first + k
             elseif signs[k] == '-' then
               out.removed[#out.removed + 1] = first + k
+            elseif signs[k] == '$' then
+              out.commands[#out.commands + 1] = first + k
             end
           end
         elseif ev.kind == 'tool_result' then
@@ -225,10 +232,11 @@ end
 ---Render events turn by turn; the result is the concatenation of each turn rendered alone.
 ---`answers`: the first line of every main-thread `text` event (a subagent's text is not one).
 ---`added`, `removed`: the `+` and `-` lines of every `Edit`, a subagent's included.
+---`commands`: the command lines of every `Bash` call, a subagent's included.
 ---@param events table[]
----@return { lines: string[], folds: { first: integer, last: integer }[], answers: integer[], added: integer[], removed: integer[] }
+---@return { lines: string[], folds: { first: integer, last: integer }[], answers: integer[], added: integer[], removed: integer[], commands: integer[] }
 function M.render(events)
-  local out = { lines = {}, folds = {}, answers = {}, added = {}, removed = {} }
+  local out = { lines = {}, folds = {}, answers = {}, added = {}, removed = {}, commands = {} }
   local first = 1
   for i = 2, #events + 1 do
     if i > #events or M.starts_turn(events[i]) then

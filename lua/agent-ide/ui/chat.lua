@@ -548,6 +548,25 @@ function M.park(s)
   end)
 end
 
+---Open the next (`offset` 1) or previous (-1) session of the project of `s`, in the drawer's
+---order, skipping hidden sessions and wrapping around. Focus stays in the window the key was
+---pressed in (transcript or prompt), so the next press steps again; the drawer's cursor follows.
+---@param s table Session
+---@param offset integer
+function M.cycle(s, offset)
+  local in_prompt = chats[s.id] ~= nil and api.nvim_get_current_buf() == chats[s.id].pbuf
+  local p = M.project_of(s)
+  for _, dp in ipairs(drawer().state().projects or {}) do
+    if dp.key == p.key then p = dp break end -- the drawer's latest scan: its order
+  end
+  local m = require('agent-ide.ui.drawer_model').neighbor(p.sessions or {}, s.id, offset, require('agent-ide.hidden').is)
+  if not m then return notify('Agent-IDE: no other session in ' .. (p.name or '?')) end
+  M.open(session.open({ id = m.id, cwd = m.cwd or p.root or p.key, path = m.path, title = m.title }), p)
+  -- open() leaves the prompt focused
+  if not in_prompt then api.nvim_set_current_win(windows.transcript()) end
+  drawer().reveal(m.id, p.key)
+end
+
 ---Session owning a chat buffer (transcript or prompt).
 ---@param buf integer
 ---@return table|nil Session

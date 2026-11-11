@@ -161,6 +161,7 @@ require('agent-ide').setup({
       -- only, since the prompt buffer is where you edit text (gT stays Vim's there)
       native = { 'gT', '<leader>aT' },
       queue = { 'Q', '<leader>aQ' }, -- the queue panel (Q is Ex mode, which the prompt buffer does not need)
+      next_session = ']s', prev_session = '[s', -- next / previous session of the project
       save_library = '<leader>W', prompts = '<leader>al' },
     -- diff view, on both sides; a one-character key (q, ?, R) only on the left side, since the
     -- right side is your own file, where they stay macro recording, search and Replace mode
@@ -322,6 +323,7 @@ In the chat (transcript and prompt buffer, unless noted):
 | `<leader>al` | Pick a prompt: saved prompts, library, Claude's commands and skills |
 | `<leader>W` | Prompt: save it to the library (asks for a name; `group/name` makes a folder) |
 | `Q`, `<leader>aQ` | Show or hide the queue panel (see [Queue panel](#queue-panel)) |
+| `]s`, `[s` | Open the next or previous session of the project, in the drawer's order (wraps around, hidden sessions skipped); focus stays where you pressed it and the drawer's cursor follows. In the prompt they replace Vim's spelling motions |
 | `:w`, `:x`, `ZZ` | Prompt: save it (see [Prompts](#prompts)); `:x` and `ZZ` then hide the window |
 | `za` | Toggle fold |
 | `:q` | Prompt: hide the window; the draft stays |
