@@ -63,7 +63,7 @@ local function start(steps, opts)
     live = { interval_ms = 50, cmd = { 'echo', '[]' } },
     icons_style = 'plain', icons = ICONS,
     sound = { waiting = false },
-    agents = { fake = { kind = 'acp', cmd = cmd, label = 'Fake' } },
+    agents = { fake = { kind = 'acp', cmd = cmd, label = 'Fake' }, gemini = false, opencode = false },
   }, opts or {}) })
 end
 
@@ -201,6 +201,108 @@ T['an ask while typing never pops up; the answer key opens it with the agent\'s 
   local answers = vim.tbl_filter(function(m) return m.result and m.result.outcome end, acp.ins(log))
   eq(answers[1].result.outcome, { outcome = 'selected', optionId = 'proceed_always' })
   eq(has_line(transcript(), 'done') ~= nil, true)
+end
+
+-- Drawer: choosing an agent, labelling sessions ---------------------------------------------
+
+local function drawer_lines()
+  return child.lua_get([[(function()
+    local s = require('agent-ide.ui.drawer').state()
+    return s.buf and vim.api.nvim_buf_get_lines(s.buf, 0, -1, false) or {}
+  end)()]])
+end
+
+local function drawer_cursor_to(text)
+  local last
+  local found = vim.wait(5000, function()
+    local ok, lines = pcall(drawer_lines) -- the child may be busy for a moment
+    last = { ok, lines }
+    return ok and has_line(lines, text) ~= nil
+  end, 20)
+  if not found then error('timed out waiting for drawer line ' .. text .. ': ' .. vim.inspect(last), 2) end
+  local row = has_line(drawer_lines(), text)
+  child.lua('local s = require("agent-ide.ui.drawer").state(); vim.api.nvim_set_current_win(s.win); vim.api.nvim_win_set_cursor(s.win, { ..., 0 })', { row })
+end
+
+-- A Claude transcript in the repo, so the project shows in the drawer.
+local function claude_session(id, title)
+  local dir = projects .. '/-repo'
+  vim.fn.mkdir(dir, 'p')
+  vim.fn.writefile({
+    vim.json.encode({ type = 'user', uuid = 'u1', sessionId = id, cwd = repo, timestamp = '2026-11-01T10:00:00Z',
+      message = { role = 'user', content = title } }),
+  }, dir .. '/' .. id .. '.jsonl')
+end
+
+T['A on a project row picks an agent: unavailable ones cannot be picked; the new chat runs that agent; rows are labelled'] = function()
+  claude_session('22222222-2222-4222-8222-222222222222', 'A Claude session')
+  local fake_claude = dofile(vim.fn.getcwd() .. '/tests/fake.lua')
+  local ccmd, clog = fake_claude.cmd({ { expect = 'To Claude' },
+    { emit = { type = 'system', subtype = 'init', session_id = 'x', model = 'claude-haiku-5-5-20261001', permissionMode = 'default', slash_commands = {} } },
+    { emit = { type = 'assistant', message = { id = 'm', role = 'assistant', content = { { type = 'text', text = 'Claude here' } } } } },
+    { emit = { type = 'result', subtype = 'success', is_error = false, result = 'x' } } })
+  start(acp.flat(acp.handshake({ modes = false }), turn('Fake here')),
+    { claude = { cmd = ccmd }, keeper = { enabled = false },
+      agents = { gone = { kind = 'acp', cmd = { 'no-such-agent-binary-xyz', 'acp' } } } })
+  child.lua('vim.uv.os_setenv("FAKE_CLAUDE_LOG", ...)', { clog })
+  child.lua('require("agent-ide").toggle()')
+  drawer_cursor_to('> repo')
+  child.type_keys('<CR>')
+  drawer_cursor_to('A Claude session')
+  -- A anywhere under the project: the picker, the default marked, the missing one unavailable
+  child.type_keys('A')
+  wait_for(function() return #selects() == 1 end, 'agent picker')
+  eq(selects()[1].prompt, 'New session with')
+  eq(selects()[1].labels, { 'claude (default)', 'fake', 'gone: unavailable (no-such-agent-binary-xyz not found)' })
+  pick('gone: unavailable (no-such-agent-binary-xyz not found)')
+  eq(notes()[#notes()], 'Agent-IDE: gone is not available here')
+  eq(current(), vim.NIL)
+  child.type_keys('A')
+  wait_for(function() return #selects() == 2 end, 'agent picker again')
+  pick('fake')
+  wait_for(function() return current() ~= vim.NIL end, 'fake chat')
+  local fid = current().id
+  eq(child.lua_get('require("agent-ide.ui.chat").current().agent'), 'fake')
+  send_normal('To the fake')
+  wait_for(function() return has_line(transcript(), 'Fake here') ~= nil and state() == 'idle' end, 'fake answered')
+  -- the row of the fake session names its agent; Claude's row reads as before
+  wait_for(function() return has_line(drawer_lines(), 'fake · To the fake') ~= nil end, 'labelled row')
+  local l = drawer_lines()
+  eq(has_line(l, 'claude · ') == nil, true)
+  eq(l[has_line(l, 'A Claude session')]:match('^%s+%S+ A Claude session') ~= nil, true)
+  -- the Claude session beside it: its own process, its own chat (Review Focus 4)
+  drawer_cursor_to('A Claude session')
+  child.type_keys('<CR>')
+  wait_for(function() return current().id == '22222222-2222-4222-8222-222222222222' end, 'claude chat')
+  eq(child.lua_get('require("agent-ide.ui.chat").current().agent'), 'claude')
+  send_normal('To Claude')
+  wait_for(function() return has_line(transcript(), 'Claude here') ~= nil end, 'claude answered')
+  -- each prompt went to its own process only
+  local prompts = acp.sent(log, 'session/prompt')
+  eq(#prompts, 1)
+  eq(prompts[1].params.prompt[1].text, 'To the fake')
+  local cl = vim.tbl_filter(function(x) return x['in'] and x['in']:find('To ', 1, true) end, fake_claude.log(clog))
+  eq(#cl, 1)
+  eq(cl[1]['in']:find('To Claude', 1, true) ~= nil, true)
+  -- the status file lists both; the other agent's row names it (a Claude row has no `agent`, as before)
+  local rows = child.lua_get('require("agent-ide.status").snapshot().sessions')
+  local by = {}
+  for _, r in ipairs(rows) do by[r.id] = r.agent or 'claude' end
+  eq({ by[fid], by['22222222-2222-4222-8222-222222222222'] }, { 'fake', 'claude' })
+end
+
+T[':AgentsNew <agent> starts a session in the current project; without a name it picks; an unknown agent says so'] = function()
+  start(acp.flat(acp.handshake({ modes = false }), turn('ok')))
+  child.lua('vim.cmd.cd(...)', { repo })
+  child.cmd('AgentsNew fake')
+  wait_for(function() return current() ~= vim.NIL end, 'chat')
+  eq(child.lua_get('{ require("agent-ide.ui.chat").current().agent, require("agent-ide.ui.chat").current().cwd }'), { 'fake', repo })
+  eq(child.fn.getcompletion('AgentsNew ', 'cmdline'), { 'claude', 'fake' })
+  child.cmd('AgentsNew nope')
+  eq(notes()[#notes()], 'Agent-IDE: unknown agent "nope" (not in config.agents)')
+  child.cmd('AgentsNew')
+  wait_for(function() return #selects() == 1 end, 'picker')
+  eq(selects()[1].labels[2], 'fake')
 end
 
 return T

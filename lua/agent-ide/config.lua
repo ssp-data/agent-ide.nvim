@@ -61,7 +61,8 @@ defaults = function()
         tmux = { 'gT', '<leader>aT' }, -- jump to the session's tmux pane, or continue it in native Claude there
         search = { 'S', '<leader>ff', '<leader>S' }, park = 'sP', hide = 'H', delete = 'D', yank = 'y',
         lazygit = 'glg', close = 'q', help = { '?', 'g?' }, graph = 'G', scope = '<S-Tab>',
-        legend = { 'gL', '<leader>aL' }, close_tmux = 'X' },
+        legend = { 'gL', '<leader>aL' }, close_tmux = 'X',
+        agent = 'A' }, -- a new session of the row's project with another agent (a picker)
       -- drawer, on prompt rows (elsewhere these keys keep their normal meaning)
       prompts = { edit = 'e', rename = 'r', delete = 'D', yank = 'y', to_library = 'sL' },
       -- commit graph view, buffer-local; each a key, a list of keys, or false

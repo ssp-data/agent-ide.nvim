@@ -298,4 +298,17 @@ T['provider rows with a right part are aligned; rows without stay as given'] = f
   eq(t.lines[8], '      plain row')
 end
 
+T['a session of another agent names it before the title; Claude rows are unchanged'] = function()
+  local projects = { { key = '/r/a', name = 'a', activity = 1000, sessions = {
+    { id = 's1', title = 'Fix it', activity = 1000, agent = 'gemini' },
+    { id = 's2', title = 'Plain', activity = 990, agent = 'claude' },
+    { id = 's3', title = 'Old', activity = 980 },
+  } } }
+  local t = tree.build(projects, function() return 'parked' end, { ['/r/a'] = true }, 1000, icons)
+  local lines = vim.tbl_filter(function(l) return l:find('Fix it', 1, true) or l:find('Plain', 1, true) or l:find('Old', 1, true) end, t.lines)
+  eq(lines[1]:find('gemini · Fix it', 1, true) ~= nil, true)
+  eq(lines[2]:find(' · ', 1, true), nil)
+  eq(lines[3]:find(' · ', 1, true), nil)
+end
+
 return T

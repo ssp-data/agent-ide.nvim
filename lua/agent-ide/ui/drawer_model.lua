@@ -124,7 +124,8 @@ function M.with_unsaved(projects)
             if ev.kind == 'prompt' then title = first_line(ev.text); break end
           end
         end
-        extra[#extra + 1] = { id = id, cwd = s.cwd, title = title or 'new session', activity = u.activity }
+        extra[#extra + 1] = { id = id, cwd = s.cwd, title = title or 'new session', activity = u.activity, agent = s.agent,
+          agent_session_id = s.agent_session_id }
       end
     end
     if #extra == 0 then
@@ -177,12 +178,13 @@ end
 ---The newest session started from "+ New session" in project `key` that has sent nothing yet
 ---(no prompt, no process): pressing the row again shows it, with its draft. Nil when none.
 ---@param key string project key
+---@param agent? string only a session of this agent (nil: any)
 ---@return table|nil Session
-function M.unsent_new(key)
+function M.unsent_new(key, agent)
   local best, best_n
   for id, u in pairs(unsaved) do
     local s = session.get(id)
-    if u.key == key and s and not s.sent_before and #s.events == 0 and not s:_alive()
+    if u.key == key and s and (not agent or s.agent == agent) and not s.sent_before and #s.events == 0 and not s:_alive()
       and (not best_n or u.n > best_n) then
       best, best_n = s, u.n
     end

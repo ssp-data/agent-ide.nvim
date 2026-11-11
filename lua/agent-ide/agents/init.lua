@@ -39,8 +39,8 @@ end
 function M.names()
   local all = cfg()
   local out = {}
-  for name in pairs(all) do
-    if name ~= 'claude' then out[#out + 1] = name end
+  for name, c in pairs(all) do
+    if name ~= 'claude' and type(c) == 'table' then out[#out + 1] = name end -- `gemini = false` removes a default
   end
   table.sort(out)
   table.insert(out, 1, 'claude')

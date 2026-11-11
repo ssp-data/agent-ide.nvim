@@ -250,23 +250,7 @@ function actions.open()
       agent = m.agent, agent_session_id = m.agent_session_id })
     require('agent-ide.ui.chat').open(s, p)
   elseif node.type == 'new' then
-    local p = node.project
-    local dir = p.root or p.key
-    -- only an absolute key is a folder: a project without cwd is keyed by a bare directory name
-    if dir:sub(1, 1) ~= '/' or vim.fn.isdirectory(dir) ~= 1 then return notify('project folder not found: ' .. dir) end
-    -- an unsent new session of the project comes back with its draft; a count: a separate one
-    local s = vim.v.count == 0 and model.unsent_new(p.key) or nil
-    if not s then
-      s = session.open({ cwd = dir })
-      model.add_unsaved(s.id, p.key)
-      -- a draft an earlier Neovim left for an unsent new session here: this one takes it
-      local listed = {}
-      for _, pr in ipairs(S.projects) do
-        for _, m in ipairs(pr.sessions) do listed[m.id] = true end
-      end
-      require('agent-ide.ui.drafts').adopt(s, dir, function(id) return listed[id] or session.get(id) ~= nil end)
-    end
-    require('agent-ide.ui.chat').open(s, p)
+    M.new_session(node.project, require('agent-ide.agents').default(), vim.v.count ~= 0)
   elseif node.type == 'scope' or node.type == 'others' then
     M.set_scope('all')
   elseif node.open then
@@ -275,6 +259,66 @@ function actions.open()
   else
     toggle_node(node)
   end
+end
+
+---Start (or bring back) a new session of `project` with agent `agent`. The newest unsent new
+---session of that project and agent comes back with its draft; `separate` starts another one.
+---@param project table
+---@param agent string
+---@param separate? boolean
+function M.new_session(project, agent, separate)
+  local p = project
+  local dir = p.root or p.key
+  -- only an absolute key is a folder: a project without cwd is keyed by a bare directory name
+  if dir:sub(1, 1) ~= '/' or vim.fn.isdirectory(dir) ~= 1 then return notify('project folder not found: ' .. dir) end
+  local agents = require('agent-ide.agents')
+  local adapter, err = agents.get(agent)
+  if not adapter then return notify(tostring(err)) end
+  local ok, prog = agents.available(agent)
+  if not ok then return notify(('%s is not available: %s not found'):format(agent, tostring(prog or 'its command'))) end
+  local s = not separate and model.unsent_new(p.key, agent) or nil
+  if not s then
+    s = session.open({ cwd = dir, agent = agent })
+    model.add_unsaved(s.id, p.key)
+    -- a draft an earlier Neovim left for an unsent new session here: this one takes it
+    local listed = {}
+    for _, pr in ipairs(S.projects) do
+      for _, m in ipairs(pr.sessions) do listed[m.id] = true end
+    end
+    require('agent-ide.ui.drafts').adopt(s, dir, function(id) return listed[id] or session.get(id) ~= nil end)
+  end
+  require('agent-ide.ui.chat').open(s, p)
+end
+
+---Pick one of the configured agents and start a new session of `project` with it; agents
+---whose command is not on PATH are listed as unavailable and cannot be picked.
+---@param project table
+function M.pick_agent(project)
+  local agents = require('agent-ide.agents')
+  local items = {}
+  for _, name in ipairs(agents.names()) do
+    local ok, prog = agents.available(name)
+    items[#items + 1] = { name = name, ok = ok, prog = prog }
+  end
+  vim.ui.select(items, {
+    prompt = 'New session with',
+    format_item = function(it)
+      local mark = it.name == agents.default() and ' (default)' or ''
+      return it.ok and (it.name .. mark) or ('%s: unavailable (%s not found)'):format(it.name, tostring(it.prog or 'command'))
+    end,
+  }, function(choice)
+    if not choice then return end
+    if not choice.ok then return notify(choice.name .. ' is not available here') end
+    M.new_session(project, choice.name, true)
+  end)
+end
+
+-- `A`: a new session of the row's project with an agent picked from the configured ones.
+function actions.agent()
+  local node = current_node()
+  local p = node and node.project or scope.project()
+  if not p then return notify('no project under the cursor') end
+  M.pick_agent(p)
 end
 
 function actions.fold()
@@ -487,6 +531,7 @@ local ACTIONS = {
   { 'scope', 'scope: only this project / all projects' },
   { 'legend', 'show or hide the legend of the state marks' },
   { 'close_tmux', 'close the Claude running it in a tmux pane (Ctrl-C twice there; asks first)' },
+  { 'agent', 'start a new session of this project with another agent (a picker of the configured ones)' },
 }
 
 -- `keys.drawer`; with `keys = false` (nothing mapped globally) the drawer keeps its defaults,

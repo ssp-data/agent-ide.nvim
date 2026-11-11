@@ -163,7 +163,7 @@ require('agent-ide').setup({
     drawer = { open = { '<CR>', 'o' }, fold = 'za', collapse_all = 'z0', expand_all = 'z9', refresh = 'R',
       tmux = { 'gT', '<leader>aT' }, search = { 'S', '<leader>ff', '<leader>S' }, park = 'sP', hide = 'H',
       delete = 'D', yank = 'y', lazygit = 'glg', close = 'q', help = { '?', 'g?' }, graph = 'G', scope = '<S-Tab>',
-      legend = { 'gL', '<leader>aL' }, close_tmux = 'X' },
+      legend = { 'gL', '<leader>aL' }, close_tmux = 'X', agent = 'A' },
     -- drawer, on prompt rows (elsewhere these keys keep their normal meaning)
     prompts = { edit = 'e', rename = 'r', delete = 'D', yank = 'y', to_library = 'sL' },
   },
@@ -279,6 +279,7 @@ In the drawer (`keys.drawer`; the prompt row keys are `keys.prompts`, the sessio
 | `gL`, `<leader>aL` | Show or hide the legend of the state marks (remembered) |
 | `G` | Commit graph of the row's repository (a worktree session: that worktree; see [Commit graph](#commit-graph)) |
 | `glg` | Open lazygit for the row's repository (a worktree row or session: that worktree) |
+| `A` | A new session of the row's project with another agent: a picker of the configured ones, unavailable ones marked (see [Other agents](#other-agents)); `:AgentsNew [agent]` does the same for the current project |
 | `<S-Tab>` | Scope: only the row's project (else the working directory's), or back to all projects (see [Project scope](#project-scope)) |
 | `?`, `g?` | Help: a list of every key you can filter by typing; `<CR>` on a row presses that key (see [Help](#help)) |
 | `e` | Prompt row: edit its file in the main window (Claude's commands and skills open read-only) |

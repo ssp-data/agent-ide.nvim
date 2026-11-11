@@ -172,6 +172,8 @@ function M.build(projects, state_of, expanded, now, icons, projects_dir, note_of
             sl[#sl + 1] = { icon, group }
             sl[#sl + 1] = { ' ' }
           end
+          -- a session of another agent names it; Claude's rows read as they always did
+          if s.agent and s.agent ~= 'claude' then sl[#sl + 1] = { one_line(s.agent) .. ' · ', title_hl or 'AgentIdeAgent' } end
           if s.subpath and s.subpath ~= '' then sl[#sl + 1] = { one_line(s.subpath) .. '/ · ', title_hl } end
           sl[#sl + 1] = { one_line(s.title), title_hl, fit = true }
           local sr = {}
