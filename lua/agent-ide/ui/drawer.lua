@@ -458,6 +458,17 @@ end
 
 function actions.legend() legend.toggle() end
 
+-- `]s` / `[s`: open the next / previous session of the project, from the session row under the
+-- cursor, else from the chat shown; the drawer keeps the focus and its cursor follows.
+local function cycle(offset)
+  local node = current_node()
+  local s = node and node.type == 'session' and node.session or require('agent-ide.ui.chat').current()
+  if not s then return notify('no session to step from') end
+  require('agent-ide.ui.chat').cycle(s, offset)
+end
+function actions.next_session() cycle(1) end
+function actions.prev_session() cycle(-1) end
+
 -- `X`: close the Claude running the session in a tmux pane (ui/tmux_close.lua). Other rows: nothing.
 function actions.close_tmux()
   local node = current_node()
@@ -485,6 +496,8 @@ local ACTIONS = {
   { 'graph', 'commit graph of the project (or the row\'s worktree)' },
   { 'scope', 'scope: only this project / all projects' },
   { 'legend', 'show or hide the legend of the state marks' },
+  { 'next_session', 'open the next session of the project (from the row, else the chat shown)' },
+  { 'prev_session', 'open the previous session of the project' },
   { 'close_tmux', 'close the Claude running it in a tmux pane (Ctrl-C twice there; asks first)' },
 }
 

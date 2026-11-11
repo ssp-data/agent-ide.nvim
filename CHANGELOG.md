@@ -6,14 +6,19 @@ All notable changes to Agent-IDE.nvim are listed here. The format follows [Keep 
 
 ### Added
 
-- `]s` / `[s` in the chat (transcript and prompt) open the next or previous session of the same project, in the drawer's order, and the drawer's cursor follows (`keys.chat.next_session`, `prev_session`).
+- `]s` / `[s` in the drawer and the chat (transcript and prompt) open the next or previous session of the same project, in the drawer's order, and the drawer's cursor follows (`keys.drawer.next_session` and `keys.chat.next_session`, `prev_session`; focus stays in the pane you pressed it in).
 - Omarchy bar widget: clicking a session also switches to the workspace of, and focuses, the terminal window that shows tmux, and switches that tmux client to the session's exact session, window and pane.
 
 - The removed and added lines of an `Edit` fold in a transcript are red and green (`AgentIdeDiffDel`, `AgentIdeDiffAdd`), also inside a subagent fold and in the search preview. `gd` on the fold opens the file's branch diff, as before.
 - The command in a `Bash` fold has its own colour (`AgentIdeCommand`, linked to `Special`), so it stands apart from its output.
 
+### Changed
+
+- Plan mode has its own key: `<leader>am` turns it on, and off again back to the mode you had before (`keys.chat.plan`). `<S-Tab>` now cycles manual, acceptEdits and auto (`claude.modes`; add `'plan'` to have it there again), and in plan mode it leaves plan.
+
 ### Fixed
 
+- `<S-Tab>` no longer gets stuck on a mode Claude refuses, for example leaving plan mode while a turn runs. The cycle skips the refused mode and asks for the next one; it stops when it is back at the mode in effect.
 - Opening a session whose Claude another Neovim drives shows the "another Neovim drives this session" warning once and then the transcript from disk. Before, it kept trying to attach, so the warnings piled up and covered the screen.
 - Hand-off to native Claude (`gT`): a bare `claude` in the configured command is resolved through Neovim's own `$PATH` before the tmux pane runs it. The pane used to inherit the tmux server's environment, where `claude` can resolve to a different binary (a version manager's wrapper, say) that never starts.
 

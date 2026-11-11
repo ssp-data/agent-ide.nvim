@@ -134,7 +134,7 @@ require('agent-ide').setup({
     strip_api_key = true,   -- remove ANTHROPIC_API_KEY from the environment of every Claude it starts
     model = nil,            -- model for new sessions (nil: Claude's default)
     version_check = true,   -- one notice when the installed Claude Code is not the tested version
-    modes = { 'manual', 'acceptEdits', 'plan', 'auto' }, -- what <S-Tab> cycles through
+    modes = { 'manual', 'acceptEdits', 'auto' }, -- what <S-Tab> cycles through (plan: <leader>am)
     default_mode = nil,     -- where the cycle starts before Claude reports a mode
     models = nil,           -- what the model picker offers (nil: every model Claude Code lists; a list
                             -- of names such as { 'opus', 'sonnet' } offers exactly those)
@@ -155,7 +155,7 @@ require('agent-ide').setup({
       reuse = '<C-e>', scope = '<Tab>', kinds = '<C-f>', close = { '<Esc>', 'q' } },
     chat = { send = '<C-CR>', send_alt = '<leader><CR>', interrupt = '<C-c>', prompt = '<leader>ap', help = 'g?',
       history_prev = '<C-p>', history_next = '<C-n>', attach = '<leader>af',
-      answer_inner = 'ir', answer_outer = 'ar', mode = '<S-Tab>', model = { '<leader>aM', '<leader>M' },
+      answer_inner = 'ir', answer_outer = 'ar', mode = '<S-Tab>', plan = '<leader>am', model = { '<leader>aM', '<leader>M' },
       answer = '<leader>ay', raw = 'gr', raw_event = 'gR', park = '<leader>ax', diff = { 'gd', '<leader>gd' },
       -- native: continue in native Claude in a tmux pane; a typed key (gT) works in the transcript
       -- only, since the prompt buffer is where you edit text (gT stays Vim's there)
@@ -173,7 +173,8 @@ require('agent-ide').setup({
     drawer = { open = { '<CR>', 'o' }, fold = 'za', collapse_all = 'z0', expand_all = 'z9', refresh = 'R',
       tmux = { 'gT', '<leader>aT' }, search = { 'S', '<leader>ff', '<leader>S' }, park = 'sP', hide = 'H',
       delete = 'D', yank = 'y', lazygit = 'glg', close = 'q', help = { '?', 'g?' }, graph = 'G', scope = '<S-Tab>',
-      legend = { 'gL', '<leader>aL' }, close_tmux = 'X' },
+      legend = { 'gL', '<leader>aL' }, close_tmux = 'X',
+      next_session = ']s', prev_session = '[s' }, -- open the next / previous session of the project
     -- drawer, on prompt rows (elsewhere these keys keep their normal meaning)
     prompts = { edit = 'e', rename = 'r', delete = 'D', yank = 'y', to_library = 'sL' },
   },
@@ -288,6 +289,7 @@ In the drawer (`keys.drawer`; the prompt row keys are `keys.prompts`, the sessio
 | `X` | Close the Claude that runs the session in a tmux pane, after a confirm (see [Closing terminal sessions](#closing-terminal-sessions)) |
 | `q` | Close the drawer |
 | `gL`, `<leader>aL` | Show or hide the legend of the state marks (remembered) |
+| `]s`, `[s` | Open the next or previous session of the project (from the session row, else the chat shown); the drawer keeps the focus and its cursor follows |
 | `G` | Commit graph of the row's repository (a worktree session: that worktree; see [Commit graph](#commit-graph)) |
 | `glg` | Open lazygit for the row's repository (a worktree row or session: that worktree) |
 | `<S-Tab>` | Scope: only the row's project (else the working directory's), or back to all projects (see [Project scope](#project-scope)) |
@@ -308,7 +310,8 @@ In the chat (transcript and prompt buffer, unless noted):
 | `<leader>ap` | Focus the prompt |
 | `i`, `a`, `o` | Transcript: write in the prompt |
 | `<leader>ay` | Answer what Claude asks (permission, question, plan) |
-| `<S-Tab>` | Next permission mode |
+| `<S-Tab>` | Next permission mode (manual, acceptEdits, auto); in plan mode, leaves it |
+| `<leader>am` | Plan mode on, or off again (back to the mode you had before) |
 | `<leader>aM`, `<leader>M` | Pick the model |
 | `<leader>ax` | Park the session: stop its Claude process (asks when it is working); the next send resumes it |
 | `gT`, `<leader>aT` | Continue the session in native Claude in a tmux pane; while it is there, take it back (`gT` in the transcript only; the prompt buffer keeps Vim's `gT`) |
@@ -330,7 +333,7 @@ In the chat (transcript and prompt buffer, unless noted):
 | `:q!` | Prompt: hide the window and discard the draft |
 | `g?` | Help, filterable (`?` stays Vim's backward search) |
 
-The history buffer is markdown with folds for tool calls, results and thinking. Claude's own words, an answer or a remark between two tool calls, start with a green `●` (`AgentIdeAnswerMark`; virtual text, so yanks and the `ir` / `ar` text objects copy the words only), while it streams too. In an `Edit` fold the removed lines are red and the added ones green (`AgentIdeDiffDel`, `AgentIdeDiffAdd`), and `gd` on the fold opens the branch diff of that file. Anything the viewer does not understand is shown as a fold marked `unknown`, never dropped, and truncated output says how many lines are hidden.
+The history buffer is markdown with folds for tool calls, results and thinking. Claude's own words, an answer or a remark between two tool calls, start with a green `●` (`AgentIdeAnswerMark`; virtual text, so yanks and the `ir` / `ar` text objects copy the words only), while it streams too. In an `Edit` fold the removed lines are red and the added ones green (`AgentIdeDiffDel`, `AgentIdeDiffAdd`), and `gd` on the fold opens the branch diff of that file. In a `Bash` fold the command has its own colour (`AgentIdeCommand`), apart from its output. Anything the viewer does not understand is shown as a fold marked `unknown`, never dropped, and truncated output says how many lines are hidden.
 
 ### Help
 
@@ -350,7 +353,7 @@ Open a session from the drawer, or start one with `+ New session` under a projec
 
 **Permissions, questions and plans.** When Claude asks to use a tool, the ask shows at the end of the transcript and in the drawer, and a picker opens with Allow, Deny and the suggestions Claude made (switch the mode for this session, or always allow a rule; offered only where Claude saves it in this project's local settings, and labelled so). The picker opens only when you are in that session's chat in normal mode. Nothing ever interrupts you: an ask from another session never opens a popup, moves the cursor or takes focus; it shows in the drawer and in the footer, and `<leader>an` takes you there. While you type in the same session's prompt, a one-line hint appears instead; `<leader>ay` opens the picker. Questions Claude asks (multiple choice) are answered the same way, one picker per question; a multi-select question takes one option per round until you pick Done choosing. A plan from plan mode can be approved, approved with edits accepted for the rest of the session, or sent back with Keep planning. A soft chime plays when a session of this Neovim starts waiting for you (at most once every two seconds), through `pw-play`, `paplay`, `aplay` or `afplay`, whichever is installed, or the player you set in `sound.cmd`; `sound = { waiting = false }` turns it off. Five chimes to choose from with `sound.chime`: `two` (two rising notes, the default), `soft` (one low note), `bell` (one ringing note), `rising` (three quick notes) and `pop` (a short blip); `:AgentsChime bell` plays one so you can pick. Each is a small WAV the plugin generates once, `stdpath('cache')/agent-ide/chime-<name>.wav`, nothing is downloaded.
 
-**Mode and model.** `<S-Tab>` cycles the permission mode (manual, acceptEdits, plan, auto) and `<leader>aM` (or `<leader>M`) picks the model. Before a session's first prompt the winbar (and the footer) name the model it will start with: the one you picked for it, else `claude.model` when set, else the model last used in this plugin (the last one picked, or reported by a Claude it started; kept in `prefs.json`), else Claude's own default (`default`, or its name when Claude's list is known). New and resumed sessions start with that model. The winbar shows `old→new` until Claude confirms a change; a refused change says why. The picker lists every model your Claude Code offers, with name and description (`Fable 5.2 — … (claude-fable-5-2)`, the current one marked `●`), as Claude reports them when a process starts (no turn, kept in `models.json`; on a fresh install a short-lived Claude is asked first, for at most 1.5 s), and the winbar and the footer name the model the same way (`fable 5.1`).
+**Mode and model.** `<S-Tab>` cycles the permission mode (manual, acceptEdits, auto), `<leader>am` turns plan mode on and off again, and `<leader>aM` (or `<leader>M`) picks the model. Before a session's first prompt the winbar (and the footer) name the model it will start with: the one you picked for it, else `claude.model` when set, else the model last used in this plugin (the last one picked, or reported by a Claude it started; kept in `prefs.json`), else Claude's own default (`default`, or its name when Claude's list is known). New and resumed sessions start with that model. The winbar shows `old→new` until Claude confirms a change; a refused change says why. The picker lists every model your Claude Code offers, with name and description (`Fable 5.2 — … (claude-fable-5-2)`, the current one marked `●`), as Claude reports them when a process starts (no turn, kept in `models.json`; on a fresh install a short-lived Claude is asked first, for at most 1.5 s), and the winbar and the footer name the model the same way (`fable 5.1`).
 
 **Raw view.** `gr` in the transcript shows every line sent to Claude (`>>`) and received (`<<`) for the session, byte for byte; for a session that did not run here it shows the transcript file. Anything the chat cannot render shows as an `unknown` fold, and `gR` on it opens the raw view at its line.
 

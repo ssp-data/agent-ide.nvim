@@ -16,7 +16,8 @@ local HELP = {
   { 'interrupt', 'interrupt Claude; queued prompts return to the prompt buffer' },
   { 'prompt', 'focus the prompt' },
   { 'answer', 'answer what Claude asks (permission, question, plan)' },
-  { 'mode', 'next permission mode (manual, acceptEdits, plan, auto)' },
+  { 'mode', 'next permission mode (manual, acceptEdits, auto; leaves plan)' },
+  { 'plan', 'plan mode on, or off again (back to the mode before)' },
   { 'model', 'pick the model' },
   { 'raw', 'transcript: raw view of the wire lines (>> sent, << received), not the rendered answer; q or the same key returns' },
   { 'raw_event', 'transcript: raw view at the line of the unknown fold under the cursor' },
@@ -77,6 +78,7 @@ function M.map(c, buf, is_transcript, act)
   map('n', keys.help, M.help, 'chat help')
   map('n', keys.answer, function() require('agent-ide.ui.permission').answer(c.s) end, 'answer Claude')
   map('n', keys.mode, function() require('agent-ide.ui.mode').cycle(c.s) end, 'next permission mode')
+  map('n', keys.plan, function() require('agent-ide.ui.mode').toggle_plan(c.s) end, 'toggle plan mode')
   map('n', keys.model, function() require('agent-ide.ui.mode').pick_model(c.s) end, 'pick model')
   -- a typed key (gT) only in the transcript: the prompt buffer is where the user edits text
   local native = is_transcript and keys.native

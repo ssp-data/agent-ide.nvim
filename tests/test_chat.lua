@@ -689,6 +689,15 @@ T[']s and [s in the chat cycle through the project\'s sessions; the drawer follo
   wait_for(function() return current().id == FIXTURE_ID end, 'next from the prompt')
   eq(child.lua_get('vim.api.nvim_get_current_win() == require("agent-ide.ui.chat")._windows().prompt'), true)
   eq(drawer_row_id(), FIXTURE_ID)
+  -- in the drawer: from the row under the cursor; the drawer keeps the focus
+  child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.drawer").state().win)')
+  child.type_keys(']s')
+  wait_for(function() return current().id == SECOND end, 'next from the drawer')
+  eq(child.lua_get('vim.api.nvim_get_current_win() == require("agent-ide.ui.drawer").state().win'), true)
+  eq(drawer_row_id(), SECOND)
+  child.type_keys('[s')
+  wait_for(function() return current().id == FIXTURE_ID end, 'previous from the drawer')
+  eq(drawer_row_id(), FIXTURE_ID)
 end
 
 T['a send while the history loads waits for the load'] = function()

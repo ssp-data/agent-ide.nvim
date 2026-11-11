@@ -570,11 +570,13 @@ T['two pending asks are answered oldest first'] = function()
 end
 
 T['<S-Tab> cycles the mode; the winbar follows what Claude confirms; a control error keeps it'] = function()
+  local function refuse(rid)
+    return { emit = { type = 'control_response', response = { subtype = 'error', request_id = rid, error = 'bad mode',
+      error_code = 'invalid_mode' } } }
+  end
   start(flat({ expect = 'hi' }, init(), status(), say('hey'), result('hey'),
     { expect = '"acceptEdits"' }, { expect = '"go"' }, status('acceptEdits'), ok('r1', { mode = 'acceptEdits' }),
-    { expect = '"plan"' },
-    { emit = { type = 'control_response', response = { subtype = 'error', request_id = 'r2', error = 'bad mode',
-      error_code = 'invalid_mode' } } }))
+    { expect = '"plan"' }, refuse('r2'), { expect = '"auto"' }, refuse('r3'), { expect = '"default"' }, refuse('r4')), { claude = { modes = { 'manual', 'acceptEdits', 'plan', 'auto' } } })
   local id = open_new()
   send_normal('hi')
   wait_for(function() return winbar():find('[manual]', 1, true) ~= nil and current().state == 'idle' end, 'first turn')
@@ -585,17 +587,56 @@ T['<S-Tab> cycles the mode; the winbar follows what Claude confirms; a control e
   child.lua('require("agent-ide.session").get(...):_write({ type = "go" })', { id })
   wait_for(function() return winbar():find('[acceptEdits]', 1, true) ~= nil end, 'confirmed')
   child.type_keys('<S-Tab>')
-  wait_for(function() return #controls() == 2 end, 'second set_permission_mode')
-  eq(controls()[2], { subtype = 'set_permission_mode', mode = 'plan' })
+  -- every other mode refused: each is tried once, the cycle stops at the mode in effect
+  wait_for(function() return #controls() == 4 and #child.lua_get('_G.notes') == 3 end, 'refused modes')
+  eq({ controls()[2].mode, controls()[3].mode, controls()[4].mode }, { 'plan', 'auto', 'default' })
   wait_for(function() return winbar():find('[acceptEdits]', 1, true) ~= nil end, 'error keeps the mode')
-  local notes = child.lua_get('_G.notes')
-  eq(notes[#notes], 'Agent-IDE: cannot switch mode to plan: bad mode')
+  eq(child.lua_get('_G.notes'), { 'Agent-IDE: cannot switch mode to plan: bad mode; trying auto',
+    'Agent-IDE: cannot switch mode to auto: bad mode; trying manual', 'Agent-IDE: cannot switch mode to manual: bad mode' })
   -- the cycle and the names sent to Claude
   eq(child.lua_get([[(function()
     local m = require('agent-ide.ui.mode')
     return { m.next_mode('manual'), m.next_mode('acceptEdits'), m.next_mode('plan'), m.next_mode('auto'), m.next_mode(nil),
       m.claude_name('manual'), m.claude_name('plan') }
   end)()]]), { 'acceptEdits', 'plan', 'auto', 'manual', 'acceptEdits', 'default', 'plan' })
+end
+
+T['plan is not in the default cycle; its own key toggles it and goes back to the mode before'] = function()
+  start(flat({ expect = 'hi' }, init('acceptEdits'), status(), say('hey'), result('hey'),
+    { expect = '"plan"' }, status('plan'), ok('r1', { mode = 'plan' }),
+    { expect = '"acceptEdits"' }, status('acceptEdits'), ok('r2', { mode = 'acceptEdits' })))
+  open_new()
+  send_normal('hi')
+  wait_for(function() return winbar():find('[acceptEdits]', 1, true) ~= nil and current().state == 'idle' end, 'first turn')
+  -- the default cycle, and leaving plan with <S-Tab> goes to the list's first mode
+  eq(child.lua_get([[(function()
+    local m = require('agent-ide.ui.mode')
+    return { m.next_mode('manual'), m.next_mode('acceptEdits'), m.next_mode('auto'), m.next_mode('plan') }
+  end)()]]), { 'acceptEdits', 'auto', 'manual', 'manual' })
+  child.type_keys('\\am')
+  wait_for(function() return winbar():find('[plan]', 1, true) ~= nil end, 'plan on')
+  child.type_keys('\\am')
+  wait_for(function() return winbar():find('[acceptEdits]', 1, true) ~= nil and #controls() == 2 end, 'plan off')
+  eq(controls(), { { subtype = 'set_permission_mode', mode = 'plan' }, { subtype = 'set_permission_mode', mode = 'acceptEdits' } })
+end
+
+T['<S-Tab> during a turn: a refused mode is skipped, the cycle goes on to the next one'] = function()
+  start(flat({ expect = 'hi' }, init('plan'), status(), say('working'),
+    { expect = '"auto"' },
+    { emit = { type = 'control_response', response = { subtype = 'error', request_id = 'r1', error = 'not now' } } },
+    { expect = '"default"' }, status('default'), ok('r2', { mode = 'default' }),
+    { expect = '"go"' }, result('done')), { claude = { modes = { 'manual', 'acceptEdits', 'plan', 'auto' } } })
+  local id = open_new()
+  send_normal('hi')
+  wait_for(function() return winbar():find('[plan]', 1, true) ~= nil and current().state == 'busy' end, 'turn runs')
+  child.type_keys('<S-Tab>')
+  wait_for(function() return #controls() == 2 end, 'second set_permission_mode')
+  eq(controls(), { { subtype = 'set_permission_mode', mode = 'auto' }, { subtype = 'set_permission_mode', mode = 'default' } })
+  wait_for(function() return winbar():find('[manual]', 1, true) ~= nil end, 'manual confirmed')
+  local notes = child.lua_get('_G.notes')
+  eq(notes[#notes], 'Agent-IDE: cannot switch mode to auto: not now; trying manual')
+  child.lua('require("agent-ide.session").get(...):_write({ type = "go" })', { id })
+  wait_for(function() return current().state == 'idle' end, 'turn ends')
 end
 
 T['the mode list comes from config; manual is sent as default'] = function()

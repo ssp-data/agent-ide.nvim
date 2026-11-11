@@ -106,7 +106,7 @@ end
 SEQ.turns300 = many_turns(300)
 
 local function concat_turns(events)
-  local lines, folds, answers, added, removed = {}, {}, {}, {}, {}
+  local lines, folds, answers, added, removed, commands = {}, {}, {}, {}, {}, {}
   local seg = {}
   local function flush()
     if #seg == 0 then return end
@@ -115,6 +115,7 @@ local function concat_turns(events)
     for _, a in ipairs(r.answers) do answers[#answers + 1] = a + #lines end
     for _, l in ipairs(r.added) do added[#added + 1] = l + #lines end
     for _, l in ipairs(r.removed) do removed[#removed + 1] = l + #lines end
+    for _, l in ipairs(r.commands) do commands[#commands + 1] = l + #lines end
     vim.list_extend(lines, r.lines)
     seg = {}
   end
@@ -123,7 +124,7 @@ local function concat_turns(events)
     seg[#seg + 1] = ev
   end
   flush()
-  return { lines = lines, folds = folds, answers = answers, added = added, removed = removed }
+  return { lines = lines, folds = folds, answers = answers, added = added, removed = removed, commands = commands }
 end
 
 T['render is compositional over turns'] = function()
