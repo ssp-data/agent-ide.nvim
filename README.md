@@ -2,8 +2,8 @@
 
 A Neovim plugin to run and review all your Claude Code sessions from one place: a drawer lists every session grouped by git repository, you chat in native buffers (a prompt buffer to write, a markdown buffer to read), and you review what the agent changed with git diffs, without leaving Neovim.
 
-[!NOTE]
-> There's a branch to support Gemini, Codex through the `zed-industries/codex-acp`, but the effort and integration to ao all the features for Claude Code is not worth yet, as I myself use Claude Code exclusively for now. But the architecture and everything is prepared for adding other Agents, too.
+> [!NOTE]
+> **Agent-IDE is built for Claude Code.** Every feature here targets the Claude Code CLI on your subscription. Support for other agents (Gemini CLI, opencode, and Codex through Zed's [codex-acp](https://github.com/zed-industries/codex-acp)) exists on the [`acp`](../../tree/acp) branch, via the Agent Client Protocol. That branch is parked: matching every Claude Code feature for other agents isn't worth the effort yet, as I use Claude Code exclusively. The architecture is ready for other agents if that changes.
 
 ## Why I built Agent-IDE?
 
@@ -61,7 +61,7 @@ Although it's not the same, the agents-IDE does an fraction of it. What's compar
 
 ## Status
 
-Everything above is built and in daily use: the drawer, chat with Claude Code from Neovim, reusable prompts, git review with the diff view and the commit graph, search across all sessions, and the Omarchy indicator (see `omarchy/io.github.sspaeti.agent-ide/README.md`). Other agents (Codex, Gemini, opencode) are planned and not available yet.
+Everything above is built and in daily use: the drawer, chat with Claude Code from Neovim, reusable prompts, git review with the diff view and the commit graph, search across all sessions, and the Omarchy indicator (see `omarchy/io.github.sspaeti.agent-ide/README.md`). Other agents (Codex, Gemini, opencode) are not part of this version; the parked work is on the `acp` branch.
 
 ## Prerequisites
 
