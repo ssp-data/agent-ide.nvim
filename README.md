@@ -15,6 +15,10 @@ I want to prompt in neovim (I use `ctrl-g`) for Claude Code anyway to type with 
 
 What you see, from right to left. **The drawer** shows the `Prompts` node (library, skills and commands) and every project with its sessions in all states: running elsewhere (`elsewhere`), waiting for a permission (`permission: Bash`), done and not read yet (`done, unread`), failed (`failed: API Error…`), idle and parked (dimmed). A project row sums its sessions up (`input (1)`, `review (1)`). Below the sessions are a branch's `Changes vs main` and `Commits on branch`, and a second worktree. **The chat** fills the main window: a rendered markdown transcript with tool calls (`Read`, `Edit`, `Bash`, `Write`) and thinking folded, and a winbar with project, title, model, permission mode and state. **The prompt buffer** below holds a draft with an `[attach]` line. **The footer** in lualine shows the overall state, the model and the quota.
 
+If you like set `scope = 'project'` in opts, Agent-ide will open only the project you are in right now. This is handy when you want to open agent-IDE next to your app or code, in a split view in tmux or other for example. You can also open code in Neovim, as it's Neovim right, but it works better to have one open that only acts as Prompter with agents-IDE, at least for me.
+
+![scope project](docs/images/demo-scope-project.webp)
+
 The diff view: what the agent changed on the branch, side by side, with your real file on the right:
 
 ![Agent-IDE: side-by-side diff of a changed file](docs/images/diff.png)
@@ -49,6 +53,9 @@ You might ask why not a terminal-based TUI, now that Herdr, Rex, and others are 
 - **Uses your Claude subscription** through the Claude Code CLI; no API key
 - **Fast**: Rust helper for scanning, search and file watching, with a Lua fallback
 
+
+## Why Not Tmux, Or Herdr?
+Although it's not the same, the agents-IDE does an fraction of it. What's comparable is that you manage all agents sessions in one UI (currently optimized for Claude Code), but you have one "harness" for all sessions. What is not the same, it does not do any multi-plexing, obvisouly, or also can't integrate Claude Web apps, it's a terminal first, inside Neovim.
 
 ## Status
 
