@@ -6,12 +6,15 @@ All notable changes to Agent-IDE.nvim are listed here. The format follows [Keep 
 
 ### Added
 
+- `]s` / `[s` in the chat (transcript and prompt) open the next or previous session of the same project, in the drawer's order, and the drawer's cursor follows (`keys.chat.next_session`, `prev_session`).
 - Omarchy bar widget: clicking a session also switches to the workspace of, and focuses, the terminal window that shows tmux, and switches that tmux client to the session's exact session, window and pane.
 
 - The removed and added lines of an `Edit` fold in a transcript are red and green (`AgentIdeDiffDel`, `AgentIdeDiffAdd`), also inside a subagent fold and in the search preview. `gd` on the fold opens the file's branch diff, as before.
+- The command in a `Bash` fold has its own colour (`AgentIdeCommand`, linked to `Special`), so it stands apart from its output.
 
 ### Fixed
 
+- Opening a session whose Claude another Neovim drives shows the "another Neovim drives this session" warning once and then the transcript from disk. Before, it kept trying to attach, so the warnings piled up and covered the screen.
 - Hand-off to native Claude (`gT`): a bare `claude` in the configured command is resolved through Neovim's own `$PATH` before the tmux pane runs it. The pane used to inherit the tmux server's environment, where `claude` can resolve to a different binary (a version manager's wrapper, say) that never starts.
 
 ## [0.1.0] - 2026-11-10

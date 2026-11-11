@@ -601,4 +601,27 @@ T['diff marks: the - and + lines of an Edit are coloured, kept through later upd
   eq({ m.col, m.end_col }, { 0, #'│ - old' })
 end
 
+T['command marks: the command of a Bash fold is coloured after the gutter, its output is not'] = function()
+  local s, buf = stub(), new_buf()
+  local view = live_render.attach(buf, s)
+  api.nvim_set_current_buf(buf)
+  local history = require('agent-ide.ui.history')
+  local function marked()
+    local out = {}
+    for _, m in ipairs(history.diff_marks(buf)) do
+      local line = api.nvim_buf_get_lines(buf, m.line - 1, m.line, false)[1]
+      out[#out + 1] = { line:sub(m.col + 1, m.end_col), m.hl }
+    end
+    return out
+  end
+  push(s, { kind = 'prompt', text = 'one' })
+  push(s, { kind = 'tool_call', id = 'b', name = 'Bash', input = { command = 'ls &&\n  pwd' } })
+  push(s, { kind = 'tool_result', id = 'b', text = 'a.txt' })
+  view:sync('events')
+  local want = { { '$ ls &&', 'AgentIdeCommand' }, { '  pwd', 'AgentIdeCommand' } }
+  eq(marked(), want)
+  view:sync('reset')
+  eq(marked(), want)
+end
+
 return T

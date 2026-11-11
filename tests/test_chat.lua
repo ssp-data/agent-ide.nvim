@@ -657,6 +657,40 @@ T['opening the fixture shows its history; a send resumes it'] = function()
   eq(has_line(lines, 'Please add a greeting to main.') < has_line(lines, 'Next question'), true)
 end
 
+T[']s and [s in the chat cycle through the project\'s sessions; the drawer follows'] = function()
+  -- a second session of the project: the fixture under another id
+  local SECOND = '22222222-2222-4222-8222-222222222222'
+  local dir = projects .. '/-repo'
+  vim.fn.writefile(vim.fn.readfile(dir .. '/' .. FIXTURE_ID .. '.jsonl'), dir .. '/' .. SECOND .. '.jsonl')
+  start({})
+  open_fixture()
+  eq(current().id, FIXTURE_ID)
+  -- the keys live in the transcript; focus stays there for the next step
+  child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.chat")._windows().transcript)')
+  child.type_keys(']s')
+  wait_for(function() return current().id == SECOND end, 'next session')
+  eq(child.lua_get('vim.api.nvim_get_current_win() == require("agent-ide.ui.chat")._windows().transcript'), true)
+  child.type_keys(']s') -- two sessions: wraps back
+  wait_for(function() return current().id == FIXTURE_ID end, 'wrap around')
+  child.type_keys('[s')
+  wait_for(function() return current().id == SECOND end, 'previous session')
+  -- the drawer's cursor follows, the drawer does not take the focus
+  local function drawer_row_id()
+    return child.lua_get([=[(function()
+      local d = require('agent-ide.ui.drawer').state()
+      local n = d.nodes[vim.api.nvim_win_get_cursor(d.win)[1]]
+      return n and n.session and n.session.id or vim.NIL
+    end)()]=])
+  end
+  eq(drawer_row_id(), SECOND)
+  -- in the prompt too; focus stays in the prompt
+  child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.chat")._windows().prompt)')
+  child.type_keys('<Esc>]s')
+  wait_for(function() return current().id == FIXTURE_ID end, 'next from the prompt')
+  eq(child.lua_get('vim.api.nvim_get_current_win() == require("agent-ide.ui.chat")._windows().prompt'), true)
+  eq(drawer_row_id(), FIXTURE_ID)
+end
+
 T['a send while the history loads waits for the load'] = function()
   start(turn('Early bird', 'Worm'))
   child.lua([[

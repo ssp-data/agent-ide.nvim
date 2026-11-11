@@ -245,6 +245,32 @@ T['added and removed: the + and - lines of an Edit, not its cut markers, results
   eq(texts(out.added), { '│ + n1', '│ + n2' })
 end
 
+T['commands: the command lines of a Bash call, not its output, cut marker or other tools'] = function()
+  local long = {}
+  for i = 1, 61 do long[i] = 'echo ' .. i end
+  local out = render.render({
+    { kind = 'tool_call', id = 'b', name = 'Bash', input = { command = 'cd /x &&\n  ls -la' } },
+    { kind = 'tool_result', id = 'b', text = '$ not a command' },
+    { kind = 'tool_call', id = 'l', name = 'Bash', input = { command = table.concat(long, '\n') } },
+    { kind = 'tool_call', id = 'w', name = 'Write', input = { file_path = '/g', content = '$ ls' } },
+  })
+  local t = {}
+  for _, l in ipairs(out.commands) do t[#t + 1] = out.lines[l] end
+  eq(vim.list_slice(t, 1, 3), { '│ $ cd /x &&', '│   ls -la', '│ $ echo 1' })
+  eq(#t, 2 + 60)
+  eq(t[#t], '│ echo 60')
+end
+
+T['commands: a Bash call inside a subagent fold is marked on its nested lines'] = function()
+  local out = render.render({
+    { kind = 'prompt', text = 'hi' },
+    { kind = 'tool_call', id = 'b', name = 'Bash', sidechain = true, input = { command = 'ls' } },
+  })
+  local t = {}
+  for _, l in ipairs(out.commands) do t[#t + 1] = out.lines[l] end
+  eq(t, { '│ │ $ ls' })
+end
+
 T['added and removed: an Edit inside a subagent fold is marked on its nested lines'] = function()
   local out = render.render({
     { kind = 'prompt', text = 'hi' },

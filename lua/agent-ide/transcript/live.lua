@@ -24,6 +24,7 @@ local function render_range(events, first, last, lines, levels, marks, diff)
   for _, a in ipairs(out.answers) do marks[#marks + 1] = base + a end
   for _, l in ipairs(out.added) do diff.added[#diff.added + 1] = base + l end
   for _, l in ipairs(out.removed) do diff.removed[#diff.removed + 1] = base + l end
+  for _, l in ipairs(out.commands) do diff.commands[#diff.commands + 1] = base + l end
 end
 
 ---Replace the buffer lines from `row` (0-based) on, where the view last wrote `old`/`old_lv`,
@@ -46,10 +47,11 @@ function View:write(row, old, old_lv, new, new_lv, new_marks, new_diff)
   local abs = {}
   for _, m in ipairs(new_marks or {}) do abs[#abs + 1] = row + m end
   history.mark_answers(buf, start + 1, abs)
-  local added, removed = {}, {}
+  local added, removed, commands = {}, {}, {}
   for _, l in ipairs(new_diff and new_diff.added or {}) do added[#added + 1] = row + l end
   for _, l in ipairs(new_diff and new_diff.removed or {}) do removed[#removed + 1] = row + l end
-  history.mark_diff(buf, start + 1, added, removed)
+  for _, l in ipairs(new_diff and new_diff.commands or {}) do commands[#commands + 1] = row + l end
+  history.mark_diff(buf, start + 1, added, removed, commands)
 end
 
 ---Windows showing the buffer whose cursor is on its last line, or on a closed fold that
@@ -114,7 +116,7 @@ function View:sync_events()
   end
   self.seen = #events
   -- completed turns (rendered for the last time) then the current one
-  local lines, levels, marks, diff = {}, {}, {}, { added = {}, removed = {} }
+  local lines, levels, marks, diff = {}, {}, {}, { added = {}, removed = {}, commands = {} }
   render_range(events, self.start, start - 1, lines, levels, marks, diff)
   local done = #lines
   render_range(events, start, #events, lines, levels, marks, diff)

@@ -98,4 +98,18 @@ T['handed to native Claude: native, whatever the live state'] = function()
   eq(model.note_of(s.id, 'waiting'), { 'native', 'AgentIdeAge' })
 end
 
+T['neighbor: next and previous in the drawer order, wrapping, hidden skipped'] = function()
+  local sessions = { { id = 'a' }, { id = 'b' }, { id = 'c' }, { id = 'd' } }
+  eq(model.neighbor(sessions, 'b', 1).id, 'c')
+  eq(model.neighbor(sessions, 'b', -1).id, 'a')
+  eq(model.neighbor(sessions, 'd', 1).id, 'a') -- wraps
+  eq(model.neighbor(sessions, 'a', -1).id, 'd')
+  local hidden = function(id) return id == 'c' end
+  eq(model.neighbor(sessions, 'b', 1, hidden).id, 'd') -- c is hidden
+  eq(model.neighbor(sessions, 'c', 1, hidden).id, 'd') -- from a hidden one itself
+  eq(model.neighbor(sessions, 'b', 1, function() return true end), nil) -- all others hidden
+  eq(model.neighbor({ { id = 'a' } }, 'a', 1), nil) -- alone
+  eq(model.neighbor(sessions, 'zz', 1), nil) -- not listed
+end
+
 return T
