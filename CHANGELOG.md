@@ -8,6 +8,7 @@ First public version.
 
 ### Added
 
+- **Other agents** through the Agent Client Protocol: Gemini CLI (`gemini --acp`) and opencode (`opencode acp`) run in the same drawer, chat, permission flow and footer as Claude Code, each with its own login. `A` in the drawer or `:AgentsNew [agent]` starts a session with a configured agent (`agents`, `default_agent`); rows and the chat header name the agent; mode, model and `/` commands follow what the agent offers. The plugin keeps its own log of such sessions (`sessions/<agent>/<id>.jsonl`) for the drawer and the history. Any ACP program can be added with `{ kind = 'acp', cmd = {…} }`. Claude sessions are unchanged.
 - **Drawer** (`:Agents`, `<leader>aa`): every Claude Code session on the machine, grouped by git repository (sub-folders and worktrees fold into one project), with title, age and live state: input required, running, done, failed, idle, parked. Right-aligned state words such as `permission: Bash`, `done, unread`, `tmux 2.1`. Works for folders without git too.
 - **Chat in native buffers**: a prompt buffer to write with your own Vim setup and a read-only markdown transcript; streaming answers; tool calls, thinking and subagents as folds; an answer text object (`ir` / `ar`); prompt history; attach files with `@`; send with `<C-CR>` or `<leader><CR>`.
 - **Command menu** on `/` in the prompt: Claude's commands and skills, narrowed fuzzily as you type, plus the plugin's own `/model` and `/copy`.
@@ -65,4 +66,4 @@ First public version.
 
 - Claude runs through the Claude Code CLI on your subscription; an `ANTHROPIC_API_KEY` in the environment is not passed on.
 - The plugin sends nothing over the network and reads no credentials.
-- Other agents (Codex, Gemini, opencode) are planned and not included yet.
+- Codex is not supported yet: `codex` has no ACP mode.

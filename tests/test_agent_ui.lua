@@ -270,6 +270,11 @@ T['A on a project row picks an agent: unavailable ones cannot be picked; the new
   local l = drawer_lines()
   eq(has_line(l, 'claude · ') == nil, true)
   eq(l[has_line(l, 'A Claude session')]:match('^%s+%S+ A Claude session') ~= nil, true)
+  -- D on another agent's row deletes nothing and names the plugin's log
+  drawer_cursor_to('fake · To the fake')
+  child.type_keys('D')
+  eq(notes()[#notes()]:find('fake sessions are not deleted here', 1, true) ~= nil, true)
+  eq(has_line(drawer_lines(), 'fake · To the fake') ~= nil, true)
   -- the Claude session beside it: its own process, its own chat (Review Focus 4)
   drawer_cursor_to('A Claude session')
   child.type_keys('<CR>')

@@ -397,6 +397,13 @@ end
 function actions.delete()
   local node = current_node()
   if not node or node.type ~= 'session' then return end
+  -- the trash moves what Claude keeps of a session; another agent's session is the plugin's own
+  -- log file plus whatever that agent keeps itself, which is not ours to move
+  local agent = node.session.agent
+  if agent and agent ~= 'claude' then
+    return notify(('%s sessions are not deleted here; the plugin\'s log of this one is %s'):format(agent,
+      vim.fn.fnamemodify(require('agent-ide.agents.log').path(agent, node.session.id), ':~')))
+  end
   require('agent-ide.ui.delete').run(node, function()
     local id = node.session.id
     for _, p in ipairs(S.projects) do
