@@ -379,7 +379,7 @@ Rules that still hold: the keeper is the plugin's own process, started with the 
 
 ## Other agents
 
-Claude Code is what this plugin is built around. Other agents run beside it through the [Agent Client Protocol](https://agentclientprotocol.com) (ACP), in the same drawer, chat, prompt buffer, permission flow and footer; nothing about Claude sessions changes. `A` on a row of a project in the drawer (or `:AgentsNew [agent]`) starts a session with one of the configured agents; `+ New session` starts `default_agent`. A session of another agent carries its name: `gemini · <title>` on its drawer row, `Gemini · …` at the start of the chat header.
+Claude Code is what this plugin is built around. Other agents run beside it through the [Agent Client Protocol](https://agentclientprotocol.com) (ACP), in the same drawer, chat, prompt buffer, permission flow and footer; nothing about Claude sessions changes. `A` on a row of a project in the drawer (or `:AgentsNew [agent]`) starts a session with one of the configured agents; `+ New session` starts `default_agent`. A session of another agent carries its name: `gemini · <title>` on its drawer row, `Gemini · …` at the start of the chat header, and `## Gemini` over its answers in the transcript. A session belongs to the agent that started it: an old Claude session continues with Claude, and each agent only sees its own conversations.
 
 | | Claude Code | Gemini CLI (`gemini --acp`) | opencode (`opencode acp`) | Codex |
 |---|---|---|---|---|
@@ -409,6 +409,14 @@ opts = { agents = { myagent = { kind = 'acp', cmd = { 'myagent', '--acp' }, labe
 ```
 
 `gemini = false` (or `opencode = false`) removes a default from the picker.
+
+**Codex.** The `codex` CLI has no ACP mode of its own. Zed's adapter [codex-acp](https://github.com/zed-industries/codex-acp) gives it one (`npm i -g @zed-industries/codex-acp`, or a binary from its releases); the plugin installs nothing, but once the adapter is on your PATH this entry runs Codex like the others (not checked against the real adapter yet):
+
+```lua
+opts = { agents = { codex = { kind = 'acp', cmd = { 'codex-acp' }, label = 'Codex' } } }
+```
+
+**When an agent says nothing.** A turn that hears nothing from the agent for 30 seconds adds a line to the transcript saying so, with what the agent wrote to its error output folded inside (Gemini CLI, for one, notes there that a folder is not trusted). The turn keeps waiting; interrupt it to stop.
 
 ## Footer
 

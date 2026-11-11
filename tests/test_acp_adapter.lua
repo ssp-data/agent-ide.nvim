@@ -345,4 +345,23 @@ T['client-side files: a read inside the folder is answered, one outside refused;
   eq(acp.ins(log2)[4].error.code, -32601)
 end
 
+T['a turn that hears nothing from the agent says so once, then goes on when the answer comes'] = function()
+  local adapter = require('agent-ide.agents.acp.adapter')
+  local old = adapter.STALL_MS
+  adapter.STALL_MS = 150
+  script(acp.flat(acp.handshake(), { expect = '"session/prompt"' }, { sleep_ms = 700 }, acp.chunk('late'), acp.end_turn()))
+  local s = open()
+  eq(s:send('hello'), true)
+  assert(wait(function() return #s.events == 2 end, 3000))
+  local ev = s.events[2]
+  adapter.STALL_MS = old
+  eq({ ev.kind, ev.live_only, ev.text }, { 'meta', true, 'the agent wrote no message' })
+  eq(ev.label, 'no answer from Fake for 0 s; it is still waiting (interrupt to stop)')
+  eq(s.state, 'busy')
+  assert(wait(function() return s.state == 'done' end))
+  -- once per turn, and the late answer is kept
+  eq(kinds(s.events), { 'prompt', 'meta', 'text' })
+  eq(s.events[3].text, 'late')
+end
+
 return T

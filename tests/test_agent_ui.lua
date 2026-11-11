@@ -121,6 +121,12 @@ T['an ACP chat: the answer renders, the winbar names the agent, no quota in the 
   send_normal('hi there')
   wait_for(function() return has_line(transcript(), 'Hello from the fake') ~= nil end, 'answer')
   wait_for(function() return state() == 'idle' end, 'idle')
+  -- the answer's heading names the agent, not Claude; the answer text object finds it
+  eq({ has_line(transcript(), '## Fake') ~= nil, has_line(transcript(), '## Claude') }, { true, nil })
+  child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.chat")._windows().transcript)')
+  child.lua('vim.api.nvim_win_set_cursor(0, { vim.fn.search("Hello from the fake"), 0 })')
+  child.type_keys('yir')
+  eq(child.lua_get([[vim.fn.getreg('"')]]):find('Hello from the fake', 1, true) ~= nil, true)
   local bar = winbar()
   eq(vim.startswith(bar, 'Fake · '), true)
   eq(bar:find('repo', 1, true) ~= nil, true)

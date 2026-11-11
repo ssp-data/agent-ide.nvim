@@ -107,6 +107,7 @@ end
 
 ---Emit rendered events into `out` ({lines, folds}); `results` maps id -> results, `known` is the set of call ids; `nested` renders a sidechain group's own events without regrouping.
 local function emit(events, results, known, out, nested)
+  local heading = '## ' .. (out.name or 'Claude')
   local function block(header, body)
     local first = #out.lines + 1
     out.lines[first] = cut_line(header, M.MAX_FOLD_LINE)
@@ -131,7 +132,7 @@ local function emit(events, results, known, out, nested)
       i = i + 1 -- rendered with its call
     else
       if after_prompt then
-        plain({ '## Claude', '' })
+        plain({ heading, '' })
         after_prompt = false
       end
       if ev.sidechain and not nested then
@@ -177,6 +178,17 @@ function M.tool_parts(name, input)
   return summary(input), call_body({ name = name, input = input })
 end
 
+---The name in the answer heading of Session `s`: its agent's label, `Claude` for Claude (and
+---for anything that is not a session of another agent).
+---@param s table|nil
+---@return string
+function M.name_of(s)
+  if type(s) == 'table' and s.agent and s.agent ~= 'claude' and type(s.adapter) == 'table' and type(s.adapter.label) == 'string' then
+    return s.adapter.label
+  end
+  return 'Claude'
+end
+
 ---First line of `s` (`\n`, `\r\n` or `\r` end a line).
 M.first_line = first_line
 
@@ -207,8 +219,10 @@ end
 ---`answers`: the first line of every main-thread `text` event (a subagent's text is not one).
 ---@param events table[]
 ---@return { lines: string[], folds: { first: integer, last: integer }[], answers: integer[] }
-function M.render(events)
-  local out = { lines = {}, folds = {}, answers = {} }
+---`name`: who answers, for the heading of an answer (`## Claude`; another agent's label).
+---@param name? string
+function M.render(events, name)
+  local out = { lines = {}, folds = {}, answers = {}, name = name }
   local first = 1
   for i = 2, #events + 1 do
     if i > #events or M.starts_turn(events[i]) then

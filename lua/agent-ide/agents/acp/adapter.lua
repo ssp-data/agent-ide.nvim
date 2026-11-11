@@ -13,6 +13,10 @@ local M = {}
 M.PROTOCOL_VERSION = 1
 M.HANDSHAKE_MS = 60000 -- initialize and session/new (a load replays the whole conversation first)
 M.CLIENT_INFO = { name = 'agent-ide.nvim', version = '0' }
+-- A turn that hears nothing from the agent for this long says so in the transcript (once per
+-- turn), with what the agent wrote to stderr: an agent that waits on its service, its quota or
+-- a folder it does not trust otherwise just looks busy.
+M.STALL_MS = 30000
 
 local function list(v) return type(v) == 'table' and vim.islist(v) and v or {} end
 local function str(v) return type(v) == 'string' and v or nil end
@@ -54,7 +58,23 @@ function M.context_text(events, current)
   return 'Earlier conversation, for context (this agent session is new):\n\n' .. table.concat(parts, '\n\n') .. '\n\n---\n\n'
 end
 
+-- (Re)start the stall watch of the running turn; `stop`: the turn is over.
+function Handle:_watch(stop)
+  if self.stall then self.stall:stop() end
+  if stop or self.stalled then return end
+  self.stall = self.stall or vim.uv.new_timer()
+  self.stall:start(M.STALL_MS, 0, vim.schedule_wrap(function()
+    if not self.turn or self.stalled or not self:alive() then return end
+    self.stalled = true
+    local label = ('no answer from %s for %d s; it is still waiting (interrupt to stop)'):format(self.label, math.floor(M.STALL_MS / 1000))
+    local notes = vim.trim(self.client.stderr_tail and self.client.stderr_tail() or '')
+    self.sink.action(live_meta(label, notes ~= '' and ("the agent's own messages:\n" .. notes) or 'the agent wrote no message'))
+  end))
+end
+
 function Handle:_prompt(text)
+  self.turn, self.stalled = true, false
+  self:_watch()
   local wire = text
   if self.preamble then
     local ctx = M.context_text(self.s.events, text)
@@ -63,6 +83,8 @@ function Handle:_prompt(text)
   end
   return self.client:request('session/prompt', { sessionId = self.sid, prompt = { { type = 'text', text = wire } } },
     function(err, result)
+      self.turn = false
+      self:_watch(true)
       if err and err.code == 'exit' then return end -- the exit path ends the turn
       self:_actions(self.translator:result(err, result))
     end, false)
@@ -350,7 +372,10 @@ function M.new(name, cfg)
       cwd = s.cwd,
       env = child_env(cfg.env),
       on_raw = function(dir, line)
-        if dir == 'in' then handle.last_raw = line end
+        if dir == 'in' then
+          handle.last_raw = line
+          if handle.turn then handle:_watch() end -- the agent is heard: the stall watch starts over
+        end
         sink.raw(dir, line)
       end,
       on_garbage = function(line) if mine() then sink.garbage(line) end end,

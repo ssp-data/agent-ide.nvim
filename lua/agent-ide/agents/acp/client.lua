@@ -171,6 +171,8 @@ function M.start(cmd, opts)
     req_handlers = {}, notif_handlers = {} }, Client)
   local splitter = lines.splitter()
   local err_chunks, err_len = {}, 0
+  -- what the agent wrote to stderr so far (the last STDERR_KEEP bytes): its own notices
+  self.stderr_tail = function() return table.concat(err_chunks):sub(-STDERR_KEEP) end
   local ok, handle = pcall(vim.system, cmd, {
     cwd = opts.cwd, stdin = true, env = opts.env, clear_env = opts.env ~= nil,
     stdout = vim.schedule_wrap(function(err, data)

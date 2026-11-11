@@ -53,7 +53,7 @@ function M.answers(buf, s)
         local prompt_n = #render.render({ turn[1] }).lines
         local header = offset + prompt_n + 1
         local last = offset + n + extra
-        if last <= count and api.nvim_buf_get_lines(buf, header - 1, header, false)[1] == '## Claude' then
+        if last <= count and api.nvim_buf_get_lines(buf, header - 1, header, false)[1] == '## ' .. render.name_of(s) then
           out[#out + 1] = { header = header, last = last }
         end
       end

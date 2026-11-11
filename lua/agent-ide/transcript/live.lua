@@ -13,9 +13,9 @@ local View = {}
 View.__index = View
 
 -- `marks`: the answer-start lines (1-based, relative to `lines`) of what was rendered.
-local function render_range(events, first, last, lines, levels, marks)
+local function render_range(events, first, last, lines, levels, marks, name)
   if last < first then return end
-  local out = render.render(vim.list_slice(events, first, last))
+  local out = render.render(vim.list_slice(events, first, last), name)
   local lv = render.fold_levels(out.folds, #out.lines)
   local base = #lines
   vim.list_extend(lines, out.lines)
@@ -80,7 +80,7 @@ function View:stream_lines()
     -- between the turn's own lines and the empty text's lines
     local turn = vim.list_slice(s.events, self.start, #s.events)
     turn[#turn + 1] = { kind = 'text', text = '' }
-    local with = render.render(turn).lines
+    local with = render.render(turn, render.name_of(s)).lines
     local text_n = #render.render({ { kind = 'text', text = '' } }).lines
     self.header = vim.list_slice(with, #self.turn + 1, #with - text_n)
   end
@@ -107,9 +107,10 @@ function View:sync_events()
   self.seen = #events
   -- completed turns (rendered for the last time) then the current one
   local lines, levels, marks = {}, {}, {}
-  render_range(events, self.start, start - 1, lines, levels, marks)
+  local name = render.name_of(self.s)
+  render_range(events, self.start, start - 1, lines, levels, marks, name)
   local done = #lines
-  render_range(events, start, #events, lines, levels, marks)
+  render_range(events, start, #events, lines, levels, marks, name)
   local below = vim.list_extend(vim.list_slice(self.stream), self.tail)
   local old = vim.list_extend(vim.list_slice(self.turn), below)
   local old_lv = vim.list_extend(vim.list_slice(self.turn_lv), zeros(#below))
