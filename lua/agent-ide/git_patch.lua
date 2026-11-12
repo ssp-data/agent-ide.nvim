@@ -110,7 +110,54 @@ local function read_untracked(root, files, cb)
   pump()
 end
 
--- Run the patch command, split it, add the untracked files of `files`, and answer.
+-- delta (https://github.com/dandavison/delta) colours the patch without changing its lines:
+-- syntax colours, a background per changed line, the changed words stronger. Tabs and long
+-- lines pass through as they are.
+local DELTA_FLAGS = { '--color-only', '--paging=never', '--true-color=always', '--tabs=0', '--max-line-length=0' }
+
+---The delta command the full diff pipes its patch through, per `git.delta`: 'auto' (the
+---default) when `delta` is installed, a command list of your own as given, nil for false or
+---without delta. The flags above and `--dark` / `--light` after Neovim's background follow.
+---@return string[]|nil
+function M.delta_cmd()
+  local g = require('agent-ide.config').get().git
+  local d = type(g) == 'table' and g.delta
+  if d == nil then d = 'auto' end
+  if d == false then return nil end
+  local cmd
+  if type(d) == 'table' then
+    cmd = vim.list_slice(d)
+  elseif vim.fn.executable('delta') == 1 then
+    cmd = { 'delta' }
+  else
+    return nil
+  end
+  vim.list_extend(cmd, DELTA_FLAGS)
+  cmd[#cmd + 1] = vim.o.background == 'light' and '--light' or '--dark'
+  return cmd
+end
+
+M.DELTA_MAX_LINES = 20000 -- a longer patch keeps the plugin's own colours: delta's spans cost per line
+
+-- `cb(colored)` with the patch `text` through delta, nil without delta, for a patch over
+-- DELTA_MAX_LINES lines, or when delta failed.
+local function colorize(text, cb)
+  local cmd = M.delta_cmd()
+  if not cmd or text == '' then return cb(nil) end
+  local n, at = 0, 0
+  while n <= M.DELTA_MAX_LINES do
+    at = text:find('\n', at + 1, true)
+    if not at then break end
+    n = n + 1
+  end
+  if n > M.DELTA_MAX_LINES then return cb(nil) end
+  local ok = pcall(vim.system, cmd, { stdin = text, text = false }, function(r)
+    vim.schedule(function() cb(r.code == 0 and r.stdout ~= '' and r.stdout or nil) end)
+  end)
+  if not ok then cb(nil) end
+end
+
+-- Run the patch command, colour it, split it, add the untracked files of `files`, and answer.
 local function patch(root, args, files, label, cb)
   run(root, args, function(code, out, err)
     local res = { files = files, blocks = {}, label = label }
@@ -118,12 +165,18 @@ local function patch(root, args, files, label, cb)
       res.error = parse.line(err) ~= '' and parse.line(err) or ('git failed (' .. code .. ')')
       return cb(res)
     end
-    for _, b in ipairs(parse.patch(out)) do res.blocks[b.path] = b end
-    local untracked = vim.tbl_filter(function(f) return f.untracked and not f.dir end, files)
-    if #untracked == 0 then return cb(res) end
-    read_untracked(root, untracked, function(blocks)
-      for path, b in pairs(blocks) do res.blocks[path] = b end
-      cb(res)
+    colorize(out, function(colored)
+      res.colored = colored ~= nil
+      for _, b in ipairs(parse.patch(colored or out)) do
+        b.colored = res.colored
+        res.blocks[b.path] = b
+      end
+      local untracked = vim.tbl_filter(function(f) return f.untracked and not f.dir end, files)
+      if #untracked == 0 then return cb(res) end
+      read_untracked(root, untracked, function(blocks)
+        for path, b in pairs(blocks) do res.blocks[path] = b end
+        cb(res)
+      end)
     end)
   end)
 end

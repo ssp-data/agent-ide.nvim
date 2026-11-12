@@ -22,6 +22,7 @@ local T = MiniTest.new_set({ hooks = {
   pre_case = function()
     tmp = R.tmp()
     cache._reset()
+    require('agent-ide.config').get().git.delta = false -- plain blocks; the delta case sets its own
   end,
   post_case = function() vim.fn.delete(tmp, 'rf') end,
 } })
@@ -121,6 +122,40 @@ T['the user\'s diff.mnemonicPrefix or diff.noprefix does not change the block pa
     eq({ setting[1], res.blocks['c/a.txt'], res.blocks['w/a.txt'] }, { setting[1], nil, nil })
     R.git(repo, { 'config', '--unset', setting[1] })
   end
+end
+
+-- A stand-in for delta: `+` lines get a green code (and an erase code, as delta writes).
+local function fake_delta(body)
+  local script = tmp .. '/delta.sh'
+  R.write(repo, '../delta.sh', '#!/bin/sh\n' .. body .. '\n')
+  vim.uv.fs_chmod(script, 493)
+  return script
+end
+
+T['git.delta: the patch goes through delta and its blocks are coloured; a failing or missing delta gives plain blocks'] = function()
+  feature_repo()
+  local config = require('agent-ide.config')
+  local saved = config.get().git.delta
+  config.get().git.delta = { fake_delta('sed "s/^+/\\x1b[48;2;0;40;0m+/;s/$/\\x1b[0m\\x1b[48;2;0;40;0m\\x1b[0K\\x1b[0m/"') }
+  local res = R.await(function(cb) patch.load(repo, { kind = 'head' }, cb) end)
+  eq(res.colored, true)
+  eq(res.blocks['a.txt'].colored, true)
+  eq(res.blocks['a.txt'].lines[4], '\27[48;2;0;40;0m+aaa\27[0m\27[48;2;0;40;0m\27[0K\27[0m')
+  eq(res.blocks['a.txt'].lines[2], ' a\27[0m\27[48;2;0;40;0m\27[0K\27[0m')
+  eq(res.blocks['new.txt'].colored, nil) -- an untracked file is read from disk, not coloured
+  config.get().git.delta = { fake_delta('exit 1') }
+  res = R.await(function(cb) patch.load(repo, { kind = 'head' }, cb) end)
+  eq({ res.colored, res.blocks['a.txt'].colored, res.blocks['a.txt'].lines[4] }, { false, false, '+aaa' })
+  config.get().git.delta = false
+  res = R.await(function(cb) patch.load(repo, { kind = 'head' }, cb) end)
+  eq({ res.colored, patch.delta_cmd() }, { false, nil })
+  config.get().git.delta = { '/nonexistent/delta' }
+  res = R.await(function(cb) patch.load(repo, { kind = 'head' }, cb) end)
+  eq({ res.colored, res.blocks['a.txt'].lines[4] }, { false, '+aaa' })
+  config.get().git.delta = 'auto'
+  local cmd = patch.delta_cmd()
+  eq(cmd == nil or (cmd[1] == 'delta' and cmd[2] == '--color-only' and cmd[#cmd] == '--dark'), true)
+  config.get().git.delta = saved
 end
 
 T['cache.committed loads through the cache and is invalidated with it'] = function()

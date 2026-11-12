@@ -31,6 +31,16 @@ T['parse.patch: blocks with paths, renames, binary, mode-only, quoted paths'] = 
   eq(parse.patch(''), {})
 end
 
+T['parse.patch: colour codes on header lines (delta with a styled file header) keep the structure'] = function()
+  local E = '\27['
+  local b = parse.patch(table.concat({ E .. '1;33mdiff --git a/x.lua b/x.lua' .. E .. '0m', 'index 1..2 100644',
+    E .. '1;33m--- a/x.lua' .. E .. '0m', E .. '1;33m+++ b/x.lua' .. E .. '0m', E .. '34m@@ -1 +1 @@' .. E .. '0m',
+    E .. '48;2;0;40;0m+a' .. E .. '0K' .. E .. '0m' }, '\n') .. '\n')
+  eq(#b, 1)
+  eq(b[1].path, 'x.lua')
+  eq(b[1].lines, { E .. '34m@@ -1 +1 @@' .. E .. '0m', E .. '48;2;0;40;0m+a' .. E .. '0K' .. E .. '0m' })
+end
+
 T['parse.unquote'] = function()
   eq(parse.unquote('plain.txt'), 'plain.txt')
   eq(parse.unquote('"a\\tb\\\\c\\"d\\303\\244.txt"'), 'a\tb\\c"dä.txt')
@@ -73,10 +83,60 @@ T['render.build: headers with stats, hunks, notes, folds, nodes'] = function()
   eq(t.nodes[6], { file = 1, new_line = 3 })    -- '+c'
   eq(t.nodes[7], { file = 1 })                  -- '\ No newline'
   eq(t.nodes[8], { file = 1, new_line = 4 })    -- ' d'
-  local groups = {}
-  for _, h in ipairs(t.hl) do groups[h.line] = groups[h.line] or h.group end
-  eq({ groups[2], groups[4], groups[5], groups[7], groups[16] },
-    { 'AgentIdeDiffHunk', 'AgentIdeDiffDel', 'AgentIdeDiffAdd', 'AgentIdeDiffHunk', 'AgentIdeDiffNote' })
+  local g = t.line_group
+  eq({ g[2], g[4], g[5], g[7], g[16] },
+    { 'AgentIdeDiffHunk', 'AgentIdeFullDiffDel', 'AgentIdeFullDiffAdd', 'AgentIdeDiffHunk', 'AgentIdeDiffNote' })
+  eq({ t.line_eol[4], t.line_eol[5], t.line_eol[2], t.line_eol[16] }, { true, true, nil, nil })
+  eq(g[1], nil) -- a header has ranges in hl, no whole-line colour
+  eq(t.hl[1].line, 1)
+end
+
+T['render.build: changed text inside paired - / + lines is marked, a wholly different pair is not'] = function()
+  local files = { { status = 'M', path = 'a.lua', added = 3, removed = 3, binary = false, submodule = false } }
+  local blocks = { ['a.lua'] = { lines = { '@@ -1,4 +1,4 @@', ' ctx',
+    '-local x = compute(1)', '-wholly different', '-ü = {a, b}',
+    '+local x = compute(2)', '+another thing entirely', '+ü = {a, c}', ' end' } } }
+  local t = render.build(files, blocks, { icons = ICONS, width = 60, fold_over = 500 })
+  local text = {}
+  for _, h in ipairs(t.hl) do
+    if h.group == 'AgentIdeFullDiffText' then text[#text + 1] = { h.line, t.lines[h.line]:sub(h.col_start + 1, h.col_end), h.priority } end
+  end
+  eq(text, { { 4, '1', 110 }, { 7, '2', 110 }, { 6, 'b', 110 }, { 9, 'c', 110 } })
+end
+
+T['render.build: a coloured block (delta): codes stripped, spans as ansi groups, the line background to the end'] = function()
+  local E = '\27['
+  local files = { { status = 'M', path = 'a.lua', added = 1, removed = 1, binary = false, submodule = false } }
+  -- delta --color-only: a background per line, a stronger one on the changed word, syntax
+  -- colours in the foreground, `ESC[0K` (erase to the end of the line) before the reset
+  local blocks = { ['a.lua'] = { colored = true, lines = { '@@ -1,2 +1,2 @@',
+    E .. '48;2;63;0;1m-local x = compute(' .. E .. '48;2;144;16;17m1' .. E .. '48;2;63;0;1m)' .. E .. '0m' .. E .. '48;2;63;0;1m' .. E .. '0K' .. E .. '0m',
+    E .. '48;2;0;40;0m+' .. E .. '38;2;249;38;114mlocal' .. E .. '38;2;248;248;242m x = compute(' .. E .. '48;2;0;96;0;38;2;190;132;255m2' .. E .. '48;2;0;40;0;38;2;248;248;242m)' .. E .. '0m' .. E .. '48;2;0;40;0m' .. E .. '0K' .. E .. '0m',
+    ' ' .. E .. '38;2;249;38;114mlocal' .. E .. '0m y = 2' } } }
+  local t = render.build(files, blocks, { icons = ICONS, width = 60, fold_over = 500 })
+  eq({ t.lines[3], t.lines[4], t.lines[5] }, { '-local x = compute(1)', '+local x = compute(2)', ' local y = 2' })
+  eq({ t.nodes[3], t.nodes[4], t.nodes[5] }, { { file = 1 }, { file = 1, new_line = 1 }, { file = 1, new_line = 2 } })
+  -- the coloured lines are kept raw for a decode on demand (the view decodes what it draws)
+  eq({ t.raw[2], t.raw[3] == blocks['a.lua'].lines[2], t.raw[5] == blocks['a.lua'].lines[4] }, { nil, true, true })
+  -- our own line colours stay out of a coloured block
+  for _, h in ipairs(t.hl) do eq(h.group:find('^AgentIdeFullDiff'), nil) end
+  eq({ t.line_group[3], t.line_group[4], t.line_group[2] }, { nil, nil, 'AgentIdeDiffHunk' })
+  local function decoded(line)
+    local out = {}
+    for _, h in ipairs(render.decode(t.raw[line], line)) do
+      out[#out + 1] = { h.col_start, h.col_end, h.group, h.line_hl or false, h.line }
+    end
+    return out
+  end
+  -- the removed line: the whole line in its background, the word in the stronger one, then the
+  -- background again to the end of the screen line (a line highlight)
+  eq(decoded(3), { { 0, 19, 'AgentIdeAnsi_Y3f0001', false, 3 }, { 19, 20, 'AgentIdeAnsi_Y901011', false, 3 },
+    { 20, 21, 'AgentIdeAnsi_Y3f0001', false, 3 }, { 0, 0, 'AgentIdeAnsi_Y3f0001', true, 3 } })
+  local four = decoded(4)
+  eq(four[2], { 1, 6, 'AgentIdeAnsi_Xf92672_Y002800', false, 4 })
+  eq(four[#four], { 0, 0, 'AgentIdeAnsi_Y002800', true, 4 })
+  eq(decoded(5), { { 1, 6, 'AgentIdeAnsi_Xf92672', false, 5 } })
+  eq(render.decode(nil, 9), {})
 end
 
 T['render.build: closed folds by size and by the user; a block without a list entry is kept'] = function()
