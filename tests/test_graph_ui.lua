@@ -215,6 +215,25 @@ T['gd on a commit opens its full diff; q returns to the graph with the cursor on
   eq(v.lines[v.cursor]:sub(1, 9), 'v M b.txt')
 end
 
+T['chat → graph → gd → G in the drawer: the new graph still returns to the chat'] = function()
+  start()
+  child.lua('require("agent-ide").toggle()')
+  press_on(' r  ')
+  press_on('Work on it')
+  wait_for(function() return child.lua_get('require("agent-ide.ui.chat")._windows().prompt ~= nil') end, 'chat')
+  press_on('Work on it', 'G')
+  wait_for(function() local g = graph(); return g ~= vim.NIL and g.state == 'ok' end, 'graph')
+  cursor_on('feat two')
+  child.type_keys('gd')
+  wait_for(function() return child.lua_get('(function() local v = require("agent-ide.ui.fulldiff").state(); return v ~= nil and v.loading == false end)()') end, 'full diff')
+  press_on('Work on it', 'G')
+  wait_for(function() local g = graph(); return g ~= vim.NIL and g.state == 'ok' and g.shown end, 'graph again')
+  eq(child.lua_get('require("agent-ide.ui.fulldiff").state()'), vim.NIL)
+  child.lua('require("agent-ide.ui.graph").close()')
+  wait_for(function() return child.lua_get('require("agent-ide.ui.chat")._windows().prompt ~= nil') end, 'chat back')
+  eq(child.lua_get('vim.b[vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().transcript)].agent_ide_session'), ID)
+end
+
 T['the root commit\'s file diff: an empty left side'] = function()
   start()
   open_graph()

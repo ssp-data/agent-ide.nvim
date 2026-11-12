@@ -8,7 +8,9 @@ local parse = require('agent-ide.git_parse')
 local M = {}
 
 local QUOTE = { '-c', 'core.quotePath=false' } -- only control characters and quotes get quoted
-local PATCH = { '--no-color', '--no-ext-diff', '--no-textconv', '-M', '-U3' }
+-- the prefixes are fixed on the command line: a user's diff.mnemonicPrefix (`c/` `w/`) or
+-- diff.noprefix would otherwise change the `diff --git` lines the parser reads
+local PATCH = { '--no-color', '--no-ext-diff', '--no-textconv', '--src-prefix=a/', '--dst-prefix=b/', '-M', '-U3' }
 local LIST = { '-z', '--no-ext-diff', '--no-textconv', '-M', '--raw', '--numstat' }
 
 M.NOTE_LARGE = 'not shown (larger than 2 MiB)'

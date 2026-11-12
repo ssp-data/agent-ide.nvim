@@ -296,7 +296,9 @@ local function show(root, project)
   if G and G.buf == shown then
     prev = G.prev -- another project's graph: back to what was there before that one
   elseif fd and fd.buf == shown then
-    prev, drop_fulldiff = fd.prev, true -- a full diff: replaced the same way
+    -- a full diff: replaced the same way; one opened from this graph (kept underneath) hands
+    -- over what the graph itself had before, since that graph goes too
+    prev, drop_fulldiff = (G and fd.prev.buf == G.buf) and G.prev or fd.prev, true
   else
     local chat = package.loaded['agent-ide.ui.chat']
     prev = { buf = shown, chat = chat and chat.session_of(shown) or nil }

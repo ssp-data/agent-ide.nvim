@@ -112,6 +112,17 @@ T['a large untracked file is noted, not read; an empty repository gives empty sc
   vim.fn.delete(repo .. '/big.bin')
 end
 
+T['the user\'s diff.mnemonicPrefix or diff.noprefix does not change the block paths'] = function()
+  feature_repo()
+  for _, setting in ipairs({ { 'diff.mnemonicPrefix', 'true' }, { 'diff.noprefix', 'true' } }) do
+    R.git(repo, { 'config', setting[1], setting[2] })
+    local res = R.await(function(cb) patch.load(repo, { kind = 'head' }, cb) end)
+    eq({ setting[1], res.blocks['a.txt'] and res.blocks['a.txt'].lines }, { setting[1], { '@@ -1,2 +1,3 @@', ' a', ' aa', '+aaa' } })
+    eq({ setting[1], res.blocks['c/a.txt'], res.blocks['w/a.txt'] }, { setting[1], nil, nil })
+    R.git(repo, { 'config', '--unset', setting[1] })
+  end
+end
+
 T['cache.committed loads through the cache and is invalidated with it'] = function()
   feature_repo()
   local files = R.await(function(cb) cache.when(repo, 'committed', cb) end)

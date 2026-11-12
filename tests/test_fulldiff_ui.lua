@@ -205,6 +205,25 @@ T['<CR> on a + line opens the side-by-side view on that file and line; q comes b
   eq(diff_state().path, 'dir/sp ace "q".txt')
 end
 
+T['a closed fold survives the side-by-side round trip; a reload while hidden keeps the cursor restore'] = function()
+  start()
+  open({ kind = 'branch' })
+  cursor_on('v M a.txt')
+  child.type_keys('zc')
+  cursor_on('v R sp ace')
+  child.type_keys('<CR>')
+  wait_for(function() return diff_state() ~= vim.NIL end, 'diff')
+  -- the project's git data changes while the full diff is hidden
+  R.write(repo, 'zz.txt', { 'z' })
+  child.lua('require("agent-ide.git_cache").invalidate(...)', { repo })
+  wait_for(function() return view_line('v ? zz.txt') ~= nil end, 'reload while hidden')
+  child.lua('require("agent-ide.ui.diff").close()')
+  wait_for(function() local v = view(); return v ~= vim.NIL and v.shown end, 'full diff back')
+  local v = view()
+  eq({ v.closed[1], v.lines[1]:sub(1, 1) }, { true, '>' })
+  eq(v.lines[v.cursor]:sub(1, 10), 'v R sp ace')
+end
+
 T['commit scope and head scope: labels; an empty scope shows one line'] = function()
   start()
   local c2 = R.await(function(cb) require('agent-ide.git').commits(repo, cb) end)[1]

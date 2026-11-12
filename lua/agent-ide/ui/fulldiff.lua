@@ -98,16 +98,20 @@ local function empty_text()
 end
 
 ---Re-render into the buffer; every window showing it keeps its cursor on the same file and
----hunk (or goes where `V.restore` says). Never changes the current window.
-local function draw()
+---hunk (or goes where `V.restore` says). `fresh_win`: the buffer just (re)entered a window,
+---whose folds are not ours yet, so the fold state kept in `V.closed` stands. Never changes the
+---current window.
+local function draw(fresh_win)
   if not (V and api.nvim_buf_is_valid(V.buf)) then return end
   local ws = wins()
   local keep = {}
   for _, w in ipairs(ws) do keep[w] = (V.res and V.restore) or cursor.key(w, V.t) end
-  if V.res then V.restore = nil end -- a `loading…` draw keeps it for the content
+  -- a `loading…` draw, or one without a window (the view hidden behind the diff view), keeps
+  -- the restore for the draw that shows the content
+  if V.res and #ws > 0 then V.restore = nil end
   local lines, t, note_hl
   if V.res then
-    V.closed = cursor.read_closed(ws[1], V.t) or V.closed
+    if not fresh_win then V.closed = cursor.read_closed(ws[1], V.t) or V.closed end
     t = render.build(V.res.files, V.res.blocks, { icons = config.get().icons, width = ws[1] and text_width(ws[1]) or 80,
       closed = V.closed, fold_over = FOLD_OVER })
     lines = t.lines
@@ -176,6 +180,7 @@ function A.open()
   local node, w = current()
   if not node then return end
   V.restore = cursor.key(w, V.t)
+  V.closed = cursor.read_closed(w, V.t) or V.closed -- the folds go with the window; kept for the return
   vim.bo[V.buf].bufhidden = 'hide' -- kept while the diff view shows: closing it shows this again
   require('agent-ide.ui.fulldiff_open').side_by_side(V, V.t.files[node.file].path, node.new_line)
 end
@@ -266,7 +271,7 @@ local function make_buf(root)
     vim.bo[buf].bufhidden = 'wipe'
     local w = api.nvim_get_current_win()
     if api.nvim_win_get_buf(w) == buf then apply_win(w) end
-    draw()
+    draw(true)
   end })
   api.nvim_create_autocmd('BufWipeout', { group = augroup, buffer = buf, callback = function()
     if V and V.buf == buf then
