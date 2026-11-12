@@ -17,7 +17,7 @@ end
 -- Claude started a turn by itself (e.g. after a background task): busy without a prompt.
 local function turn_begins(s)
   if s.state ~= 'busy' and s.state ~= 'waiting' then
-    activity.turn(s.activity, vim.uv.now())
+    activity.turn(s.activity, vim.uv.now(), s.context_tokens)
     s:_set_state('busy')
   end
 end

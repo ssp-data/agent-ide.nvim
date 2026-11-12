@@ -96,11 +96,11 @@ end
 
 T['tracker: tokens summed per message (its parts overwrite), a cache written again, thinking until the message'] = function()
   local act = activity.new()
-  activity.turn(act, 0)
+  activity.turn(act, 0, 395000) -- resumed: the conversation was 395k before
   activity.thinking(act, 8000)
-  activity.call(act, { id = 'm', read = 100, write = 400000, input = 3, out = 10 })
-  activity.call(act, { id = 'm', read = 100, write = 400000, input = 3, out = 50 }) -- a later part
-  activity.call(act, { id = 'n', read = 400100, write = 500, input = 2, out = 20 })
+  activity.call(act, { id = 'm', tokens = 400103, read = 100, write = 400000, input = 3, out = 10 })
+  activity.call(act, { id = 'm', tokens = 400103, read = 100, write = 400000, input = 3, out = 50 }) -- a later part
+  activity.call(act, { id = 'n', tokens = 400602, read = 400100, write = 500, input = 2, out = 20 })
   activity.call(act, { parent = 'x', id = 'a', write = 90000 }) -- an agent's fresh context: no rebuild
   eq({ act.read, act.write, act.input, act.out, act.calls, act.agent_calls }, { 400200, 490500, 5, 70, 2, 1 })
   eq({ act.rebuilt, act.thinking }, { 400000, nil })
@@ -144,8 +144,8 @@ end
 
 T['section: cache warning, thinking, tokens, last turn per model, todos and shells'] = function()
   local act = activity.new()
-  activity.turn(act, 0)
-  activity.call(act, { id = 'm', read = 0, write = 400000, input = 0, out = 40000 })
+  activity.turn(act, 0, 398000) -- resumed after a pause
+  activity.call(act, { id = 'm', tokens = 400000, read = 0, write = 400000, input = 0, out = 40000 })
   activity.thinking(act, 8000)
   activity.event(act, { kind = 'tool_call', id = 't', name = 'TodoWrite', input = { todos = {
     { content = 'a', status = 'completed' }, { content = 'b', status = 'in_progress', activeForm = 'Doing b' },
@@ -175,6 +175,18 @@ T['failure text: the API status in words and the reason the turn ended'] = funct
     'Overloaded\n(API error 529: Anthropic is overloaded; ended: api_error)')
   eq(f({ api_error_status = 503 }), 'Turn failed\n(API error 503: server error)')
   eq(f({ text = 'x', terminal_reason = 'completed' }), 'x')
+end
+
+T['tracker: a new conversation writes its cache the first time, which is no rewrite; a pause later is'] = function()
+  local act = activity.new()
+  activity.turn(act, 0) -- nothing known before: a new session
+  activity.call(act, { id = 'a', tokens = 35071, read = 14875, write = 20194, input = 2 })
+  activity.call(act, { id = 'b', tokens = 44414, read = 35069, write = 9343, input = 2 }) -- grew by its write
+  eq(act.rebuilt, nil)
+  -- the next turn after the cache expired: the whole conversation written again
+  activity.turn(act, 1)
+  activity.call(act, { id = 'c', tokens = 45000, read = 0, write = 44998, input = 2 })
+  eq(act.rebuilt, 44998)
 end
 
 return T

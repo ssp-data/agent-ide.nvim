@@ -1,4 +1,4 @@
-.PHONY: deps test helper test-helper bench release-notes release publish demo
+.PHONY: deps test helper test-helper bench changelog release-notes release publish demo
 
 deps:
 	@test -d deps/mini.nvim || git clone --depth 1 https://github.com/echasnovski/mini.nvim deps/mini.nvim

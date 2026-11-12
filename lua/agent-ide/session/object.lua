@@ -156,7 +156,7 @@ function Session:_start_turn(text)
   end
   self:_append({ kind = 'prompt', text = text })
   self.turn_start = #self.events
-  require('agent-ide.session.activity').turn(self.activity, vim.uv.now())
+  require('agent-ide.session.activity').turn(self.activity, vim.uv.now(), self.context_tokens)
   self.echo_expected = text
   self.sent_before = true
   self:_set_state('busy')
