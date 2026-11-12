@@ -65,6 +65,7 @@ defaults = function()
       drawer = { open = { '<CR>', 'o' }, fold = 'za', collapse_all = 'z0', expand_all = 'z9', refresh = 'R',
         tmux = { 'gT', '<leader>aT' }, -- jump to the session's tmux pane, or continue it in native Claude there
         search = { 'S', '<leader>ff', '<leader>S' }, park = 'sP', hide = 'H', delete = 'D', yank = 'y',
+        rename = 'r', -- a name of your own for the session (prompt rows: keys.prompts.rename)
         lazygit = 'glg', close = 'q', help = { '?', 'g?' }, graph = 'G', scope = '<S-Tab>',
         legend = { 'gL', '<leader>aL' }, close_tmux = 'X',
         next_session = ']s', prev_session = '[s' }, -- open the next / previous session of the project

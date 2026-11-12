@@ -36,6 +36,7 @@ A Neovim plugin that manages Claude Code sessions from inside Neovim: a drawer w
 | `lua/agent-ide/ui/search_hl.lua` | marks of a search query in a transcript window (`]n`, `[n`) |
 | `lua/agent-ide/ui/bufname.lua` | names of the plugin's buffers (`agents://<project>/<title>`, …) |
 | `lua/agent-ide/hidden.lua` | hidden sessions (`H`), kept in `hidden.json` |
+| `lua/agent-ide/names.lua` | session names (`r` on a session row), kept in `names.json`; applied to the drawer's rows and to search hits |
 | `lua/agent-ide/scope.lua` | project scope or all: what the drawer, search, next waiting and the footer show |
 | `lua/agent-ide/session/commands.lua` | Claude's command list per project for the `/` menu, kept in `commands.json` |
 | `lua/agent-ide/claude/models.lua`, `models_fetch.lua` | the models Claude lists in its `initialize` answer, kept in `models.json`; the one-off fetch for the picker |

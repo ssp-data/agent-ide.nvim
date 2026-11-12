@@ -151,6 +151,13 @@ local function apply(res, q, t_key)
   local sel = q == P.sent_query and P.sel or 1
   res.shown = #(res.hits or {})
   P.hits, P.backend, P.sent_query = res.hits or {}, res.backend, q
+  local names = require('agent-ide.names')
+  if names.any() then
+    for _, h in ipairs(P.hits) do
+      local name = names.get(h.session)
+      if name then h.title, h.raw_title = name, h.title end
+    end
+  end
   if prompts_only() then P.hits = collapse(P.hits) end
   P.sel = math.max(1, math.min(sel, #P.hits))
   P.last = res

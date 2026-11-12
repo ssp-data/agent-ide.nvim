@@ -177,7 +177,7 @@ require('agent-ide').setup({
     drawer = { open = { '<CR>', 'o' }, fold = 'za', collapse_all = 'z0', expand_all = 'z9', refresh = 'R',
       tmux = { 'gT', '<leader>aT' }, search = { 'S', '<leader>ff', '<leader>S' }, park = 'sP', hide = 'H',
       delete = 'D', yank = 'y', lazygit = 'glg', close = 'q', help = { '?', 'g?' }, graph = 'G', scope = '<S-Tab>',
-      legend = { 'gL', '<leader>aL' }, close_tmux = 'X',
+      legend = { 'gL', '<leader>aL' }, close_tmux = 'X', rename = 'r',
       next_session = ']s', prev_session = '[s' }, -- open the next / previous session of the project
     -- drawer, on prompt rows (elsewhere these keys keep their normal meaning)
     prompts = { edit = 'e', rename = 'r', delete = 'D', yank = 'y', to_library = 'sL' },
@@ -231,6 +231,8 @@ The drawer has no header line; `?` lists every key. Each row shows its state mar
 Ages read `now`, `5m`, `3h`, `12d`, then months (`14mo`) and years (`2y`). Colours: waiting violet (bold), busy yellow, idle a filled mark in mid grey (`●`; parked is the hollow `○` in the dimmer comment colour), done orange, failed red, parked rows (mark, title, age) and ages dimmed, never italic; the groups are `AgentIdeWaiting`, `AgentIdeBusy`, `AgentIdeIdle`, `AgentIdeDone`, `AgentIdeFailed`, `AgentIdeParked`, `AgentIdeAge` and `AgentIdeSection`, and a colorscheme can set them. The dim groups (`AgentIdeParked`, `AgentIdeAge`, `AgentIdeMissing`, `AgentIdeBranch`, `AgentIdeGitUntracked`) take the foreground of `Comment` at setup and on every `ColorScheme`, without italic or bold. A project row is its fold arrow and bold name; a parked project's name is dimmed. A project whose folder is gone says `(folder missing)`; a session started in a sub-folder of its project shows `<subfolder>/ · <title>`.
 
 **Legend.** The bottom of the drawer explains the state marks: `● input  ◐ running  ● idle  ○ parked  ✓ done  ✗ failed`, each mark in its colour (the marks of your icon set), over one or two lines. It stays put while the list scrolls, never takes the focus and never covers the cursor row (the list scrolls instead). It hides itself while the drawer is shorter than 12 lines or narrower than 24 columns. `gL` (or `<leader>aL`) shows or hides it, and that choice is remembered across restarts (`prefs.json`); `drawer = { legend = false }` is the start before you ever toggled it.
+
+**Session names.** A session's title is what Claude Code wrote for it (its own title, else your first prompt), which says little about a session you keep coming back to. `r` on a session row asks for a name of your own; the drawer, the chat's winbar, the buffer names, search results and the footer then show that name instead. Nothing in Claude's files changes, and nothing is inferred: the mapping is a small file of the plugin's, `names.json` (see [Privacy](#privacy)), shared by several Neovims. An empty answer, or the title itself, brings Claude's title back.
 
 **Hidden sessions.** `H` on a session row hides it: nothing is deleted, the session only moves into a collapsed, dimmed `Hidden (n)` group, the last row of its project's `Sessions (n)` section (which counts the visible ones only). `<CR>` or `za` expands the group; its rows open like any other session, and `H` on one shows it again. Hidden sessions do not count for the project's age, order or state mark, except while one needs you: a hidden session that is waiting, busy, done-unread or failed is listed among the normal rows (and counted in the roll-up, the footer and `<leader>an`) for as long as that lasts. A project whose sessions are all hidden still shows, with `Sessions (0)` and its group. Search finds hidden sessions as usual. The list is kept in `hidden.json` (see [Privacy](#privacy)); several Neovims share it.
 
@@ -293,6 +295,7 @@ In the drawer (`keys.drawer`; the prompt row keys are `keys.prompts`, the sessio
 | `S`, `<leader>ff`, `<leader>S` | Search the sessions of the project under the cursor |
 | `sP` | Park the session: stop the Claude process this Neovim runs for it |
 | `H` | Hide the session into its project's `Hidden (n)` group; on a hidden session: show it again (Vim's `H` motion is not available in the drawer) |
+| `r` | Session row: give the session a name of your own (see [Session names](#session-names)); empty, or the title itself, brings Claude's title back. Prompt row: rename the file |
 | `D` | Session row: delete an inactive session, moving it to the plugin's trash after a confirm (see [Deleting sessions](#deleting-sessions)). Prompt row: delete the file (asks first) |
 | `y` | Session row: yank the last prompt sent in it. Prompt row: yank its text (unnamed and `+` registers). Elsewhere Vim's `y` |
 | `<leader>aM` / `<leader>M`, `<C-c>`, `gr` | On a session row, what they do in its chat, for that session and without opening it: pick the model, interrupt (only while Claude works, after a confirm), raw view in the main window. A session without a process takes the model when it starts; one running in another Claude is refused (the raw view still opens). On other rows `<C-c>` keeps its Vim meaning. (The chat's mode key, `<S-Tab>`, is the drawer's scope key, so the mode cycle is not on the row; remap `keys.chat.mode` to have it there) |
@@ -665,6 +668,7 @@ What it writes, all of it private (new files `0600`, folders it creates `0700`, 
 | `keeper-<session id>.json`, `keeper-<session id>.sock` | the same folder | per Claude under a keeper (see [Background sessions](#background-sessions)): session id, project folder, transcript path, the keeper's and Claude's pids, a coarse state (busy, waiting, idle), whether a Neovim is attached, how many prompts are queued; and the socket (0600) a Neovim attaches through. Both go when Claude ends |
 | `quota.json` | `stdpath('state')/agent-ide/` | the last quota windows (percent used, reset times) and when they were reported |
 | `hidden.json` | `stdpath('data')/agent-ide/` | the ids of the sessions you hid with `H` |
+| `names.json` | `stdpath('data')/agent-ide/` | the names you gave sessions with `r` (session id and name) |
 | Trash (`<YYYYMMDD-HHMMSS>-<id>/` per deleted session) | `stdpath('data')/agent-ide/trash/` | everything `D` moved out of Claude's folder (transcripts, file history, the session's `history.jsonl` lines) and a manifest, until `:AgentsTrash empty` or `trash.keep_days` |
 | `commands.json` | `stdpath('state')/agent-ide/` | Claude's command names last seen per project (at most 50), keyed by a short hash of the project folder, for the `/` menu |
 | `models.json` | `stdpath('state')/agent-ide/` | the models Claude Code last listed (value, name, description, full id), its version and when; nothing about your account |

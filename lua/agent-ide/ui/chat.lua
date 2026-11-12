@@ -613,7 +613,8 @@ function M.cycle(s, offset)
   end
   local m = require('agent-ide.ui.drawer_model').neighbor(p.sessions or {}, s.id, offset, require('agent-ide.hidden').is)
   if not m then return notify('Agent-IDE: no other session in ' .. (p.name or '?')) end
-  M.open(session.open({ id = m.id, cwd = m.cwd or p.root or p.key, path = m.path, title = m.title }), p)
+  local title = require('agent-ide.names').get(m.id) or m.title -- the drawer's scan has Claude's title
+  M.open(session.open({ id = m.id, cwd = m.cwd or p.root or p.key, path = m.path, title = title }), p)
   if api.nvim_win_is_valid(from) then api.nvim_set_current_win(from) end -- open() focuses the prompt
   drawer().reveal(m.id, p.key)
 end
