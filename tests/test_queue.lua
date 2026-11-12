@@ -134,9 +134,20 @@ local function open_new()
 end
 
 local function panel() return child.lua_get('require("agent-ide.ui.queue")._state()') end
-local function panel_lines()
+local function all_panel_lines()
   local p = panel()
   return p.win and child.lua_get('vim.api.nvim_buf_get_lines(..., 0, -1, false)', { p.buf }) or nil
+end
+-- the prompt rows only: the session's section (ui/queue_activity.lua) starts at a blank line
+local function panel_lines()
+  local lines = all_panel_lines()
+  if not lines then return nil end
+  local out = {}
+  for _, l in ipairs(lines) do
+    if l == '' then break end
+    out[#out + 1] = l
+  end
+  return out
 end
 local function prompt_lines()
   return child.lua_get('vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().prompt), 0, -1, false)')
@@ -161,6 +172,10 @@ T['Q opens the panel left of the transcript; it shows the running and queued pro
   child.type_keys('i', 'third one', '<Esc>', '\\<CR>')
   wait_for(function() return current().queue == 2 end, 'queued')
   wait_for(function() return vim.deep_equal(panel_lines(), { 'Queue · 2 waiting', 'B first', '1. second one', '2. third one' }) end, 'panel rows')
+  -- below them, the session: the running turn with its clock and requests
+  local all = all_panel_lines()
+  eq(all[7], 'Session')
+  eq(all[8]:match('^  turn %d+s · 0 requests$') ~= nil, true)
   -- x on a queued row: back into the prompt buffer
   child.lua('vim.api.nvim_set_current_win(...)', { p.win })
   child.lua('vim.api.nvim_win_set_cursor(0, { 3, 0 })')

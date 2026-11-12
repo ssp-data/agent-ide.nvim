@@ -201,7 +201,7 @@ require('agent-ide').setup({
   -- the size of a session's conversation (see Token usage): from `threshold` tokens on (false: never)
   -- a send that resumes a parked session asks first (Send / Compact first / Cancel) and parking
   -- offers a /compact first; each question can be turned off on its own
-  context = { threshold = 50000, confirm_resume = true, compact_before_park = true },
+  context = { threshold = 50000, confirm_resume = true, compact_before_park = true, large = 200000 },
   -- a soft chime when a session needs you; chime: 'two', 'soft', 'bell', 'rising' or 'pop'
   -- (:AgentsChime <name> plays one); cmd: the player (nil: pw-play, paplay, aplay or afplay,
   -- whichever exists), the chime's WAV path is appended to it
@@ -372,6 +372,23 @@ Open a session from the drawer, or start one with `+ New session` under a projec
 **While Claude works.** Answers stream into the transcript. A prompt sent while a turn runs is queued by the plugin and sent after that turn, in order. `<C-c>` interrupts the turn and puts the queued prompts back into the prompt buffer.
 
 **Queue panel.** `Q` opens a narrow window left of the transcript with the session's prompts as a timeline: every prompt you sent, the first one too (dim, `✓`; the panel opens at the end), the one Claude works on (`◐`, or `●` while it waits for you) and the ones queued behind it, numbered. It never takes the focus, follows the chat when you open another session, and redraws as prompts go out. `Q` works in the chat, in the drawer (on any row) and in the panel itself, so the panel is one key away wherever you are. In the panel, `<CR>` on a sent or running prompt puts the transcript cursor on it and `<CR>` on a queued one focuses the prompt buffer; `x` takes a queued prompt out of the queue, back into the prompt buffer above your draft; `e` opens a queued prompt in a buffer of its own, where `:w` puts the edited text back in its place in the queue (an empty save takes it out); `dd` deletes a queued prompt (its text goes to the unnamed register) and `J` / `K` move one down or up. Claude only sees a prompt when it starts, so a queued one can be changed until then; one that started while you edited it stays as it was, and `:w` says so. Claude Code reads a prompt sent during a turn only after that turn ends; to have it read sooner, interrupt (`<C-c>`) and send again. `q` closes the panel, `g?` lists its keys.
+
+Below the prompts the panel shows what the session weighs and what its turn does, so a session that grows heavy is visible before the limit is:
+
+```
+Session  ~412k  ▲ large
+  turn 6m12s · 38 requests
+
+Agents · 2 running · 1 done · 54 req
+◐ Explore  find fold callers
+    ~58k · 14 tools · Grep
+◐ general-purpose  rewrite budget test
+    ~97k · 31 tools · Bash
+✓ Plan  design the cursor state
+    ~41k · 9 tools · 2m03s
+```
+
+`Session` is the size of the conversation, the same `~412k` as the winbar, marked `▲ large` from `context.large` tokens on (200 000; `false` never marks). `turn` is how long the current turn runs and how many requests it made to the model: each request reads the whole conversation again, so many requests on a large conversation are what uses up a session limit. Under `Agents`, every subagent of the turn: its type and task, its own context, its tool uses and the tool it runs now (or how long it took), and in the header the requests the agents made together. `<CR>` on an agent puts the transcript cursor on the call that started it. A background agent stays listed until its task finishes, across turns. Everything comes from what Claude already sends (the `usage` of each message, the agent calls and their results); nothing asks the model. For a session not run in this Neovim (parked, or in a terminal), the agents of its last turn are listed from the transcript, without sizes or times.
 
 **Permissions, questions and plans.** When Claude asks to use a tool, the ask shows at the end of the transcript and in the drawer, and a picker opens with Allow, Deny and the suggestions Claude made (switch the mode for this session, or always allow a rule; offered only where Claude saves it in this project's local settings, and labelled so). The picker opens only when you are in that session's chat in normal mode. Nothing ever interrupts you: an ask from another session never opens a popup, moves the cursor or takes focus; it shows in the drawer and in the footer, and `<leader>an` takes you there. While you type in the same session's prompt, a one-line hint appears instead; `<leader>ay` opens the picker, also again after a picker was closed without an answer. Questions Claude asks (multiple choice) are answered the same way, one picker per question; a multi-select question takes one option per round until you pick Done choosing. A plan from plan mode can be approved, approved with edits accepted for the rest of the session, or sent back with Keep planning. A soft chime plays when a session of this Neovim starts waiting for you (at most once every two seconds), through `pw-play`, `paplay`, `aplay` or `afplay`, whichever is installed, or the player you set in `sound.cmd`; `sound = { waiting = false }` turns it off. Five chimes to choose from with `sound.chime`: `two` (two rising notes, the default), `soft` (one low note), `bell` (one ringing note), `rising` (three quick notes) and `pop` (a short blip); `:AgentsChime bell` plays one so you can pick. Each is a small WAV the plugin generates once, `stdpath('cache')/agent-ide/chime-<name>.wav`, nothing is downloaded.
 
@@ -659,7 +676,7 @@ What the plugin adds, and what it costs in model tokens:
 | The model picker's list | a short-lived Claude that is only asked `initialize`: no prompt, no turn, and it answers without a network (your `SessionStart` hooks do run) | none |
 | Permissions, questions, plans | answered over Claude's control channel instead of its terminal UI | none beyond what Claude Code asks anyway |
 | Footer quota | read from the rate-limit objects Claude already sends | none |
-| Raw view, queue panel, drafts | local | none |
+| Raw view, queue panel (its sizes and agents included), drafts | local | none |
 
 **What talks to Anthropic.** Only the `claude -p` process of a session you chat in. Everything else (the drawer, `claude agents --json`, the model picker, search, git) stays on your machine. The plugin never starts a turn on its own: no title generation, no summary, no suggestion request.
 
