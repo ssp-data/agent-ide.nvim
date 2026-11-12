@@ -84,9 +84,9 @@ T['statusline text per level'] = function()
   eq(status.statusline_hl(), 'AgentIdeLevel4')
 end
 
-T['model of the focused session, claude- prefix removed'] = function()
+T['no model in the footer: the chat\'s winbar and prompt label name it'] = function()
   use({}, {}, { model = 'claude-haiku-5-5' })
-  eq(status.statusline(), 'agents ok · haiku-5-5')
+  eq(status.statusline(), 'agents ok')
   use({}, {}, { model = nil })
   eq(status.statusline(), 'agents ok')
 end

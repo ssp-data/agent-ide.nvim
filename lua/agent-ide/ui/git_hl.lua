@@ -24,6 +24,11 @@ local GROUPS = {
   AgentIdeGraphTag = { fg = '#e0af68', ctermfg = 179 },
   AgentIdeGraphHead = { bold = true },
   AgentIdeGraphHash = require('agent-ide.ui.highlights').dim,
+  -- the full diff without delta: whole lines as Neovim's diff mode colours them, the changed
+  -- text inside a modified line like its DiffText
+  AgentIdeFullDiffAdd = { link = 'DiffAdd' },
+  AgentIdeFullDiffDel = { link = 'DiffDelete' },
+  AgentIdeFullDiffText = { link = 'DiffText' },
 }
 
 local function apply()

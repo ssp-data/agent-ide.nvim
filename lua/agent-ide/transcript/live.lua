@@ -28,6 +28,7 @@ local function render_range(events, first, last, lines, levels, marks, diff)
   for _, a in ipairs(out.ansi) do
     diff.ansi[#diff.ansi + 1] = { line = base + a.line, col = a.col, end_col = a.end_col, hl = a.hl }
   end
+  for _, e in ipairs(out.edits or {}) do diff.edits[#diff.edits + 1] = base + e end
 end
 
 ---Replace the buffer lines from `row` (0-based) on, where the view last wrote `old`/`old_lv`,
@@ -58,6 +59,11 @@ function View:write(row, old, old_lv, new, new_lv, new_marks, new_diff)
     colours.ansi[#colours.ansi + 1] = { line = row + a.line, col = a.col, end_col = a.end_col, hl = a.hl }
   end
   history.mark_diff(buf, start + 1, colours)
+  local edits = {}
+  for _, e in ipairs(new_diff and new_diff.edits or {}) do
+    if row + e >= start + 1 then edits[#edits + 1] = row + e end
+  end
+  history.set_edits(buf, start + 1, edits)
 end
 
 ---Windows showing the buffer whose cursor is on its last line, or on a closed fold that
@@ -122,7 +128,7 @@ function View:sync_events()
   end
   self.seen = #events
   -- completed turns (rendered for the last time) then the current one
-  local lines, levels, marks, diff = {}, {}, {}, { added = {}, removed = {}, commands = {}, ansi = {} }
+  local lines, levels, marks, diff = {}, {}, {}, { added = {}, removed = {}, commands = {}, ansi = {}, edits = {} }
   render_range(events, self.start, start - 1, lines, levels, marks, diff)
   local done = #lines
   render_range(events, start, #events, lines, levels, marks, diff)

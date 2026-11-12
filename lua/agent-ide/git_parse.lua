@@ -115,6 +115,89 @@ end
 ---@return string first line without the line end
 function M.line(s) return ((s or ''):match('^[^\r\n]*')) end
 
+local ESCAPES = { a = '\a', b = '\b', f = '\f', n = '\n', r = '\r', t = '\t', v = '\v', ['\\'] = '\\', ['"'] = '"' }
+
+---A path as git quotes it (C style, within double quotes) back to its bytes; a string without
+---the surrounding quotes is returned unchanged.
+---@param s string
+---@return string
+function M.unquote(s)
+  if s:sub(1, 1) ~= '"' or s:sub(-1) ~= '"' or #s < 2 then return s end
+  return (s:sub(2, -2):gsub('\\(%d%d?%d?)', function(oct) return string.char(tonumber(oct, 8) % 256) end)
+    :gsub('\\(.)', function(c) return ESCAPES[c] or c end))
+end
+
+-- The two paths of a `diff --git a/X b/Y` line (`rest` is what follows `diff --git `). Quoted
+-- paths are unquoted; unquoted ones are identical halves (a rename has `rename from/to` lines).
+local function header_paths(rest)
+  if rest:sub(1, 1) == '"' then
+    local q = rest:match('^(".-[^\\]")')
+    if q then return (M.unquote(q):gsub('^a/', '')) end
+  end
+  local n = (#rest - 4) / 2
+  if n >= 1 and rest:sub(n + 3, n + 4) == ' b' and rest:sub(1, 2) == 'a/' then return rest:sub(3, n + 2) end
+  return (rest:match('^a/(.-) b/') or rest)
+end
+
+---Blocks of a patch (`git diff -p`), one per `diff --git` header, in output order: `path` (the
+---new path), `old_path` for a rename or copy, `lines` from the first `@@` on (hunk headers,
+---context, `+`, `-`, `\ No newline…`), `binary` for a `Binary files … differ` block and
+---`mode_only` for one with mode lines and no hunk. Git's own header lines are left out. Colour
+---codes (a patch through delta) do not disturb the structure and stay in `lines` as they are.
+---@param text string
+---@return { path: string, old_path: string|nil, lines: string[], binary: boolean, mode_only: boolean }[]
+function M.patch(text)
+  local blocks, b, in_hunk = {}, nil, false
+  text = text or ''
+  if text ~= '' and text:sub(-1) ~= '\n' then text = text .. '\n' end
+  for raw in text:gmatch('([^\n]*)\n') do
+    local line = raw
+    if raw:byte(1) == 27 then
+      -- a coloured line (delta): the codes before the text decide nothing; a header line is
+      -- stripped whole for its paths
+      local at = 1
+      while line:byte(at) == 27 do
+        local e = line:find('[mK]', at + 1)
+        if not e then break end
+        at = e + 1
+      end
+      line = line:sub(at)
+      if line:sub(1, 11) == 'diff --git ' or line:sub(1, 7) == 'rename ' or line:sub(1, 5) == 'copy ' then
+        line = raw:gsub('\27%[[%d;:]*[mK]', '')
+      end
+    end
+    if in_hunk and line:sub(1, 11) ~= 'diff --git ' then
+      b.lines[#b.lines + 1] = raw
+    elseif line:sub(1, 11) == 'diff --git ' then
+      b = { path = header_paths(line:sub(12)), lines = {}, binary = false, mode_only = false, modes = false }
+      blocks[#blocks + 1] = b
+      in_hunk = false
+    elseif b then
+      if line:sub(1, 2) == '@@' then
+        in_hunk = true
+        b.lines[#b.lines + 1] = raw
+      elseif line:sub(1, 12) == 'rename from ' then
+        b.old_path = M.unquote(line:sub(13))
+      elseif line:sub(1, 10) == 'rename to ' then
+        b.path = M.unquote(line:sub(11))
+      elseif line:sub(1, 10) == 'copy from ' then
+        b.old_path = M.unquote(line:sub(11))
+      elseif line:sub(1, 8) == 'copy to ' then
+        b.path = M.unquote(line:sub(9))
+      elseif line:sub(1, 13) == 'Binary files ' then
+        b.binary = true
+      elseif line:sub(1, 9) == 'old mode ' or line:sub(1, 9) == 'new mode ' then
+        b.modes = true
+      end
+    end
+  end
+  for _, blk in ipairs(blocks) do
+    blk.mode_only = blk.modes and #blk.lines == 0 and not blk.binary
+    blk.modes = nil
+  end
+  return blocks
+end
+
 -- Ref badges of one `%D` (with `--decorate=full`): `HEAD -> refs/heads/x` gives the branch, then
 -- HEAD; a remote's symbolic HEAD (`refs/remotes/origin/HEAD`) is left out.
 local function graph_refs(d)

@@ -24,21 +24,26 @@ A Neovim plugin that manages Claude Code sessions from inside Neovim: a drawer w
 | `lua/agent-ide/session/` | session object, states, prompt queue, actions |
 | `lua/agent-ide/transcript/` | parsing transcripts into events, rendering events into lines and folds; `ansi.lua` reads the colour codes of tool output |
 | `lua/agent-ide/index/`, `search/` | talking to the helper, Lua fallbacks |
-| `lua/agent-ide/git*.lua` | read-only, asynchronous git queries, parsing, cache |
+| `lua/agent-ide/git*.lua` | read-only, asynchronous git queries, parsing, cache; `git_patch.lua` the full diff's patch per scope and its untracked reads |
 | `lua/agent-ide/prompts/` | prompt library, skills and commands, saved prompts |
 | `lua/agent-ide/ui/` | drawer, chat, prompt, permission, diff, graph, search picker, help palette, highlights, icons |
 | `lua/agent-ide/ui/drafts.lua` | the prompt buffer's text kept in `drafts/<session id>.md`, brought back when the prompt opens |
-| `lua/agent-ide/ui/queue.lua` | the queue panel (`Q`): prompts sent, running and queued, left of the transcript |
+| `lua/agent-ide/ui/prompt_label.lua` | the prompt window's winbar (`↑ title · model`); which session a prompt window should follow |
+| `lua/agent-ide/ui/queue.lua`, `queue_edit.lua`, `queue_activity.lua` | the queue panel (`Q`): prompts sent, running and queued, left of the transcript; `e`, `dd`, `J`, `K` on queued ones; below them the session's size and its turn's requests and subagents |
+| `lua/agent-ide/session/activity.lua` | what a turn does, from the stream's `call`, `task`, `thinking` and `result` actions and the Agent and TodoWrite calls (pure): requests and tokens, a cache written again, subagents, background shells, todos, the last turn per model |
 | `lua/agent-ide/ui/drawer_legend.lua`, `drawer_session_keys.lua` | the drawer's legend of state marks (`gL`, remembered in `prefs.json`); the chat's keys on a session row |
 | `lua/agent-ide/ui/graph.lua`, `graph_render.lua`, `graph_keys.lua`, `graph_context.lua` | commit graph: window, pure lane layout, keys, which repository |
+| `lua/agent-ide/ui/fulldiff.lua`, `fulldiff_render.lua`, `fulldiff_keys.lua`, `fulldiff_open.lua`, `fulldiff_cursor.lua` | full diff (`gd`, `:AgentsDiff`): window and reload, pure rendering of a patch into lines and folds, keys, a drawer row to its scope and `<CR>` into the side-by-side view, cursor and fold state across redraws |
 | `lua/agent-ide/ui/tmux_close.lua`, `tmux_verify.lua` | closing a Claude in a tmux pane (`X`, `:AgentsCloseIdle`); the checks before any key is typed |
 | `lua/agent-ide/ui/delete.lua`, `lua/agent-ide/trash.lua`, `trash_fs.lua`, `trash_history.lua` | deleting a session (`D`) into the trash, `:AgentsTrash` restore and empty |
 | `lua/agent-ide/ui/search_hl.lua` | marks of a search query in a transcript window (`]n`, `[n`) |
 | `lua/agent-ide/ui/bufname.lua` | names of the plugin's buffers (`agents://<project>/<title>`, …) |
 | `lua/agent-ide/hidden.lua` | hidden sessions (`H`), kept in `hidden.json` |
+| `lua/agent-ide/names.lua` | session names (`r` on a session row), kept in `names.json`; applied to the drawer's rows and to search hits |
 | `lua/agent-ide/scope.lua` | project scope or all: what the drawer, search, next waiting and the footer show |
 | `lua/agent-ide/session/commands.lua` | Claude's command list per project for the `/` menu, kept in `commands.json` |
 | `lua/agent-ide/claude/models.lua`, `models_fetch.lua` | the models Claude lists in its `initialize` answer, kept in `models.json`; the one-off fetch for the picker |
+| `lua/agent-ide/claude/usage.lua`, `session/context.lua`, `ui/context_ask.lua` | the size of a conversation from `usage` objects (pure) and from a transcript's tail; the questions before a resume and before parking, the `/compact` key |
 | `lua/agent-ide/util/jsonfile.lua` | private JSON files, read leniently and written atomically |
 | `lua/agent-ide/status.lua`, `live.lua`, `tmux.lua` | footer and status files, sessions running elsewhere, tmux |
 | `demo/`, `scripts/demo.sh`, `scripts/demo-screenshot.sh` | synthetic demo data and fake `claude` for `make demo`, and the README screenshots (no real data; the screenshot script needs Hyprland, foot and grim) |
@@ -55,7 +60,7 @@ make helper        # build the helper after changing helper/ or pulling
 make test-omarchy  # widget tests (node)
 make test-real     # real Claude on the subscription; not part of `make test`, run on purpose only
 make release-notes # print the changelog section that would be released
-make demo          # Neovim on the synthetic demo (demo/): sessions, repos, prompts under /tmp/agent-ide-demo; for screenshots
+make demo          # Neovim on the synthetic demo (demo/, see demo/README.md) under /tmp/agent-ide-demo; you drive, for screenshots
 make release VERSION=x.y.z   # see "Releasing"
 ```
 
@@ -66,7 +71,7 @@ Run one file or case: `TEST_FILE=tests/test_tree.lua make test`, `TEST_CASE='tex
 1. **Fidelity.** What Claude sent is what the user sees. Nothing is dropped or altered silently; unknown events are shown as `unknown` folds; anything cut for display carries a counted marker and the raw view (`gr`) keeps everything. Colour codes (SGR) in tool output are shown as the colours they stand for, as a terminal would; other escape sequences stay in the text. The Lua parser (`transcript/parse.lua`) and the Rust parser (`helper/src/events.rs`) must produce the same events: change both, bump `RULES_VERSION` in both, and keep the parity tests green.
 2. **Prompts are sent verbatim.** Templates and saved prompts are loaded and saved byte for byte.
 3. **Never interrupt typing.** No focus changes, no pop-ups while the user types; permission requests and results wait. Nothing synchronous on a keystroke.
-4. **Speed.** The budget tests (`tests/test_budget.lua`, `test_git_budget.lua`, `test_graph_budget.lua`, `test_search_budget.lua`, with `budget_lib.lua`, and the helper's search budgets in `make test-helper`) are requirements; never weaken them. No synchronous git or file scanning on the UI thread.
+4. **Speed.** The budget tests (`tests/test_budget.lua`, `test_git_budget.lua`, `test_graph_budget.lua`, `test_fulldiff_budget.lua`, `test_search_budget.lua`, with `budget_lib.lua`, and the helper's search budgets in `make test-helper`) are requirements; never weaken them. No synchronous git or file scanning on the UI thread.
 5. **Subscription only.** Claude runs through the Claude Code CLI; `ANTHROPIC_API_KEY` is stripped from every child process. Never read credentials, never call the network from the plugin.
 6. **The plugin works without the helper.** Every helper feature has a Lua fallback (search is limited there).
 7. **Git is read-only.** Queries use `--no-optional-locks`; staging, committing and the like are left to lazygit.
@@ -82,7 +87,7 @@ With `conceallevel >= 2`, Neovim asks the treesitter highlighter about every row
 ## Conventions
 
 - Match the surrounding code: comment density, naming, idiom. Keep files focused (about 350 lines is a good ceiling).
-- Pure logic stays pure and tested without a window (`ui/tree.lua`, `ui/layout.lua`, `ui/graph_render.lua`, `transcript/render.lua`, `git_parse.lua`).
+- Pure logic stays pure and tested without a window (`ui/tree.lua`, `ui/layout.lua`, `ui/graph_render.lua`, `ui/fulldiff_render.lua`, `transcript/render.lua`, `git_parse.lua`).
 - Every configurable key goes through `lua/agent-ide/util/keys.lua` and accepts a key, a list of keys, or `false`. New keys are added to the view's help (`g?`) and the README key tables. Do not shadow common Vim keys where the user edits text (the prompt buffer, the real file in the diff view).
 - Highlight groups are defined with `default = true` and re-applied on `ColorScheme`. Dimmed text is never italic.
 - Test first where behaviour changes. Child Neovims in tests are headless with a timeout; wait on conditions rather than fixed sleeps. Tests never start a real `claude`; use the fakes in `tests/`.

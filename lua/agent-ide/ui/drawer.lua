@@ -2,6 +2,7 @@
 local api = vim.api
 local config = require('agent-ide.config')
 local hidden = require('agent-ide.hidden')
+local names = require('agent-ide.names')
 local index = require('agent-ide.index')
 local live = require('agent-ide.live')
 local project = require('agent-ide.project')
@@ -66,9 +67,10 @@ local function sync_scope()
   S.kind, S.expanded = k, S.expanded_by[k] or {}
 end
 
----Projects as the drawer shows them: those in scope, unsaved new sessions added, hidden ones grouped.
+---Projects as the drawer shows them: those in scope, unsaved new sessions added, your names
+---on sessions you named, hidden ones grouped.
 local function shown_projects()
-  local projects = model.with_unsaved(model.in_scope(S.projects, scope.project()))
+  local projects = names.with(model.with_unsaved(model.in_scope(S.projects, scope.project())))
   if not hidden.any() then return projects end
   return model.with_hidden(projects, hidden.is, model.state_of)
 end
@@ -130,6 +132,7 @@ end
 local function rescan()
   index.scan(function(sessions)
     hidden.refresh() -- another Neovim may have hidden or shown sessions
+    names.refresh() -- or named one
     S.projects = project.group(sessions)
     render()
   end)
@@ -347,6 +350,30 @@ function actions.hide()
   if after and after.type == 'session' and after.session.id == id then notify('hidden; listed here while it needs you') end
 end
 
+-- `r`: a name of your own for the session, shown instead of Claude's title (drawer, chat, footer);
+-- kept in names.json, Claude's files untouched. Empty, or the title itself: back to the title.
+function actions.rename()
+  local node = current_node()
+  if not node or node.type ~= 'session' then return end
+  local m = node.session
+  local id, raw = m.id, m.raw_title or m.title
+  vim.ui.input({ prompt = 'Session name (empty: Claude\'s title): ', default = names.get(id) or raw or '' },
+    function(typed)
+      if typed == nil then return end
+      local name = vim.trim(typed)
+      if name == '' or name == raw then name = nil end
+      if name == names.get(id) then return end
+      if not names.set(id, name) then return end
+      local s = session.get(id)
+      if s then
+        s.title = name or raw
+        s:_emit('meta') -- the winbar, the buffer names and the status follow
+      end
+      render()
+      notify(name and ('named "' .. name .. '"') or 'name removed; Claude\'s title shows again')
+    end)
+end
+
 -- `D`: delete the session (into the plugin's trash, after checks and a confirm; ui/delete.lua).
 -- Its row goes away at once; the cursor stays on its screen line. Other rows: nothing.
 function actions.delete()
@@ -488,12 +515,14 @@ local ACTIONS = {
   { 'search', 'search this project (<Tab> in the picker: all sessions)' },
   { 'park', 'park the session: stop its Claude process here' },
   { 'hide', 'hide the session into Hidden (n); on a hidden one: show it again' },
+  { 'rename', 'session row: a name of your own for it (Claude\'s title stays in its files); empty: the title again' },
   { 'delete', 'delete an inactive session: move it to the trash (:AgentsTrash)' },
   { 'yank', 'session row: yank the last prompt sent in it', fall = true },
   { 'lazygit', 'lazygit for the project (or the row\'s worktree)' },
   { 'close', 'close drawer' },
   { 'help', 'this help (type to filter; <CR> presses the key)' },
   { 'graph', 'commit graph of the project (or the row\'s worktree)' },
+  { 'full_diff', 'full diff of the row: its project, section, commit or file' },
   { 'scope', 'scope: only this project / all projects' },
   { 'legend', 'show or hide the legend of the state marks' },
   { 'next_session', 'open the next session of the project (from the row, else the chat shown)' },
@@ -573,6 +602,10 @@ function actions.graph()
   local root, p = graph.node_root(current_node())
   if not root then return notify('not a git project') end
   graph.open({ root = root, project = p })
+end
+
+function actions.full_diff()
+  if not require('agent-ide.ui.fulldiff_open').from_node(current_node()) then notify('not a git project') end
 end
 
 ---Help rows of the drawer: its own keys as configured, `/`, the row keys of the providers and

@@ -31,6 +31,12 @@ local GROUPS = {
   -- the removed and added lines of an Edit fold in a transcript (red, green)
   AgentIdeDiffAdd = { fg = '#9ece6a', ctermfg = 114 },
   AgentIdeDiffDel = { fg = '#f7768e', ctermfg = 204 },
+  -- the changed text inside a modified line of an Edit fold: the line's colour as a background
+  AgentIdeDiffAddText = { fg = '#9ece6a', ctermfg = 114, reverse = true },
+  AgentIdeDiffDelText = { fg = '#f7768e', ctermfg = 204, reverse = true },
+  -- the full diff view: the `@@` hunk lines and the one-line notes (binary, submodule), dimmed
+  AgentIdeDiffHunk = M.dim,
+  AgentIdeDiffNote = M.dim,
   -- the command of a Bash fold, apart from its output
   AgentIdeCommand = { link = 'Special' },
   -- chat winbar: the model in italic (Normal's foreground), the permission mode as a badge; a
@@ -40,7 +46,13 @@ local GROUPS = {
     return { fg = n.fg, ctermfg = n.ctermfg, italic = true }
   end,
   AgentIdeMode = M.dim,
+  AgentIdeContext = M.dim, -- the context size (`~123k`) beside the model
+  AgentIdeLarge = { link = 'WarningMsg' }, -- `▲ large` in the queue panel: a heavy conversation
   AgentIdeModeHot = { link = 'WarningMsg' },
+  -- the prompt window's label (`↑ title · model`, ui/prompt_label.lua); a prompt that is not the
+  -- transcript's in a warning colour
+  AgentIdePromptLabel = M.dim,
+  AgentIdePromptOther = { link = 'WarningMsg' },
 }
 
 -- the terminal's 16 colours when the colorscheme sets none (`g:terminal_color_<n>`)

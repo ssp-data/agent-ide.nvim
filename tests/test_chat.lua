@@ -599,6 +599,36 @@ T['at most one prompt window per tab, also after the transcript is shown elsewhe
   eq(child.lua_get('vim.b.agent_ide_kind'), 'prompt')
 end
 
+T['the prompt window names its session; it follows another transcript put above it'] = function()
+  start()
+  open_fixture()
+  local fixture_t = child.lua_get('vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().transcript)')
+  local fixture_p = child.lua_get('vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().prompt)')
+  open_new()
+  local function label()
+    local bar = child.lua_get('vim.wo[require("agent-ide.ui.chat")._windows().prompt].winbar')
+    return (bar:gsub('%%#[^#]*#', ''):gsub('%%%*', ''):gsub('%%=', '  '):gsub('%%%%', '%%'))
+  end
+  eq(label(), '  ↑ new session · default')
+  eq(child.lua_get('vim.wo[require("agent-ide.ui.chat")._windows().prompt].winbar'):find('AgentIdePromptLabel', 1, true) ~= nil, true)
+  -- the fixture's transcript put into the transcript window (`:b`): its own prompt comes below
+  child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.chat")._windows().transcript)')
+  child.cmd('buffer ' .. fixture_t)
+  wait_for(function()
+    return child.lua_get('vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().prompt)') == fixture_p
+  end, 'prompt follows')
+  eq(label():find('↑ Alpha basics', 1, true) ~= nil, true)
+  -- while the user types in the prompt it is never swapped: the label warns instead
+  open_new()
+  child.type_keys('i', 'draft')
+  child.lua('vim.api.nvim_win_set_buf(require("agent-ide.ui.chat")._windows().transcript, ...)', { fixture_t })
+  vim.wait(200)
+  eq(mode(), 'i')
+  eq(vim.startswith(label(), '  prompt of new session'), true)
+  eq(child.lua_get('vim.wo[require("agent-ide.ui.chat")._windows().prompt].winbar'):find('AgentIdePromptOther', 1, true) ~= nil, true)
+  eq(prompt_lines(), { 'draft' })
+end
+
 T['a second send while busy shows queued:1; <C-c> interrupts and returns the queue'] = function()
   start({ { expect = 'first' }, init(), status(), { expect = 'interrupt' }, result('stopped', true) })
   open_new()
@@ -645,6 +675,9 @@ T['opening the fixture shows its history; a send resumes it'] = function()
   local bash = has_line(lines, '▸ Bash:')
   eq(bash ~= nil, true)
   eq(child.lua_get('vim.api.nvim_win_call(require("agent-ide.ui.chat")._windows().transcript, function() return vim.fn.foldclosed(' .. bash .. ') end)'), bash)
+  -- an Edit fold starts open, so the change is seen as it comes; its body is still a fold
+  local edit = has_line(lines, '▸ Edit:')
+  eq(child.lua_get('vim.api.nvim_win_call(require("agent-ide.ui.chat")._windows().transcript, function() return { vim.fn.foldclosed(' .. edit .. '), vim.fn.foldlevel(' .. (edit + 1) .. ') } end)'), { -1, 1 })
   eq(winbar(), '. parked · repo · Alpha ba…  default')
   type_prompt('Next question')
   child.type_keys('<C-CR>')

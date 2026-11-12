@@ -234,15 +234,7 @@ local function compute_text()
   elseif l.level == 2 then text = ('agents running (%d)'):format(l.busy)
   elseif l.level == 3 then text = ('review (%d)'):format(l.review)
   else text = ('input required (%d)'):format(l.waiting) end
-  local ok, cur = pcall(M._src.current)
-  if ok and type(cur) == 'table' then
-    local mode = require('agent-ide.ui.mode')
-    local model = type(cur.model) == 'string' and cur.model ~= '' and cur.model or mode.start_model(cur)
-    if model then
-      local name = mode.model_name(cur, model)
-      text = text .. ' · ' .. (name or model:gsub('^claude%-', ''))
-    end
-  end
+  -- the model is not here: the chat's winbar and its prompt's label name it
   return text .. quota_text()
 end
 
@@ -553,7 +545,7 @@ function M.refresh()
 end
 
 local function on_change(_, what)
-  if what == 'delta' then return end -- streaming text does not change the status
+  if what == 'delta' or what == 'activity' then return end -- streaming text, the queue panel's counts: no status change
   M.refresh()
 end
 

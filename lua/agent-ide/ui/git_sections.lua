@@ -107,7 +107,7 @@ end
 local function fold_row(out, w, ctx, name, text, group, icon)
   local key = w.root .. '/git/' .. name
   local open = is_open(ctx.expanded, key)
-  local node = { type = 'git_section', project = w.project, root = w.root, id = w.root .. '#' .. name,
+  local node = { type = 'git_section', name = name, project = w.project, root = w.root, id = w.root .. '#' .. name,
     fold = { key = key, default = false } }
   node.fold.focus = node.id
   out[#out + 1] = { pieces = { { w.indent .. (open and ctx.icons.open or ctx.icons.closed) .. ' ' .. prefix(icon) .. text, group } },
@@ -132,6 +132,17 @@ local function graph_row(out, w, ctx, parent)
     fold = { key = parent.fold.key, default = false, focus = parent.id },
     open = function(n) require('agent-ide.ui.graph').open({ root = n.root, project = n.project }) end }
   out[#out + 1] = { pieces = { { w.indent .. '    commit graph' .. (key and (' · ' .. key) or ''), 'AgentIdeAge' } }, node = node }
+end
+
+-- A dimmed `full diff · gd` row (named with the drawer's key): the whole diff of the section in
+-- one buffer (ui/fulldiff.lua), the branch against the working tree under Changes, the commits
+-- only under Commits.
+local function fulldiff_row(out, w, parent, kind)
+  local key = require('agent-ide.util.keys').get('drawer', 'full_diff')[1]
+  local node = { type = 'git_fulldiff', kind = kind, project = w.project, root = w.root, id = w.root .. '#fulldiff:' .. kind,
+    fold = { key = parent.fold.key, default = false, focus = parent.id },
+    open = function(n) require('agent-ide.ui.fulldiff_open').from_node(n) end }
+  out[#out + 1] = { pieces = { { w.indent .. '    full diff' .. (key and (' · ' .. key) or ''), 'AgentIdeAge' } }, node = node }
 end
 
 local function uncommitted_rows(out, w, ctx)
@@ -226,6 +237,7 @@ local function tree_rows(out, w, ctx)
   local label = base and ('Changes vs ' .. base.label) or 'Changes'
   local open, node = section(out, w, ctx, 'changes', label, changes and #changes)
   if open then
+    fulldiff_row(out, w, node, 'branch')
     if not changes then
       out[#out + 1] = hint(w.indent .. '    ', 'loading…', w.project)
     else
@@ -236,6 +248,7 @@ local function tree_rows(out, w, ctx)
   open, node = section(out, w, ctx, 'commits', label, commits and #commits)
   if open then
     graph_row(out, w, ctx, node)
+    fulldiff_row(out, w, node, 'commits')
     uncommitted_rows(out, w, ctx)
     if not commits then
       out[#out + 1] = hint(w.indent .. '    ', 'loading…', w.project)

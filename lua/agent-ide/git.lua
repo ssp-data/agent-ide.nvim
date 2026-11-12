@@ -11,6 +11,9 @@ local MAX_COUNT_BYTES = 2 * 1024 * 1024 -- untracked files larger than this get 
 local COUNT_BUDGET = 16 * 1024 * 1024 -- bytes read in total to count untracked lines
 local COUNT_PARALLEL = 4 -- untracked files read at a time
 
+-- The same limits for anyone else reading untracked files (git_patch.lua).
+M.read_limits = { file = MAX_COUNT_BYTES, total = COUNT_BUDGET, parallel = COUNT_PARALLEL }
+
 -- Background queue: at most BG_MAX git processes at once for work nobody waits for.
 local BG_MAX = 4
 local bg_running, bg_queue = 0, {}

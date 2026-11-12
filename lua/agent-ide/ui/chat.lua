@@ -85,6 +85,8 @@ local function winbar_text(s, project, width)
   local model = not away and one_line(model_label) or nil
   local mode = (s.mode or s.mode_requested) and ('[' .. mode_label:gsub('^mode:', '') .. ']') or nil
   local hot = mode and not (quiet_mode(s.mode) and quiet_mode(s.mode_requested))
+  -- the size of the conversation (the input of its last request), beside the model
+  local ctx = not away and s.context_tokens and ('~' .. require('agent-ide.claude.usage').fmt(s.context_tokens)) or nil
   local queued = #s.queue > 0 and ('queued:' .. #s.queue) or nil
   local name = one_line(project and project.name or '?')
   local title = one_line(s.title or 'new session')
@@ -95,9 +97,18 @@ local function winbar_text(s, project, width)
     if name ~= '' then n = n + W(SEP) + W(name) end
     return n
   end
+  local function right()
+    local p = {}
+    if model then p[#p + 1] = model end
+    if ctx then p[#p + 1] = ctx end
+    if mode then p[#p + 1] = mode end
+    return p
+  end
   local function rw()
-    if not model and not mode then return 0 end
-    return 1 + (model and W(model) or 0) + (model and mode and 1 or 0) + (mode and W(mode) or 0)
+    local p = right()
+    local n = #p -- a gap before the first part and between the parts
+    for _, x in ipairs(p) do n = n + W(x) end
+    return n
   end
   -- the title takes what is left; without room for it the model, the queue count, the badge
   -- and last the state word give way, and the project gets what remains
@@ -106,7 +117,7 @@ local function winbar_text(s, project, width)
   if not title and lw() + rw() > width then
     local full = name
     name = ''
-    if lw() + rw() > width then model = nil end
+    if lw() + rw() > width then model, ctx = nil, nil end
     if lw() + rw() > width then queued = nil end
     if lw() + rw() > width then mode = nil end
     if lw() + rw() > width then
@@ -122,10 +133,13 @@ local function winbar_text(s, project, width)
   if queued then out[#out + 1] = SEP .. esc(queued) end
   if name ~= '' then out[#out + 1] = SEP .. seg('AgentIdeProject', name) end
   if title then out[#out + 1] = SEP .. esc(title) end
-  if model or mode then
+  if model or ctx or mode then
     out[#out + 1] = '%='
-    if model then out[#out + 1] = seg('AgentIdeModel', model) end
-    if mode then out[#out + 1] = (model and ' ' or '') .. seg(hot and 'AgentIdeModeHot' or 'AgentIdeMode', mode) end
+    local segs = {}
+    if model then segs[#segs + 1] = seg('AgentIdeModel', model) end
+    if ctx then segs[#segs + 1] = seg('AgentIdeContext', ctx) end
+    if mode then segs[#segs + 1] = seg(hot and 'AgentIdeModeHot' or 'AgentIdeMode', mode) end
+    out[#out + 1] = table.concat(segs, ' ')
   end
   return table.concat(out)
 end
@@ -141,6 +155,22 @@ local function update_winbar(c)
     api.nvim_set_option_value('winbar', winbar_text(c.s, c.project, api.nvim_win_get_width(wins[i])),
       { scope = 'local', win = wins[i] })
   end
+  require('agent-ide.ui.prompt_label').refresh()
+end
+
+-- A prompt window follows the one transcript of its tab (another session's buffer put into the
+-- transcript window: `:b`, a jump), never while the user types in it; then every label is set.
+local function sync_prompts()
+  local label = require('agent-ide.ui.prompt_label')
+  for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+    if api.nvim_win_is_valid(w) and vim.b[api.nvim_win_get_buf(w)].agent_ide_kind == 'prompt'
+      and api.nvim_win_get_config(w).relative == '' then
+      local id = label.target(w)
+      local c = id and chats[id]
+      if c and valid_buf(c.pbuf) then api.nvim_win_set_buf(w, c.pbuf) end
+    end
+  end
+  label.refresh()
 end
 
 -- Visibility -------------------------------------------------------------------------------
@@ -163,7 +193,10 @@ local function update_visible(gone_win, gone_buf)
 end
 
 local function setup_autocmds()
-  local function later() vim.schedule(function() update_visible() end) end
+  local function later() vim.schedule(function()
+    update_visible()
+    sync_prompts()
+  end) end
   api.nvim_create_autocmd({ 'BufWinEnter', 'TabEnter' }, { group = augroup, callback = function()
     update_visible()
     later()
@@ -187,6 +220,7 @@ local function setup_autocmds()
         update_winbar(c)
       end
     end
+    require('agent-ide.ui.prompt_label').refresh() -- a resized prompt window: its label fits again
   end })
 end
 
@@ -245,6 +279,20 @@ local function cancel_check(c, why)
   if not c.checking then return end
   end_check(c)
   if why and valid_buf(c.pbuf) then notify(why, vim.log.levels.WARN) end
+end
+
+---Hand the prompt buffer's text to the Session (queued behind a running turn) and clear it.
+local function deliver(c)
+  if not valid_buf(c.pbuf) then return end
+  local text = prompt.text_to_send(api.nvim_buf_get_lines(c.pbuf, 0, -1, false))
+  local ok, reason = c.s:send(text)
+  if ok then
+    prompt.clear(c.pbuf)
+  elseif reason == 'running elsewhere' then
+    notify(elsewhere_msg(), vim.log.levels.WARN)
+  elseif reason ~= 'empty' then
+    notify('Agent-IDE: ' .. tostring(reason), vim.log.levels.WARN)
+  end
 end
 
 ---Send the prompt buffer's text. Held while the history loads, so the prompt lands below it.
@@ -311,18 +359,33 @@ local function send(c)
     end)
     return
   end
-  local ok, reason = c.s:send(text)
-  if ok then
-    prompt.clear(c.pbuf)
-  elseif reason == 'running elsewhere' then
-    notify(elsewhere_msg(), vim.log.levels.WARN)
-  elseif reason ~= 'empty' then
-    notify('Agent-IDE: ' .. tostring(reason), vim.log.levels.WARN)
+  -- A send that resumes a session from its transcript reads the whole conversation again: from
+  -- `context.threshold` tokens on it asks first (Send / Compact first / Cancel). The text stays
+  -- in the prompt meanwhile; what changed under the question is not sent.
+  if c.s:needs_start() and (c.s.sent_before or c.s:_has_transcript()) then
+    if c.asking then return end
+    c.asking = true
+    local pbuf, tick = c.pbuf, api.nvim_buf_get_changedtick(c.pbuf)
+    require('agent-ide.ui.context_ask').before_resume(c.s, function(choice)
+      c.asking = false
+      if choice == 'cancel' or c.pbuf ~= pbuf or not valid_buf(pbuf) then return end
+      if api.nvim_buf_get_changedtick(pbuf) ~= tick then
+        return notify('Agent-IDE: not sent: the prompt changed while checking; send again', vim.log.levels.WARN)
+      end
+      if choice == 'compact' then
+        local ok, reason = c.s:send('/compact')
+        if not ok then return notify('Agent-IDE: ' .. tostring(reason), vim.log.levels.WARN) end
+      end
+      deliver(c)
+    end)
+    return
   end
+  deliver(c)
 end
 
 local function interrupt(c)
   c.send_after_load = false -- a send held for a load is cancelled; its text stays in the prompt
+  c.s.park_after_compact = nil -- a compaction that was to end in a park: not any more
   cancel_check(c, 'Agent-IDE: not sent: interrupted while checking; send again')
   local dropped = c.s:interrupt()
   if #dropped == 0 then return end
@@ -471,6 +534,7 @@ function M.open(s, project)
   update_winbar(c)
   history.apply_win(twin, c.tbuf)
   local pwin = windows.show_prompt(c.pbuf, twin)
+  require('agent-ide.ui.prompt_label').refresh()
   api.nvim_set_current_win(pwin)
   windows.tcd(twin, c.project)
   load(c, fresh)
@@ -528,23 +592,31 @@ end
 ---Park `s`: stop the Claude process this Neovim runs for it (asking first when it works). Queued
 ---prompts it drops go back to its prompt buffer, as after an interrupt. The transcript stays;
 ---the next send resumes the session. A session without a process here gets a notice.
+---A session between turns with a large conversation is offered a /compact first (see
+---ui/context_ask.lua); `opts.no_ask` skips that question.
 ---@param s table Session
-function M.park(s)
+---@param opts? { no_ask?: boolean }
+function M.park(s, opts)
   if not s.owned then
     local why = s:_elsewhere() and 'it runs in another Claude' or 'it is not running in this Neovim'
     return notify('Agent-IDE: nothing to park; ' .. why)
   end
   local pc = chats[s.id]
   if pc then cancel_check(pc, 'Agent-IDE: not sent: the session was parked while checking; send again') end
-  s:park(function(parked, dropped)
-    if not parked then return end
-    local c = chats[s.id]
-    if dropped and #dropped > 0 and c and valid_buf(c.pbuf) then
-      prompt.restore(c.pbuf, dropped)
-      notify(('Agent-IDE: parked; %d queued prompt(s) returned to the prompt buffer'):format(#dropped))
-    end
-    if c then update_winbar(c) end
-    drawer().refresh()
+  local ask = require('agent-ide.ui.context_ask')
+  ask.before_park(s, opts, function(choice)
+    if choice == 'cancel' then return end
+    if choice == 'compact' then return ask.compact(s, { then_park = true }) end
+    s:park(function(parked, dropped)
+      if not parked then return end
+      local c = chats[s.id]
+      if dropped and #dropped > 0 and c and valid_buf(c.pbuf) then
+        prompt.restore(c.pbuf, dropped)
+        notify(('Agent-IDE: parked; %d queued prompt(s) returned to the prompt buffer'):format(#dropped))
+      end
+      if c then update_winbar(c) end
+      drawer().refresh()
+    end)
   end)
 end
 
@@ -562,7 +634,8 @@ function M.cycle(s, offset)
   end
   local m = require('agent-ide.ui.drawer_model').neighbor(p.sessions or {}, s.id, offset, require('agent-ide.hidden').is)
   if not m then return notify('Agent-IDE: no other session in ' .. (p.name or '?')) end
-  M.open(session.open({ id = m.id, cwd = m.cwd or p.root or p.key, path = m.path, title = m.title }), p)
+  local title = require('agent-ide.names').get(m.id) or m.title -- the drawer's scan has Claude's title
+  M.open(session.open({ id = m.id, cwd = m.cwd or p.root or p.key, path = m.path, title = title }), p)
   if api.nvim_win_is_valid(from) then api.nvim_set_current_win(from) end -- open() focuses the prompt
   drawer().reveal(m.id, p.key)
 end

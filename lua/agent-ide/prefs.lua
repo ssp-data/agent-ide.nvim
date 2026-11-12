@@ -50,14 +50,16 @@ function M.set(name, value)
 end
 
 ---The model session `s` starts with, nil for Claude's own default: the one asked for or picked
----for it, else `claude.model` when set, else the model last used here (picked, or reported by
----a Claude this plugin started).
+---for it, else `claude.model` when set, else the model of its own last answer (its transcript,
+---session/context.lua), else, for a session without one, the model last used here (picked, or
+---reported by a Claude this plugin started). A model picked in one session never changes what
+---another session that has answered resumes with.
 ---@param s table Session
 ---@return string|nil
 function M.start_model(s)
   local cfg = require('agent-ide.config').get().claude
   local fixed = type(cfg) == 'table' and type(cfg.model) == 'string' and cfg.model ~= '' and cfg.model or nil
-  return s.model_requested or s.model_chosen or fixed or M.get('model')
+  return s.model_requested or s.model_chosen or fixed or s.transcript_model or M.get('model')
 end
 
 ---Test only: forget the values (the file stays).

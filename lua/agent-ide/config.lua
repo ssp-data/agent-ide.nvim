@@ -46,6 +46,7 @@ defaults = function()
         -- transcript: the prompt buffer is where you edit text, gT stays Vim's there)
         native = { 'gT', '<leader>aT' },
         park = '<leader>ax', -- park: stop the session's Claude process (the next send resumes)
+        compact = '<leader>aC', -- send /compact: Claude summarizes the conversation
         diff = { 'gd', '<leader>gd' },
         save_library = '<leader>W', -- prompt: save the prompt to the library (asks for a name)
         queue = { 'Q', '<leader>aQ' }, -- show or hide the queue panel (Q: Ex mode, which the prompt does not need)
@@ -64,17 +65,24 @@ defaults = function()
       drawer = { open = { '<CR>', 'o' }, fold = 'za', collapse_all = 'z0', expand_all = 'z9', refresh = 'R',
         tmux = { 'gT', '<leader>aT' }, -- jump to the session's tmux pane, or continue it in native Claude there
         search = { 'S', '<leader>ff', '<leader>S' }, park = 'sP', hide = 'H', delete = 'D', yank = 'y',
-        lazygit = 'glg', close = 'q', help = { '?', 'g?' }, graph = 'G', scope = '<S-Tab>',
+        rename = 'r', -- a name of your own for the session (prompt rows: keys.prompts.rename)
+        lazygit = 'glg', close = 'q', help = { '?', 'g?' }, graph = 'G', full_diff = 'gd', scope = '<S-Tab>',
         legend = { 'gL', '<leader>aL' }, close_tmux = 'X',
         next_session = ']s', prev_session = '[s' }, -- open the next / previous session of the project
       -- drawer, on prompt rows (elsewhere these keys keep their normal meaning)
       prompts = { edit = 'e', rename = 'r', delete = 'D', yank = 'y', to_library = 'sL' },
       -- commit graph view, buffer-local; each a key, a list of keys, or false
-      graph = { open = '<CR>', next_commit = ']]', prev_commit = '[[', all = 'a', refresh = 'R', more = 'L', yank = 'y',
-        lazygit = 'glg', close = 'q', help = 'g?' },
+      graph = { open = '<CR>', next_commit = ']]', prev_commit = '[[', full_diff = 'gd', all = 'a', refresh = 'R', more = 'L',
+        yank = 'y', lazygit = 'glg', close = 'q', help = 'g?' },
+      -- full diff view (every change of a branch in one buffer), buffer-local; each a key, a list
+      -- of keys, or false
+      full_diff = { open = '<CR>', next_file = ']f', prev_file = '[f', next_hunk = ']c', prev_hunk = '[c', fold = 'za',
+        collapse_all = 'z0', expand_all = 'z9', refresh = 'R', yank = 'y', lazygit = 'glg', close = 'q', help = 'g?' },
     },
-    -- graph_limit: commits the commit graph loads at first (and L loads more of)
-    git = { graph_limit = 300 },
+    -- graph_limit: commits the commit graph loads at first (and L loads more of). delta: the
+    -- full diff's colours through delta (https://github.com/dandavison/delta): 'auto' when it is
+    -- installed, false never, or a command list of your own
+    git = { graph_limit = 300, delta = 'auto' },
     -- Prompts: Claude's commands and skills (read only), the library of templates and per-project
     -- saved prompts. nil dirs: stdpath('data') .. '/agent-ide/library' and '/agent-ide/prompts'
     prompts = { library_dir = nil, saved_dir = nil, command_dirs = { '~/.claude/commands' },
@@ -86,8 +94,16 @@ defaults = function()
     -- deleted sessions (`D` in the drawer) stay in stdpath('data')/agent-ide/trash until
     -- `:AgentsTrash empty`; keep_days (nil: keep) purges older ones at setup
     trash = { keep_days = nil },
-    -- prompt buffer: `/` opens the command menu, `@` opens the file picker
-    chat = { auto_slash = true, at_picker = true },
+    -- prompt buffer: `/` opens the command menu, `@` opens the file picker; prompt_label: a dim
+    -- `↑ title · model` on the prompt window's winbar naming the session it sends to
+    chat = { auto_slash = true, at_picker = true, prompt_label = true },
+    -- context: the size of a session's conversation (the input tokens of its last request; the
+    -- chat's winbar shows it as `~123k`). From `threshold` tokens on (false: never) the plugin
+    -- asks before a send that resumes a session without a process (Send / Compact first /
+    -- Cancel: the resume reads the whole conversation again) and, on park, offers to compact
+    -- first; confirm_resume and compact_before_park turn either question off. From `large`
+    -- tokens on (false: never) the queue panel marks the session `▲ large`
+    context = { threshold = 50000, confirm_resume = true, compact_before_park = true, large = 200000 },
     -- a soft chime when a session needs you (waiting); chime: two, soft, bell, rising or pop
     -- (`:AgentsChime <name>` plays one); cmd: the player (nil: pw-play, paplay, aplay or afplay,
     -- whichever exists), the chime's WAV path is appended

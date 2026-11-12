@@ -24,7 +24,7 @@ local QUIET_STREAM = {
 local QUIET_DELTA = { input_json_delta = true, thinking_delta = true, signature_delta = true }
 -- System subtypes that carry nothing to show (a running estimate, an announcement; the list of
 -- background tasks repeats what their own task_* objects say).
-local QUIET_SYSTEM = { thinking_tokens = true, background_tasks_changed = true }
+local QUIET_SYSTEM = { background_tasks_changed = true }
 
 local Decoder = {}
 Decoder.__index = Decoder
@@ -79,7 +79,7 @@ function Decoder:task(obj, st)
   if st == 'task_started' then
     local quiet = obj.is_backgrounded == false
     local name = str(obj.description) or id
-    self.tasks[id] = { name = name, quiet = quiet }
+    self.tasks[id] = { name = name, quiet = quiet, tool = str(obj.tool_use_id), task_type = str(obj.task_type) }
     if quiet then return {} end
     local kind, notes = str(obj.subagent_type), {}
     if kind and obj.task_type then notes[#notes + 1] = tostring(obj.task_type) end
@@ -94,7 +94,11 @@ function Decoder:task(obj, st)
     if str(obj.run_id) then ids[#ids + 1] = 'run ' .. obj.run_id end
     if str(obj.tool_use_id) then ids[#ids + 1] = 'tool call ' .. obj.tool_use_id end
     lines[#lines + 1] = table.concat(ids, ', ')
-    return task_event('task started: ' .. name, lines)
+    local acts = task_event('task started: ' .. name, lines)
+    -- for the queue panel: an agent by the tool call that started it, a shell by its task
+    acts[#acts + 1] = { type = 'task', id = id, tool = str(obj.tool_use_id), status = 'started',
+      task_type = str(obj.task_type), desc = name, background = obj.is_backgrounded == true }
+    return acts
   end
   local task = self.tasks[id] or { name = id }
   if task.quiet then return {} end
@@ -105,7 +109,11 @@ function Decoder:task(obj, st)
     for _, k in ipairs(keys) do
       if k ~= 'status' then lines[#lines + 1] = ('%s: %s'):format(k, (vim.inspect(patch[k]):gsub('^"(.*)"$', '%1'))) end
     end
-    return task_event(('task %s: %s'):format(str(patch.status) or 'updated', task.name), lines)
+    local acts = task_event(('task %s: %s'):format(str(patch.status) or 'updated', task.name), lines)
+    if str(patch.status) then
+      acts[#acts + 1] = { type = 'task', id = id, tool = task.tool, status = patch.status, task_type = task.task_type }
+    end
+    return acts
   end
   local lines = {}
   if str(obj.summary) then lines[#lines + 1] = obj.summary end
@@ -116,7 +124,11 @@ function Decoder:task(obj, st)
   if type(u.duration_ms) == 'number' then usage[#usage + 1] = duration(u.duration_ms) end
   if #usage > 0 then lines[#lines + 1] = table.concat(usage, ', ') end
   if str(obj.output_file) then lines[#lines + 1] = 'output: ' .. obj.output_file end
-  return task_event(('task %s: %s'):format(str(obj.status) or 'done', task.name), lines)
+  local acts = task_event(('task %s: %s'):format(str(obj.status) or 'done', task.name), lines)
+  acts[#acts + 1] = { type = 'task', id = id, tool = str(obj.tool_use_id) or task.tool,
+    status = str(obj.status) or 'completed', task_type = task.task_type,
+    tool_uses = type(u.tool_uses) == 'number' and u.tool_uses or nil }
+  return acts
 end
 
 function Decoder:system(obj, raw)
@@ -147,6 +159,26 @@ function Decoder:system(obj, raw)
     return { { type = 'event', event = { kind = 'meta', label = 'hook', text = name .. ': ' .. detail } } }
   elseif st == 'task_started' or st == 'task_updated' or st == 'task_notification' then
     return self:task(obj, st)
+  elseif st == 'compact_boundary' then
+    -- the conversation was summarized (/compact, or Claude on its own near the limit): the
+    -- same meta fold the transcript parser makes of the record, and the sizes when given
+    local m = type(obj.compact_metadata) == 'table' and obj.compact_metadata or {}
+    local pre = type(m.pre_tokens) == 'number' and m.pre_tokens or nil
+    local post = type(m.post_tokens) == 'number' and m.post_tokens or nil
+    local text = type(obj.content) == 'string' and obj.content
+    if not text then
+      text = 'conversation compacted' .. (str(m.trigger) and (' (' .. m.trigger .. ')') or '')
+        .. (pre and (', ' .. require('agent-ide.claude.usage').fmt(pre) .. ' tokens before') or '')
+    end
+    return {
+      { type = 'event', event = { kind = 'meta', label = 'system: compact_boundary', text = text } },
+      { type = 'compact', trigger = str(m.trigger), pre_tokens = pre, post_tokens = post },
+    }
+  elseif st == 'thinking_tokens' then
+    -- a running estimate while the model thinks: the queue panel's `thinking ~8k`, the main
+    -- thread's only (a subagent's would mix with it)
+    if is_sidechain(obj) or type(obj.estimated_tokens) ~= 'number' then return {} end
+    return { { type = 'thinking', tokens = obj.estimated_tokens } }
   elseif QUIET_SYSTEM[st] then
     return {}
   end
@@ -202,7 +234,30 @@ function Decoder:assistant(obj, raw)
   end
   local streamed = self.streamed and not sidechain
   if streamed then self.streamed = false end
-  return event_actions(kept, sidechain, streamed)
+  local acts = event_actions(kept, sidechain, streamed)
+  -- one request to the model (the queue panel counts them and sizes each subagent); not a
+  -- synthetic message, which no request produced
+  if obj.local_command_run == nil and obj.message.model ~= '<synthetic>' then
+    local tools = {}
+    for _, ev in ipairs(kept) do
+      if ev.kind == 'tool_call' and type(ev.name) == 'string' then tools[#tools + 1] = ev.name end
+    end
+    local u = type(obj.message.usage) == 'table' and obj.message.usage or {}
+    local function num(k) return type(u[k]) == 'number' and u[k] or nil end
+    table.insert(acts, 1, {
+      type = 'call', parent = sidechain and obj.parent_tool_use_id or nil, id = str(obj.message.id),
+      tokens = require('agent-ide.claude.usage').context(obj.message.usage), tools = tools,
+      read = num('cache_read_input_tokens'), write = num('cache_creation_input_tokens'),
+      input = num('input_tokens'), out = num('output_tokens'),
+    })
+  end
+  -- the input of this request (cached or not): the size of the conversation. Not from a
+  -- subagent (its own context) nor a synthetic message (a local command's output)
+  if not sidechain and obj.local_command_run == nil and obj.message.model ~= '<synthetic>' then
+    local n = require('agent-ide.claude.usage').context(obj.message.usage)
+    if n then acts[#acts + 1] = { type = 'context', tokens = n } end
+  end
+  return acts
 end
 
 local function replay_text(content)
@@ -284,7 +339,33 @@ function Decoder:result(obj)
     end
     if #parts > 0 then text = table.concat(parts, '\n') end
   end
-  return { { type = 'result', is_error = obj.is_error == true, text = text } }
+  local a = { type = 'result', is_error = obj.is_error == true, text = text }
+  -- what the turn weighed, for the queue panel; why it failed, for the error line
+  if type(obj.total_cost_usd) == 'number' then a.cost = obj.total_cost_usd end
+  if type(obj.num_turns) == 'number' then a.num_turns = obj.num_turns end
+  if type(obj.duration_api_ms) == 'number' then a.duration_api_ms = obj.duration_api_ms end
+  if type(obj.api_error_status) == 'number' then a.api_error_status = obj.api_error_status end
+  if str(obj.terminal_reason) then a.terminal_reason = obj.terminal_reason end
+  if type(obj.modelUsage) == 'table' then
+    local models = {}
+    for name, m in pairs(obj.modelUsage) do
+      if type(name) == 'string' and type(m) == 'table' then
+        local function n(...)
+          for _, k in ipairs({ ... }) do
+            if type(m[k]) == 'number' then return m[k] end
+          end
+          return 0
+        end
+        models[#models + 1] = { model = name,
+          tokens = n('inputTokens', 'input_tokens') + n('outputTokens', 'output_tokens')
+            + n('cacheReadInputTokens', 'cache_read_input_tokens') + n('cacheCreationInputTokens', 'cache_creation_input_tokens'),
+          cost = n('costUSD', 'cost_usd') }
+      end
+    end
+    table.sort(models, function(x, y) return x.tokens > y.tokens end)
+    if #models > 0 then a.models = models end
+  end
+  return { a }
 end
 
 local HANDLERS = {

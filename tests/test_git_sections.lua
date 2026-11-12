@@ -67,7 +67,8 @@ T['expanded project: section labels with counts, collapsed by default; loading r
   local l = lines(p, { ['/x/r'] = true })
   eq(vim.list_slice(l, 4), { '  > Changes vs origin/main', '  > Commits on branch' })
   l = lines(p, { ['/x/r'] = true, ['/x/r/git/changes'] = true, ['/x/r/git/commits'] = true })
-  eq(vim.list_slice(l, 4), { '  v Changes vs origin/main', '      loading…', '  v Commits on branch', '      commit graph · G', '      > uncommitted', '      loading…' })
+  eq(vim.list_slice(l, 4), { '  v Changes vs origin/main', '      full diff · gd', '      loading…', '  v Commits on branch',
+    '      commit graph · G', '      full diff · gd', '      > uncommitted', '      loading…' })
   cache._set('/x/r', 'changes', {
     { status = 'M', path = 'a b.lua', added = 3, removed = 1 },
     { status = 'R', path = 'new.lua', old_path = 'old.lua', added = 0, removed = 0 },
@@ -80,6 +81,7 @@ T['expanded project: section labels with counts, collapsed by default; loading r
   l = lines(p, { ['/x/r'] = true, ['/x/r/git/changes'] = true, ['/x/r/git/commits'] = true })
   eq(vim.list_slice(l, 4), {
     '  v Changes vs origin/main (6)',
+    '      full diff · gd',
     '      M a b.lua  +3 −1',
     '      R old.lua → new.lua  +0 −0',
     '      A img.png  bin',
@@ -88,6 +90,7 @@ T['expanded project: section labels with counts, collapsed by default; loading r
     '      ? nested/  dir',
     '  v Commits on branch (1)',
     '      commit graph · G',
+    '      full diff · gd',
     '      > uncommitted',
     '      > aaaa two  now',
   })
@@ -105,19 +108,21 @@ T['at the drawer width: stats and commit ages right-aligned, long paths cut, a s
   cache._set('/x/r', 'commits', { { hash = 'a1b2c3d', short = 'a1b2c3d', subject = 'feat: IMAP IDLE loop', date = -480, files = 2 } })
   local t = tree.build({ p }, parked, { ['/x/r'] = true, ['/x/r/git/changes'] = true, ['/x/r/git/commits'] = true }, 0, icons,
     nil, nil, gs.rows, { width = 40 })
-  eq(vim.list_slice(t.lines, 5, 11), {
+  eq(vim.list_slice(t.lines, 5, 13), {
+    '      full diff · gd',
     '      M imap/client.go            +18 −3',
     '      D imap/poll_legacy.go          −41',
     '      A a/very/long/path/to/some/d…  +74',
     '  v Commits on branch (1)',
     '      commit graph · G',
+    '      full diff · gd',
     '      > uncommitted',
     '      > a1b2c3d feat: IMAP IDLE loop  8m',
   })
-  for _, i in ipairs({ 5, 6, 7, 11 }) do eq(vim.fn.strdisplaywidth(t.lines[i]), 40) end
+  for _, i in ipairs({ 6, 7, 8, 13 }) do eq(vim.fn.strdisplaywidth(t.lines[i]), 40) end
   local groups = {}
   for _, h in ipairs(t.hl) do
-    if h.line == 5 or h.line == 6 then groups[#groups + 1] = t.lines[h.line]:sub(h.col_start + 1, h.col_end) .. '=' .. h.group end
+    if h.line == 6 or h.line == 7 then groups[#groups + 1] = t.lines[h.line]:sub(h.col_start + 1, h.col_end) .. '=' .. h.group end
   end
   eq(groups, { 'M=AgentIdeGitModified', '+18=AgentIdeGitAdd', '−3=AgentIdeGitDel', 'D=AgentIdeGitDeleted', '−41=AgentIdeGitDel' })
 end
@@ -129,7 +134,7 @@ T['an untracked folder (nested repository) is listed but cannot be opened'] = fu
   cache._set('/x/r', 'changes', { { status = '?', path = 'nested/', untracked = true, dir = true },
     { status = 'M', path = 'f', added = 1, removed = 0 } })
   local t = tree.build({ p }, parked, { ['/x/r'] = true, ['/x/r/git/changes'] = true }, 0, icons, nil, nil, gs.rows)
-  eq({ t.lines[5], t.nodes[5].open, type(t.nodes[6].open) }, { '      ? nested/  dir', nil, 'function' })
+  eq({ t.lines[6], t.nodes[6].open, type(t.nodes[7].open) }, { '      ? nested/  dir', nil, 'function' })
 end
 
 T['default branch labels and recent commits'] = function()
@@ -149,12 +154,16 @@ T['commit expands to its files; nodes carry ids, folds and open handlers'] = fun
   cache._set('/x/r', 'commits', { { hash = 'aaaa', short = 'aaaa', subject = 'two', date = 0, files = 1 } })
   local exp = { ['/x/r'] = true, ['/x/r/git/commits'] = true, ['/x/r/git/commit/aaaa'] = true }
   local t = tree.build({ p }, parked, exp, 0, icons, nil, nil, gs.rows)
-  eq(t.lines[9], '          loading…')
+  eq(t.lines[10], '          loading…')
   cache._set('/x/r', 'files:aaaa', { { status = 'M', path = 'f.lua', added = 1, removed = 0 } })
   t = tree.build({ p }, parked, exp, 0, icons, nil, nil, gs.rows)
-  -- the first row of an open Commits section opens the commit graph
+  -- the first rows of an open Commits section: the commit graph, the full diff of the commits
   eq(t.lines[6], '      commit graph · G')
-  eq(t.lines[7], '      > uncommitted')
+  eq(t.lines[7], '      full diff · gd')
+  eq(t.lines[8], '      > uncommitted')
+  local fulldiff = t.nodes[7]
+  eq({ fulldiff.type, fulldiff.kind, fulldiff.root, type(fulldiff.open), fulldiff.fold.key },
+    { 'git_fulldiff', 'commits', '/x/r', 'function', '/x/r/git/commits' })
   local graph = t.nodes[6]
   eq({ graph.type, graph.root, type(graph.open), graph.fold.key }, { 'git_graph', '/x/r', 'function', '/x/r/git/commits' })
   local opened
@@ -162,9 +171,9 @@ T['commit expands to its files; nodes carry ids, folds and open handlers'] = fun
   graph.open(graph)
   package.loaded['agent-ide.ui.graph'] = nil
   eq({ opened.root, opened.project.key }, { '/x/r', p.key })
-  eq(t.lines[8], '      v aaaa two  now')
-  eq(t.lines[9], '          M f.lua  +1')
-  local commit, file = t.nodes[8], t.nodes[9]
+  eq(t.lines[9], '      v aaaa two  now')
+  eq(t.lines[10], '          M f.lua  +1')
+  local commit, file = t.nodes[9], t.nodes[10]
   eq({ commit.fold.key, commit.fold.default, commit.id ~= file.id, type(file.open), file.fold.focus }, {
     '/x/r/git/commit/aaaa', false, true, 'function', commit.id })
 end
@@ -178,8 +187,8 @@ T['at most 500 files are listed, then a line with the rest'] = function()
   cache._set('/x/r', 'changes', files)
   local l = lines(p, { ['/x/r'] = true, ['/x/r/git/changes'] = true })
   eq(l[4], '  v Changes vs origin/main (620)')
-  eq(l[4 + 500], '      A f500  +1')
-  eq(l[4 + 501], '      … 120 more')
+  eq(l[5 + 500], '      A f500  +1')
+  eq(l[5 + 501], '      … 120 more')
 end
 
 T['loads from a real repository; invalidate keeps old data until the new arrives'] = function()
@@ -282,18 +291,18 @@ T['uncommitted: a count once loaded, dim at 0; expands to its files, which diff 
   cache._set('/x/r', 'commits', {})
   local exp = { ['/x/r'] = true, ['/x/r/git/commits'] = true, ['/x/r/git/uncommitted'] = true }
   local t = tree.build({ p }, parked, exp, 0, icons, nil, nil, gs.rows)
-  eq({ t.lines[7], t.lines[8] }, { '      v uncommitted', '          loading…' })
+  eq({ t.lines[8], t.lines[9] }, { '      v uncommitted', '          loading…' })
   cache._set('/x/r', 'uncommitted', {})
   t = tree.build({ p }, parked, exp, 0, icons, nil, nil, gs.rows)
-  eq({ t.lines[7], t.lines[8] }, { '      v uncommitted (0)', '          nothing to commit' })
+  eq({ t.lines[8], t.lines[9] }, { '      v uncommitted (0)', '          nothing to commit' })
   cache._set('/x/r', 'uncommitted', { { status = 'M', path = 'a.lua', added = 1, removed = 1 }, { status = '?', path = 'u.txt', untracked = true, added = 1, removed = 0 } })
   t = tree.build({ p }, parked, exp, 0, icons, nil, nil, gs.rows)
-  eq({ t.lines[7], t.lines[8], t.lines[9] }, { '      v uncommitted (2)', '          M a.lua  +1 −1', '          ? u.txt  +1' })
-  local f = t.nodes[8]
+  eq({ t.lines[8], t.lines[9], t.lines[10] }, { '      v uncommitted (2)', '          M a.lua  +1 −1', '          ? u.txt  +1' })
+  local f = t.nodes[9]
   eq({ f.type, f.mode, f.index, #f.list, type(f.open), f.fold.key }, { 'git_file', 'head', 1, 2, 'function', '/x/r/git/uncommitted' })
   -- collapsed: the count stays
   exp['/x/r/git/uncommitted'] = false
-  eq(tree.build({ p }, parked, exp, 0, icons, nil, nil, gs.rows).lines[7], '      > uncommitted (2)')
+  eq(tree.build({ p }, parked, exp, 0, icons, nil, nil, gs.rows).lines[8], '      > uncommitted (2)')
 end
 
 return T

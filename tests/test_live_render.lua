@@ -106,12 +106,13 @@ end
 SEQ.turns300 = many_turns(300)
 
 local function concat_turns(events)
-  local lines, folds, answers, added, removed, commands, ansi = {}, {}, {}, {}, {}, {}, {}
+  local lines, folds, answers, added, removed, commands, ansi, edits = {}, {}, {}, {}, {}, {}, {}, {}
   local seg = {}
   local function flush()
     if #seg == 0 then return end
     local r = render.render(seg)
-    for _, f in ipairs(r.folds) do folds[#folds + 1] = { first = f.first + #lines, last = f.last + #lines } end
+    for _, f in ipairs(r.folds) do folds[#folds + 1] = { first = f.first + #lines, last = f.last + #lines, edit = f.edit } end
+    for _, e in ipairs(r.edits) do edits[#edits + 1] = e + #lines end
     for _, a in ipairs(r.answers) do answers[#answers + 1] = a + #lines end
     for _, l in ipairs(r.added) do added[#added + 1] = l + #lines end
     for _, l in ipairs(r.removed) do removed[#removed + 1] = l + #lines end
@@ -127,7 +128,8 @@ local function concat_turns(events)
     seg[#seg + 1] = ev
   end
   flush()
-  return { lines = lines, folds = folds, answers = answers, added = added, removed = removed, commands = commands, ansi = ansi }
+  return { lines = lines, folds = folds, answers = answers, added = added, removed = removed, commands = commands, ansi = ansi,
+    edits = edits }
 end
 
 T['render is compositional over turns'] = function()
@@ -225,6 +227,19 @@ T['streaming text ends when a tool call arrives instead'] = function()
   expect_full(buf, s)
   view:sync('bogus')
   expect_full(buf, s)
+end
+
+T['a permission reads as a question, subject first, cuts counted'] = function()
+  local q = require('agent-ide.transcript.ask').question
+  eq(q({ tool_name = 'Bash', input = { command = 'npm test', description = 'Run the tests' } }),
+    'Allow Bash: npm test? Run the tests')
+  eq(q({ tool_name = 'Bash', input = { command = 'cd /x\nrm -rf build\nmake' } }), 'Allow Bash: cd /x (+2 lines)?')
+  eq(q({ tool_name = 'Bash', input = { command = ('a'):rep(90) } }), 'Allow Bash: ' .. ('a'):rep(80) .. '…?')
+  -- the ask's reason is added once, not when it repeats what is already said
+  eq(q({ tool_name = 'Write', input = { file_path = '/x/a.txt' }, description = 'outside the project' }),
+    'Allow Write: /x/a.txt? outside the project')
+  eq(q({ tool_name = 'Task', input = { description = 'Find it' }, description = 'Find it' }), 'Allow Task: Find it?')
+  eq(q({ tool_name = 'mcp__x__y', input = {} }), 'Allow mcp__x__y?')
 end
 
 T['open asks show below the events and the streaming lines, unfolded, and go when answered'] = function()

@@ -139,9 +139,11 @@ local function ask_permission(s, p, finish)
     { label = 'Deny', run = function() s:answer(p.request_id, false) end },
   }
   vim.list_extend(items, suggestion_items(s, p))
-  local prompt = ('Claude wants to use %s: %s'):format(tostring(p.tool_name), ask.summary(p))
-  if type(p.description) == 'string' and p.description ~= '' then prompt = prompt .. ' (' .. p.description .. ')' end
-  select(items, prompt, function(choice) finish(choice == nil, choice) end)
+  -- the question is the picker's prompt; pickers that show it as a narrow title cut it, so it
+  -- also goes to the message line, which is as wide as the screen
+  local question = ask.question(p)
+  echo(question)
+  select(items, question, function(choice) finish(choice == nil, choice) end)
 end
 
 -- Approving a plan can set the mode Claude continues in (sent with the approval).
@@ -299,11 +301,22 @@ function M.maybe_prompt(s, opts)
   end)
 end
 
----The answer key: reopen the oldest open ask of `s` (not while its select is already open).
+---The answer key: reopen the oldest open ask of `s`. A select still counted as open while no
+---focusable floating window is left in the tab is dropped first: its picker went away without
+---calling back, and must not block the ask for ever. While such a float is open the select is
+---taken to be there (a notification or the drawer's legend is not focusable).
 ---@param s table Session
 function M.answer(s)
   if #s.pending_permissions == 0 then
     return vim.notify('Agent-IDE: Claude is not asking anything here', vim.log.levels.INFO)
+  end
+  if active then
+    local float = false
+    for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+      local cfg = api.nvim_win_get_config(w)
+      if cfg.relative ~= '' and cfg.focusable ~= false then float = true end
+    end
+    if not float then active = nil end
   end
   M.maybe_prompt(s, { force = true })
 end

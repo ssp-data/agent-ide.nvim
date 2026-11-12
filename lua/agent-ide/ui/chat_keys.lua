@@ -23,6 +23,7 @@ local HELP = {
   { 'raw_event', 'transcript: raw view at the line of the unknown fold under the cursor' },
   { 'native', 'continue in native Claude in a tmux pane (parks here; reloads when it exits)' },
   { 'park', 'park: stop this session\'s Claude process (asks when working); the next send resumes it' },
+  { 'compact', 'send /compact: Claude summarizes the conversation (one request that reads it all; every turn after it is smaller)' },
   { 'prompts', 'pick a prompt (skills, commands, library, saved); insert mode only for a non-printing key' },
   { 'save_library', 'prompt: save the prompt to the library (asks for a name; group/name for a folder)' },
   { 'queue', 'show or hide the queue panel: prompts sent, running and queued (x there takes one back)' },
@@ -85,6 +86,7 @@ function M.map(c, buf, is_transcript, act)
     or vim.tbl_filter(function(k) return k:sub(1, 1) == '<' end, keylist.list(keys.native))
   map('n', native, function() act.native(c) end, 'continue in native Claude (tmux)')
   map('n', keys.park, function() require('agent-ide.ui.chat').park(c.s) end, 'park the session')
+  map('n', keys.compact, function() require('agent-ide.ui.context_ask').compact(c.s) end, 'compact the conversation')
   map('n', keys.queue, function() require('agent-ide.ui.queue').toggle() end, 'queue panel')
   map('n', keys.next_session, function() require('agent-ide.ui.chat').cycle(c.s, 1) end, 'next session of the project')
   map('n', keys.prev_session, function() require('agent-ide.ui.chat').cycle(c.s, -1) end, 'previous session of the project')

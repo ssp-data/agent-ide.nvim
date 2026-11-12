@@ -202,6 +202,7 @@ function M.render_preview(v, out, target, m, title, footer)
   vim.bo[buf].modifiable = false
   history.mark_answers(buf, 1, out.answers or {})
   history.mark_diff(buf, 1, out)
+  history.set_edits(buf, 1, out.edits or {})
   history.apply_win(win, buf)
   vim.wo[win].winbar = ''
   api.nvim_buf_clear_namespace(buf, ns, 0, -1)

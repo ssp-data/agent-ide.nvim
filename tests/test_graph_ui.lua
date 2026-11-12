@@ -65,7 +65,7 @@ local function start(opts)
     projects_dir = projects,
     helper = { enabled = false },
     live = { interval_ms = 50, cmd = { 'echo', '[]' } },
-    icons_style = 'plain', icons = ICONS,
+    icons_style = 'plain', icons = ICONS, git = { delta = false },
   }, opts or {}) })
 end
 
@@ -180,6 +180,58 @@ T['<CR> lists a commit\'s files; <CR> on a file opens its diff; closing it comes
   local g = graph()
   eq({ g.cursor, g.lines[g.cursor]:find('M b.txt', 1, true) ~= nil, g.winbar }, { fl, true, 'r · graph · all branches' })
   eq(child.lua_get('vim.bo[require("agent-ide.ui.graph").state().buf].bufhidden'), 'wipe')
+end
+
+T['gd on a commit opens its full diff; q returns to the graph with the cursor on the commit'] = function()
+  start()
+  open_graph()
+  cursor_on('feat two')
+  local row = graph().cursor
+  child.type_keys('gd')
+  local function fd()
+    return child.lua_get([[(function()
+      local v = require('agent-ide.ui.fulldiff').state()
+      if not v then return vim.NIL end
+      local w = vim.fn.win_findbuf(v.buf)[1]
+      return { kind = v.scope.kind, short = v.scope.commit and v.scope.commit.short, loading = v.loading,
+        lines = vim.api.nvim_buf_get_lines(v.buf, 0, -1, false), shown = w ~= nil, cursor = w and vim.api.nvim_win_get_cursor(w)[1] }
+    end)()]])
+  end
+  wait_for(function() local v = fd(); return v ~= vim.NIL and v.loading == false end, 'full diff')
+  local v = fd()
+  eq({ v.kind, v.short, v.shown, v.lines[1]:sub(1, 9) }, { 'commit', rev('feat'):sub(1, 7), true, 'v M b.txt' })
+  eq(graph().shown, false)
+  child.type_keys('q')
+  wait_for(function() local g = graph(); return g ~= vim.NIL and g.shown end, 'graph back')
+  eq({ graph().cursor, graph().focused, fd() }, { row, true, vim.NIL })
+  eq(child.lua_get('vim.bo[require("agent-ide.ui.graph").state().buf].bufhidden'), 'wipe')
+  -- on a file row of an expanded commit: the cursor on that file
+  cursor_on('feat two')
+  child.type_keys('<CR>')
+  cursor_on('M b.txt')
+  child.type_keys('gd')
+  wait_for(function() local v2 = fd(); return v2 ~= vim.NIL and v2.loading == false end, 'full diff of the file')
+  v = fd()
+  eq(v.lines[v.cursor]:sub(1, 9), 'v M b.txt')
+end
+
+T['chat → graph → gd → G in the drawer: the new graph still returns to the chat'] = function()
+  start()
+  child.lua('require("agent-ide").toggle()')
+  press_on(' r  ')
+  press_on('Work on it')
+  wait_for(function() return child.lua_get('require("agent-ide.ui.chat")._windows().prompt ~= nil') end, 'chat')
+  press_on('Work on it', 'G')
+  wait_for(function() local g = graph(); return g ~= vim.NIL and g.state == 'ok' end, 'graph')
+  cursor_on('feat two')
+  child.type_keys('gd')
+  wait_for(function() return child.lua_get('(function() local v = require("agent-ide.ui.fulldiff").state(); return v ~= nil and v.loading == false end)()') end, 'full diff')
+  press_on('Work on it', 'G')
+  wait_for(function() local g = graph(); return g ~= vim.NIL and g.state == 'ok' and g.shown end, 'graph again')
+  eq(child.lua_get('require("agent-ide.ui.fulldiff").state()'), vim.NIL)
+  child.lua('require("agent-ide.ui.graph").close()')
+  wait_for(function() return child.lua_get('require("agent-ide.ui.chat")._windows().prompt ~= nil') end, 'chat back')
+  eq(child.lua_get('vim.b[vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().transcript)].agent_ide_session'), ID)
 end
 
 T['the root commit\'s file diff: an empty left side'] = function()

@@ -261,6 +261,9 @@ T['visible session: the select opens; Allow sends allow, the result renders, the
   local sel = selects()[1]
   eq(sel.labels, { 'Allow', 'Deny' })
   eq(sel.mode, 'n')
+  -- the question is the prompt, and the message line repeats it for pickers that cut titles
+  eq(sel.prompt, 'Allow Write: /x/a.txt? a.txt')
+  eq(child.cmd_capture('messages'):find('Allow Write: /x/a.txt? a.txt', 1, true) ~= nil, true)
   local parts = view_parts()
   eq(parts.above, parts.rendered)
   eq(parts.block, parts.tail)
@@ -551,6 +554,19 @@ T['cancel leaves the ask open; entering the window again does not reopen; <leade
   eq(#answers(), 1)
 end
 
+T['a select that went away without calling back: <leader>ay opens the ask again'] = function()
+  start(write_turn('Write it', 'p1'))
+  open_new()
+  send_normal('Write it')
+  wait_for(function() return #selects() == 1 end, 'select')
+  child.lua('_G.open_select = nil') -- the picker closed and never reported back
+  child.type_keys('\\ay')
+  wait_for(function() return #selects() == 2 end, 'reopened select')
+  pick('Allow')
+  wait_for(function() return has_line(transcript(), 'Written.') ~= nil end, 'answer')
+  eq(#answers(), 1)
+end
+
 T['two pending asks are answered oldest first'] = function()
   start(flat({ expect = 'Two' }, init(), status(), tool_use('t1', 'Write', WRITE), tool_use('t2', 'Write', WRITE_B),
     ask('p1', 'Write', WRITE), ask('p2', 'Write', WRITE_B), { expect = '"p1"' }, { expect = '"p2"' },
@@ -763,9 +779,12 @@ T['answer key while the select is open opens no second one; leaving the chat fre
   open_new()
   send_normal('Write it')
   wait_for(function() return #selects() == 1 end, 'select')
+  -- the picker's float is still on screen (not focused): the answer key opens no second select
+  child.lua('_G.picker = vim.api.nvim_open_win(vim.api.nvim_create_buf(false, true), false, { relative = "editor", row = 1, col = 1, width = 10, height = 2 })')
   child.type_keys('\\ay')
   vim.wait(300)
   eq(#selects(), 1)
+  child.lua('vim.api.nvim_win_close(_G.picker, true)')
   -- the stub never calls back: go to the drawer (not the chat) and back
   child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.drawer").state().win)')
   child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.chat")._windows().prompt)')

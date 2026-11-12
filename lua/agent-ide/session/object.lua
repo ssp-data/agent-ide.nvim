@@ -156,6 +156,7 @@ function Session:_start_turn(text)
   end
   self:_append({ kind = 'prompt', text = text })
   self.turn_start = #self.events
+  require('agent-ide.session.activity').turn(self.activity, vim.uv.now())
   self.echo_expected = text
   self.sent_before = true
   self:_set_state('busy')
@@ -359,6 +360,7 @@ function Session:load(cb, no_attach)
       self.events = vim.list_extend(history, extra)
       self.turn_start, self.loaded_key = ts, key
       self:_emit('events')
+      require('agent-ide.session.context').refresh(self) -- the winbar's `~123k`, in the background
       cb()
     end)
   end))
@@ -372,6 +374,7 @@ function M.new(opts, id)
     state = opts.id and 'parked' or 'idle',
     events = {}, streaming = '', turn_start = 1, pending_permissions = {}, queue = {}, raw = {}, raw_dropped = 0,
     unread = false, owned = false, visible = false,
+    activity = require('agent-ide.session.activity').new(), -- the turn's requests and subagents
     -- internal
     requests = {}, deferred = {}, park_cbs = {}, sent_before = false,
   }, Session)

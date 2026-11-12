@@ -88,7 +88,7 @@ function M.terms(query, hit, lines)
       if type(lines) == 'function' then lines = lines() end
       local hay
       for _, w in ipairs(words) do
-        if vim.fn.strchars(w.needle) > MIN_PART and not found_in(hit.title, w) and not found_in(hit.project, w) then
+        if vim.fn.strchars(w.needle) > MIN_PART and not found_in(hit.raw_title or hit.title, w) and not found_in(hit.project, w) then
           hay = hay or lower(table.concat(lines, '\n'))
           if not hay:find(w.needle, 1, true) then
             local part = best_part(hay, w)
@@ -103,7 +103,7 @@ function M.terms(query, hit, lines)
     end
   end
   for _, t in ipairs(terms) do
-    t.visible = hit ~= nil and (found_in(hit.title, t) or found_in(hit.project, t))
+    t.visible = hit ~= nil and (found_in(hit.raw_title or hit.title, t) or found_in(hit.project, t))
   end
   return terms
 end

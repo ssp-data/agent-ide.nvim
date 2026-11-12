@@ -89,7 +89,7 @@ function M.all() return vim.list_slice(order) end
 
 ---`control_error`: Claude refused a mode or model change; `session.control_error` holds
 ---`{ what = 'mode'|'model', value, error }`.
----@param fn fun(session: table, what: 'state'|'events'|'delta'|'meta'|'permission'|'quota'|'control_error')
+---@param fn fun(session: table, what: 'state'|'events'|'delta'|'meta'|'permission'|'quota'|'control_error'|'activity')
 function M.on_change(fn) listeners[#listeners + 1] = fn end
 
 ---@param fn function

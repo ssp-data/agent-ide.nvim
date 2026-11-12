@@ -5,13 +5,16 @@ local T = MiniTest.new_set()
 
 local function slurp(p) local f = assert(io.open(p)); local s = f:read('a'); f:close(); return s end
 
--- Feed raw lines to one decoder; return the flat Action list.
-local function feed_lines(lines, dec)
+-- Feed raw lines to one decoder; return the flat Action list. The `call`, `task` and `thinking`
+-- actions (the queue panel's counts, tested on their own below) are left out unless `all`.
+local function feed_lines(lines, dec, all)
   dec = dec or stream.new()
   local out = {}
   for _, line in ipairs(lines) do
     local obj = vim.json.decode(line, parse.DECODE_OPTS)
-    for _, a in ipairs(dec:feed(obj, line)) do out[#out + 1] = a end
+    for _, a in ipairs(dec:feed(obj, line)) do
+      if all or not (a.type == 'call' or a.type == 'task' or a.type == 'thinking') then out[#out + 1] = a end
+    end
   end
   return out
 end
@@ -225,7 +228,7 @@ T['parent_tool_use_id decoded as vim.NIL is the main thread'] = function()
   eq(d, { { type = 'delta', text = 'x' } })
   local a = dec:feed({ type = 'assistant', parent_tool_use_id = vim.NIL,
     message = { content = { { type = 'text', text = 'x' } } } }, '{"type":"assistant","message":{"content":[{"type":"text","text":"x"}]},"parent_tool_use_id":null}')
-  eq(a, { { type = 'event', event = { kind = 'text', text = 'x' }, streamed = true } })
+  eq(a, { { type = 'call', tools = {} }, { type = 'event', event = { kind = 'text', text = 'x' }, streamed = true } })
   local u = dec:feed({ type = 'user', parent_tool_use_id = vim.NIL,
     message = { content = { { type = 'tool_result', tool_use_id = 't', content = 'ok' } } } }, nil)
   eq(u[1].event.sidechain, nil)
@@ -259,6 +262,102 @@ T['feed never raises'] = function()
     eq(out[1].type, 'unknown')
   end
   eq(dec:feed({ type = 5 }, '{"type":5}'), { { type = 'unknown', label = '?', raw = '{"type":5}' } })
+end
+
+T['context: an assistant message carries the input of its request; not a subagent\'s'] = function()
+  local a = feed_lines({
+    vim.json.encode({ type = 'assistant', message = { id = 'm', role = 'assistant', model = 'claude-haiku-5-5',
+      content = { { type = 'text', text = 'hi' } },
+      usage = { input_tokens = 10, cache_read_input_tokens = 120000, cache_creation_input_tokens = 3000, output_tokens = 5 } } }),
+    vim.json.encode({ type = 'assistant', parent_tool_use_id = 't1', message = { id = 'm2', role = 'assistant',
+      content = { { type = 'text', text = 'sub' } }, usage = { input_tokens = 999 } } }),
+    vim.json.encode({ type = 'assistant', local_command_run = { command = 'context', args = '' },
+      message = { id = 'm3', role = 'assistant', model = '<synthetic>',
+        content = { { type = 'text', text = 'ctx' } }, usage = { input_tokens = 5 } } }),
+    vim.json.encode({ type = 'assistant', message = { id = 'm4', role = 'assistant',
+      content = { { type = 'text', text = 'no usage' } } } }),
+  })
+  local ctx = pick(a, 'context')
+  eq(#ctx, 1)
+  eq(ctx[1].tokens, 123010)
+  -- the event comes first, the size after it
+  eq(a[1].type, 'event')
+  eq(a[2].type, 'context')
+end
+
+T['compact_boundary: the transcript parser\'s meta fold and a compact action'] = function()
+  local line = vim.json.encode({ type = 'system', subtype = 'compact_boundary', session_id = 'x', uuid = 'u',
+    compact_metadata = { trigger = 'manual', pre_tokens = 241211 } })
+  local a = feed_lines({ line })
+  eq(#a, 2)
+  eq(a[1].event, { kind = 'meta', label = 'system: compact_boundary', text = 'conversation compacted (manual), 241k tokens before' })
+  eq(a[2], { type = 'compact', trigger = 'manual', pre_tokens = 241211 })
+  -- with a content string (as the transcript record has) that text is shown, as the parser does
+  local rec = vim.json.encode({ type = 'system', subtype = 'compact_boundary', content = 'Conversation compacted',
+    compact_metadata = { trigger = 'auto', pre_tokens = 1, post_tokens = 2 } })
+  local b = feed_lines({ rec })
+  eq(b[1].event.text, 'Conversation compacted')
+  eq(b[2].post_tokens, 2)
+  eq((parse.parse_record(rec))[1], { kind = 'meta', label = 'system: compact_boundary', text = 'Conversation compacted' })
+  eq(#pick(a, 'unknown'), 0)
+end
+
+T['call: every request to the model, its message id, context, tool names and the subagent it belongs to'] = function()
+  local a = feed_lines({
+    '{"type":"assistant","message":{"id":"m1","model":"x","role":"assistant","content":[{"type":"tool_use","id":"ag","name":"Agent","input":{"description":"look","subagent_type":"Explore"}}],"usage":{"input_tokens":5,"cache_read_input_tokens":1000}},"parent_tool_use_id":null}',
+    '{"type":"assistant","message":{"id":"m2","model":"x","role":"assistant","content":[{"type":"tool_use","id":"g1","name":"Grep","input":{}},{"type":"tool_use","id":"r1","name":"Read","input":{}}],"usage":{"input_tokens":300}},"parent_tool_use_id":"ag"}',
+    '{"type":"assistant","message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"x"}]},"parent_tool_use_id":null,"local_command_run":{"command":"context","args":""}}',
+  }, nil, true)
+  local calls = vim.tbl_filter(function(x) return x.type == 'call' end, a)
+  eq(calls, {
+    { type = 'call', id = 'm1', tokens = 1005, tools = { 'Agent' }, input = 5, read = 1000 },
+    { type = 'call', parent = 'ag', id = 'm2', tokens = 300, tools = { 'Grep', 'Read' }, input = 300 },
+  })
+  eq(a[1].type, 'call') -- before the message's events, so their redraw already counts it
+end
+
+T['task: a background agent started and finished, by the tool call that started it'] = function()
+  local a = feed_lines({
+    '{"type":"system","subtype":"task_started","task_id":"k","tool_use_id":"t","description":"Scan","is_backgrounded":true}',
+    '{"type":"system","subtype":"task_notification","task_id":"k","status":"completed","usage":{"tool_uses":4}}',
+  }, nil, true)
+  local tasks = vim.tbl_filter(function(x) return x.type == 'task' end, a)
+  eq(tasks, {
+    { type = 'task', id = 'k', tool = 't', status = 'started', desc = 'Scan', background = true },
+    { type = 'task', id = 'k', tool = 't', status = 'completed', tool_uses = 4 },
+  })
+end
+
+T['task: a background shell by its task id; its update carries the status'] = function()
+  local a = feed_lines({
+    '{"type":"system","subtype":"task_started","task_id":"sh","description":"npm run dev","is_backgrounded":true,"task_type":"local_bash"}',
+    '{"type":"system","subtype":"task_updated","task_id":"sh","patch":{"status":"killed"}}',
+  }, nil, true)
+  local tasks = vim.tbl_filter(function(x) return x.type == 'task' end, a)
+  eq(tasks, {
+    { type = 'task', id = 'sh', status = 'started', task_type = 'local_bash', desc = 'npm run dev', background = true },
+    { type = 'task', id = 'sh', status = 'killed', task_type = 'local_bash' },
+  })
+end
+
+T['thinking: the main thread estimate; a subagent one is dropped'] = function()
+  local a = feed_lines({
+    '{"type":"system","subtype":"thinking_tokens","estimated_tokens":800,"estimated_tokens_delta":10}',
+    '{"type":"system","subtype":"thinking_tokens","estimated_tokens":5,"parent_tool_use_id":"x"}',
+  }, nil, true)
+  eq(a, { { type = 'thinking', tokens = 800 } })
+end
+
+T['result: cost, per-model usage (largest first), api error status and terminal reason'] = function()
+  local a = feed_lines({ vim.json.encode({ type = 'result', is_error = true, result = 'boom', total_cost_usd = 3.1,
+    num_turns = 4, duration_api_ms = 9000, api_error_status = 529, terminal_reason = 'api_error',
+    modelUsage = {
+      ['claude-opus-5-5'] = { inputTokens = 1, outputTokens = 2, cacheReadInputTokens = 3, cacheCreationInputTokens = 4, costUSD = 0.1 },
+      ['claude-fable-5-1'] = { inputTokens = 10, outputTokens = 20, cacheReadInputTokens = 3000, costUSD = 3 },
+    } }) })
+  eq(a, { { type = 'result', is_error = true, text = 'boom', cost = 3.1, num_turns = 4, duration_api_ms = 9000,
+    api_error_status = 529, terminal_reason = 'api_error', models = {
+      { model = 'claude-fable-5-1', tokens = 3030, cost = 3 }, { model = 'claude-opus-5-5', tokens = 10, cost = 0.1 } } } })
 end
 
 return T

@@ -1,8 +1,9 @@
--- Chat keys on a drawer session row: the model picker, the permission mode cycle, interrupt,
--- native Claude in tmux and the raw view, for the session of that row and without opening its
--- chat. The lhs are the chat's (`keys.chat.*`), so a remap applies in both places; a drawer key
--- with the same lhs wins. On other rows a provider's row key with the same lhs still works, the
--- mode and interrupt keys keep Vim's meaning, the others do nothing.
+-- Chat keys in the drawer: on a session row the model picker, the permission mode cycle,
+-- interrupt, native Claude in tmux and the raw view, for the session of that row and without
+-- opening its chat; on any row the queue panel. The lhs are the chat's (`keys.chat.*`), so a
+-- remap applies in both places; a drawer key with the same lhs wins. On other rows a provider's
+-- row key with the same lhs still works, the mode and interrupt keys keep Vim's meaning, the
+-- others do nothing.
 local api = vim.api
 local keylist = require('agent-ide.util.keys')
 
@@ -29,7 +30,8 @@ end
 
 local function later(s) return s:_alive() and '' or '; takes effect when the session starts' end
 
--- name in `keys.chat`, help text, action on a session row; `fall`: Vim's meaning elsewhere
+-- name in `keys.chat`, help text, action on a session row; `fall`: Vim's meaning elsewhere;
+-- `anywhere`: the action runs on every row (the node, a session row or not, is passed)
 local ACTIONS = {
   { name = 'model', desc = 'pick the model', run = function(node)
     if elsewhere(node) then return notify(elsewhere_msg(), vim.log.levels.WARN) end
@@ -65,6 +67,20 @@ local ACTIONS = {
     require('agent-ide.ui.raw').open(session_of(node), { win = main })
     api.nvim_set_current_win(main)
   end },
+  -- the queue panel of the chat shown; with no chat open, a session row opens its chat with the
+  -- panel (the focus stays in the drawer)
+  { name = 'queue', anywhere = true, desc = 'show or hide the queue panel of the chat (a session row with no chat open: open it with its panel)',
+    run = function(node)
+      local chat, queue = require('agent-ide.ui.chat'), require('agent-ide.ui.queue')
+      if not chat.current() and node and node.type == 'session' then
+        local from = api.nvim_get_current_win()
+        chat.open(session_of(node), node.project)
+        queue.open()
+        if api.nvim_win_is_valid(from) then api.nvim_set_current_win(from) end
+        return
+      end
+      queue.toggle()
+    end },
 }
 
 ---The native Claude action on session row `node` (the drawer's tmux key, ui/drawer.lua).
@@ -77,7 +93,7 @@ end
 
 ---Run the key `lhs` of action `a` on drawer row `node`.
 function M.run(a, lhs, node)
-  if node and node.type == 'session' then
+  if a.anywhere or (node and node.type == 'session') then
     local ok, err = pcall(a.run, node)
     if not ok then notify('Agent-IDE: ' .. tostring(err), vim.log.levels.ERROR) end
   elseif node and node.keys and node.keys[lhs] then
@@ -109,14 +125,20 @@ end
 ---@return table[]
 function M.help_rows(own)
   local keys = require('agent-ide.ui.chat_keys').keys()
-  local rows = {}
+  local rows, anywhere = {}, {}
   for _, a in ipairs(ACTIONS) do
     local list = vim.tbl_filter(function(lhs) return not own[vim.keycode(lhs)] end, keylist.list(keys[a.name]))
     local k = keylist.label(list)
-    if k then rows[#rows + 1] = { key = k, desc = a.desc } end
+    if k then
+      local into = a.anywhere and anywhere or rows
+      into[#into + 1] = { key = k, desc = a.desc }
+    end
   end
-  if #rows == 0 then return {} end
-  table.insert(rows, 1, { heading = 'On a session row' })
+  if #rows > 0 then table.insert(rows, 1, { heading = 'On a session row' }) end
+  if #anywhere > 0 then
+    table.insert(anywhere, 1, { heading = 'On any row' })
+    vim.list_extend(rows, anywhere)
+  end
   return rows
 end
 
