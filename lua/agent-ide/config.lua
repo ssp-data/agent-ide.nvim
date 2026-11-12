@@ -79,8 +79,10 @@ defaults = function()
       full_diff = { open = '<CR>', next_file = ']f', prev_file = '[f', next_hunk = ']c', prev_hunk = '[c', fold = 'za',
         collapse_all = 'z0', expand_all = 'z9', refresh = 'R', yank = 'y', lazygit = 'glg', close = 'q', help = 'g?' },
     },
-    -- graph_limit: commits the commit graph loads at first (and L loads more of)
-    git = { graph_limit = 300 },
+    -- graph_limit: commits the commit graph loads at first (and L loads more of). delta: the
+    -- full diff's colours through delta (https://github.com/dandavison/delta): 'auto' when it is
+    -- installed, false never, or a command list of your own
+    git = { graph_limit = 300, delta = 'auto' },
     -- Prompts: Claude's commands and skills (read only), the library of templates and per-project
     -- saved prompts. nil dirs: stdpath('data') .. '/agent-ide/library' and '/agent-ide/prompts'
     prompts = { library_dir = nil, saved_dir = nil, command_dirs = { '~/.claude/commands' },

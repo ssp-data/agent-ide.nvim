@@ -20,6 +20,45 @@ local augroup = api.nvim_create_augroup('agent-ide.fulldiff', { clear = true })
 
 local FOLD_OVER = 500 -- a file with a longer block starts folded
 
+local V -- the view, or nil (declared below with its fields)
+
+-- The colours of the lines on screen, as ephemeral extmarks: a 50 000-line patch through delta
+-- has hundreds of thousands of spans, which cost nothing until their line is drawn.
+api.nvim_set_decoration_provider(ns, {
+  on_win = function(_, _, buf) return V ~= nil and buf == V.buf and V.t ~= nil end,
+  on_line = function(_, _, buf, row)
+    local line = row + 1
+    local t = V.t
+    local g = t.line_group[line]
+    if g then
+      if t.line_eol[line] then
+        api.nvim_buf_set_extmark(buf, ns, row, 0, { end_row = row + 1, end_col = 0, hl_group = g, hl_eol = true, ephemeral = true })
+      else
+        api.nvim_buf_set_extmark(buf, ns, row, 0, { end_col = #t.lines[line], hl_group = g, ephemeral = true })
+      end
+    end
+    local list = V.by_line[line]
+    local raw = V.raw[line]
+    if raw then
+      -- a coloured line (delta): decoded the first time it is drawn, its groups defined then
+      local decoded = render.decode(raw, line)
+      local highlights = require('agent-ide.ui.highlights')
+      for _, h in ipairs(decoded) do highlights.ansi(h.group) end
+      list = vim.list_extend(vim.list_slice(list or {}), decoded)
+      V.by_line[line], V.raw[line] = list, nil
+    end
+    if not list then return end
+    for _, h in ipairs(list) do
+      if h.line_hl then
+        api.nvim_buf_set_extmark(buf, ns, row, 0, { line_hl_group = h.group, ephemeral = true })
+      else
+        api.nvim_buf_set_extmark(buf, ns, row, h.col_start, { end_col = h.col_end, hl_group = h.group,
+          hl_eol = h.hl_eol or nil, priority = h.priority, ephemeral = true })
+      end
+    end
+  end,
+})
+
 ---@class agent_ide.FullDiffView
 ---@field buf integer
 ---@field root string
@@ -32,7 +71,7 @@ local FOLD_OVER = 500 -- a file with a longer block starts folded
 ---@field prev { buf: integer|nil, chat: table|nil } what the main window showed before
 ---@field restore { path?: string, hunk?: string, offset?: integer, row?: integer }|nil where the cursor goes on the next draw
 ---@field closed table<string, boolean>|nil the user's fold state by path
-local V -- the view, or nil
+---@field by_line table<integer, table[]>|nil the highlight ranges by line, for the decoration provider
 
 local function notify(msg) vim.notify('Agent-IDE: ' .. msg, vim.log.levels.INFO) end
 local function valid_win(w) return w ~= nil and api.nvim_win_is_valid(w) end
@@ -129,10 +168,9 @@ local function draw(fresh_win)
   if note_hl then
     api.nvim_buf_set_extmark(V.buf, ns, 0, 0, { end_col = #lines[1], hl_group = 'AgentIdeDiffNote' })
   end
-  for _, h in ipairs(t and t.hl or {}) do
-    api.nvim_buf_set_extmark(V.buf, ns, h.line - 1, h.col_start,
-      { end_row = (h.end_line or h.line) - 1, end_col = h.col_end, hl_group = h.group })
-  end
+  -- the colours are drawn by the decoration provider above for the visible lines only
+  V.by_line = t and render.index(t.hl) or {}
+  V.raw = t and t.raw or {}
   V.t = t
   for _, w in ipairs(ws) do
     api.nvim_set_option_value('winbar', winbar(), { scope = 'local', win = w })

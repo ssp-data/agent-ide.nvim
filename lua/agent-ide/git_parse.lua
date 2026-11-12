@@ -142,16 +142,32 @@ end
 ---Blocks of a patch (`git diff -p`), one per `diff --git` header, in output order: `path` (the
 ---new path), `old_path` for a rename or copy, `lines` from the first `@@` on (hunk headers,
 ---context, `+`, `-`, `\ No newline…`), `binary` for a `Binary files … differ` block and
----`mode_only` for one with mode lines and no hunk. Git's own header lines are left out.
+---`mode_only` for one with mode lines and no hunk. Git's own header lines are left out. Colour
+---codes (a patch through delta) do not disturb the structure and stay in `lines` as they are.
 ---@param text string
 ---@return { path: string, old_path: string|nil, lines: string[], binary: boolean, mode_only: boolean }[]
 function M.patch(text)
   local blocks, b, in_hunk = {}, nil, false
   text = text or ''
   if text ~= '' and text:sub(-1) ~= '\n' then text = text .. '\n' end
-  for line in text:gmatch('([^\n]*)\n') do
+  for raw in text:gmatch('([^\n]*)\n') do
+    local line = raw
+    if raw:byte(1) == 27 then
+      -- a coloured line (delta): the codes before the text decide nothing; a header line is
+      -- stripped whole for its paths
+      local at = 1
+      while line:byte(at) == 27 do
+        local e = line:find('[mK]', at + 1)
+        if not e then break end
+        at = e + 1
+      end
+      line = line:sub(at)
+      if line:sub(1, 11) == 'diff --git ' or line:sub(1, 7) == 'rename ' or line:sub(1, 5) == 'copy ' then
+        line = raw:gsub('\27%[[%d;:]*[mK]', '')
+      end
+    end
     if in_hunk and line:sub(1, 11) ~= 'diff --git ' then
-      b.lines[#b.lines + 1] = line
+      b.lines[#b.lines + 1] = raw
     elseif line:sub(1, 11) == 'diff --git ' then
       b = { path = header_paths(line:sub(12)), lines = {}, binary = false, mode_only = false, modes = false }
       blocks[#blocks + 1] = b
@@ -159,7 +175,7 @@ function M.patch(text)
     elseif b then
       if line:sub(1, 2) == '@@' then
         in_hunk = true
-        b.lines[#b.lines + 1] = line
+        b.lines[#b.lines + 1] = raw
       elseif line:sub(1, 12) == 'rename from ' then
         b.old_path = M.unquote(line:sub(13))
       elseif line:sub(1, 10) == 'rename to ' then

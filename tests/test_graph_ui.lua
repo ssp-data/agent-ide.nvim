@@ -65,7 +65,7 @@ local function start(opts)
     projects_dir = projects,
     helper = { enabled = false },
     live = { interval_ms = 50, cmd = { 'echo', '[]' } },
-    icons_style = 'plain', icons = ICONS,
+    icons_style = 'plain', icons = ICONS, git = { delta = false },
   }, opts or {}) })
 end
 

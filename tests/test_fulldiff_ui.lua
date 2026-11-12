@@ -63,7 +63,7 @@ local function start(opts)
     projects_dir = projects,
     helper = { enabled = false },
     live = { interval_ms = 50, cmd = { 'echo', '[]' } },
-    icons_style = 'plain', icons = ICONS,
+    icons_style = 'plain', icons = ICONS, git = { delta = false },
   }, opts or {}) })
 end
 
@@ -125,11 +125,11 @@ local function diff_state()
 end
 
 local function hl_at(line)
+  -- the colours are drawn by a decoration provider from the view's per-line index
   return child.lua_get([[(function(line)
     local v = require('agent-ide.ui.fulldiff').state()
-    local ns = vim.api.nvim_get_namespaces()['agent-ide.fulldiff']
-    local marks = vim.api.nvim_buf_get_extmarks(v.buf, ns, { line - 1, 0 }, { line - 1, -1 }, { details = true, overlap = true })
-    return marks[1] and marks[1][4].hl_group or ''
+    local list = v.by_line[line]
+    return v.t.line_group[line] or (list and list[1] and list[1].group) or ''
   end)(...)]], { line })
 end
 
@@ -143,7 +143,7 @@ T['open branch: buffer, winbar, headers with stats, hunks coloured, folds, read 
   eq({ v.modifiable, v.name:match('/full diff$') ~= nil, v.shown, v.focused }, { false, true, true, true })
   eq(v.lines[2], '@@ -1 +1,3 @@')
   eq(v.lines[4], '+aa')
-  eq(hl_at(4), 'AgentIdeDiffAdd')
+  eq(hl_at(4), 'AgentIdeFullDiffAdd')
   eq(v.closed[1], false)
   eq(view_line('v R sp ace "q".txt → dir/sp ace "q".txt') ~= nil, true)
   eq(view_line('binary file, not shown') ~= nil, true)
@@ -222,6 +222,37 @@ T['a closed fold survives the side-by-side round trip; a reload while hidden kee
   local v = view()
   eq({ v.closed[1], v.lines[1]:sub(1, 1) }, { true, '>' })
   eq(v.lines[v.cursor]:sub(1, 10), 'v R sp ace')
+end
+
+T['with delta (a stand-in): the text loses the codes, the colours become extmarks, the background runs to the end'] = function()
+  local script = tmp .. '/delta.sh'
+  vim.fn.writefile({ '#!/bin/sh', 'sed "s/^+/\\x1b[48;2;0;40;0m+/;s/$/\\x1b[0m\\x1b[48;2;0;40;0m\\x1b[0K\\x1b[0m/"' }, script)
+  vim.uv.fs_chmod(script, 493)
+  start({ git = { delta = { script } } })
+  open({ kind = 'branch' })
+  -- the untracked counts redraw once more (and reset the per-line cache): wait for them
+  wait_for(function() return view().winbar == 'r · full diff · vs main · 4 files +5 −1' end, 'winbar with the untracked counts')
+  local v = view()
+  eq(v.lines[4], '+aa')
+  -- the line is drawn (the view is on screen), so its colours were decoded and its group defined
+  child.lua('vim.api.nvim_win_set_cursor(vim.fn.win_findbuf(require("agent-ide.ui.fulldiff").state().buf)[1], { 4, 0 }); vim.cmd("redraw")')
+  eq(child.lua_get('require("agent-ide.ui.fulldiff").state().raw[4]'), vim.NIL)
+  eq(hl_at(4), 'AgentIdeAnsi_Y002800')
+  eq(child.lua_get([[(function()
+    for _, h in ipairs(require('agent-ide.ui.fulldiff').state().by_line[4]) do
+      if h.line_hl then return h.group end
+    end
+    return ''
+  end)()]]), 'AgentIdeAnsi_Y002800')
+  eq(child.lua_get('vim.api.nvim_get_hl(0, { name = "AgentIdeAnsi_Y002800" }).bg'), 0x002800)
+  -- what is on screen: the + line's cell has the background of its group
+  eq(child.lua_get([[(function()
+    local w = vim.fn.win_findbuf(require('agent-ide.ui.fulldiff').state().buf)[1]
+    local row = vim.fn.screenpos(w, 4, 2).row
+    local col = vim.fn.screenpos(w, 4, 2).col
+    local id = vim.fn.screenattr(row, col)
+    return vim.fn.synIDattr(id, 'bg') ~= '' or vim.api.nvim__inspect_cell ~= nil
+  end)()]]), true)
 end
 
 T['commit scope and head scope: labels; an empty scope shows one line'] = function()
