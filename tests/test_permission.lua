@@ -127,6 +127,7 @@ local function start(steps, opts)
     live = { interval_ms = 50, cmd = { 'echo', '[]' } },
     icons_style = 'plain', icons = ICONS,
     claude = { cmd = cmd },
+    chat = { ask_picker = 'select' }, -- the ask window has its own cases (test_ask_float.lua)
   }, opts or {}) })
 end
 
@@ -823,6 +824,56 @@ T['help lists the new keys'] = function()
   for _, key in ipairs({ '<S-Tab>', '<leader>aM', '<leader>ay', '<leader>an' }) do
     eq(text:find(key, 1, true) ~= nil, true)
   end
+end
+
+-- The ask window (chat.ask_picker = 'float', the default) -------------------------------------
+
+-- Lines of the open ask window, or nil.
+local function ask_window()
+  local w = child.lua_get([[(function()
+    for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+      local b = vim.api.nvim_win_get_buf(w)
+      if vim.api.nvim_buf_get_name(b):match('agents://ask$') then
+        return { lines = vim.api.nvim_buf_get_lines(b, 0, -1, false), current = w == vim.api.nvim_get_current_win(),
+          row = vim.api.nvim_win_get_cursor(w)[1] }
+      end
+    end
+  end)()]])
+  if w ~= vim.NIL then return w end
+end
+
+T['ask window: the question on its own rows, then the choices; a number picks'] = function()
+  start(write_turn('Write it', 'p1', { description = 'outside the project' }), { chat = { ask_picker = 'float' } })
+  open_new()
+  send_normal('Write it')
+  wait_for(function() return ask_window() ~= nil end, 'ask window')
+  local w = ask_window()
+  eq(vim.list_slice(w.lines, 1, 6), { 'Allow Write?', 'outside the project', '/x/a.txt', '', 'hello', 'world' })
+  eq(w.lines[7], ('─'):rep(vim.fn.strchars(w.lines[7]))) -- the rule above the choices
+  eq(vim.list_slice(w.lines, 8), { '1. Allow', '2. Deny' })
+  eq({ w.current, w.row }, { true, 8 }) -- focus and cursor on the first choice
+  eq(#selects(), 0) -- vim.ui.select is not used
+  child.type_keys('k') -- the cursor stays on the choices
+  eq(ask_window().row, 8)
+  child.type_keys('2')
+  wait_for(function() return has_line(transcript(), 'Written.') ~= nil end, 'answer')
+  eq(ask_window(), nil)
+  eq(answers()[1].response.behavior, 'deny')
+end
+
+T['ask window: q cancels, the answer key opens it again, <CR> picks the choice under the cursor'] = function()
+  start(write_turn('Write it', 'p1'), { chat = { ask_picker = 'float' } })
+  open_new()
+  send_normal('Write it')
+  wait_for(function() return ask_window() ~= nil end, 'ask window')
+  child.type_keys('q')
+  wait_for(function() return ask_window() == nil end, 'closed')
+  eq(#answers(), 0)
+  child.type_keys('\\ay')
+  wait_for(function() return ask_window() ~= nil end, 'reopened')
+  child.type_keys('<CR>')
+  wait_for(function() return has_line(transcript(), 'Written.') ~= nil end, 'answer')
+  eq(answers()[1].response.behavior, 'allow')
 end
 
 return T

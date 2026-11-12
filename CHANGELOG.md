@@ -30,7 +30,7 @@ All notable changes to Agent-IDE.nvim are listed here. The format follows [Keep 
 
 ### Changed
 
-- A permission picker asks a question with the subject first (`Allow Bash: npm test? Run the tests`): Claude's own description of the call follows, and a command cut for the line says so (`(+2 lines)`, `…`). The same question shows on the message line, since pickers such as Snacks cut a long prompt in their title.
+- Claude's asks (permissions, questions, plans) open in a window of their own: the question on its own rows at the top (`Allow Bash?`, Claude's description of the call, the whole command or the diff, wrapped, up to 12 lines and the rest counted), a rule, then the numbered choices. `j`/`k` and `<CR>`, or `1`-`9`, pick; `q` or `<Esc>` cancels. Pickers such as Snacks showed the question only as a cut title. `chat.ask_picker = 'select'` keeps your `vim.ui.select`, with the question as its prompt (`Allow Bash: npm test? Run the tests`, cuts marked `(+2 lines)` or `…`), repeated on the message line (`AgentIdeAskQuestion`, `AgentIdeAskBody`, `AgentIdeAskMore`, `AgentIdeAskRule`, `AgentIdeAskNumber`).
 - A failed turn's error line adds the API status in words and why the turn ended (`API error 529: Anthropic is overloaded; ended: api_error`), after Claude's own text.
 - The queue panel lists every prompt sent, the first one too, instead of the last five, and opens at the end.
 - The footer no longer shows the model: the chat's winbar and the prompt window's label name it.

@@ -1,5 +1,6 @@
 -- What the user sees and does when Claude needs a decision: a tool permission, an
--- AskUserQuestion, an ExitPlanMode plan approval. The choice is a `vim.ui.select`, opened only
+-- AskUserQuestion, an ExitPlanMode plan approval. The choice is the plugin's ask window
+-- (`ui/ask_float.lua`, or `vim.ui.select` with `chat.ask_picker = 'select'`), opened only
 -- for the session whose chat the user is in (its transcript or prompt window is the current
 -- window), only in plain normal mode (never while typing, in a command line, an operator, or
 -- visual mode), and always through `vim.schedule`. Asks of other sessions only show in their
@@ -126,10 +127,19 @@ local function suggestion_items(s, p)
   return items
 end
 
-local function select(items, prompt, done)
-  vim.ui.select(items, { prompt = prompt, format_item = function(it) return it.label end }, function(choice)
-    vim.schedule(function() done(choice) end)
-  end)
+---Open the choice: the plugin's ask window (`ask.rows`: the question on its own rows, `ask.title`
+---on the border), or `vim.ui.select` with the one-line `prompt` when `chat.ask_picker` is
+---`'select'`. `done(choice)` is scheduled.
+local function select(items, prompt, done, view)
+  local opts = { prompt = prompt, format_item = function(it) return it.label end }
+  local function cb(choice) vim.schedule(function() done(choice) end) end
+  local chat_cfg = config.get().chat
+  if type(chat_cfg) == 'table' and chat_cfg.ask_picker == 'select' then
+    if view and view.echo then echo(prompt) end
+    return vim.ui.select(items, opts, cb)
+  end
+  opts.rows, opts.title = view and view.rows, view and view.title
+  require('agent-ide.ui.ask_float').select(items, opts, cb)
 end
 
 ---Ask the user about `p`; `finish(cancelled, choice)` once the select (chain) is over.
@@ -139,11 +149,10 @@ local function ask_permission(s, p, finish)
     { label = 'Deny', run = function() s:answer(p.request_id, false) end },
   }
   vim.list_extend(items, suggestion_items(s, p))
-  -- the question is the picker's prompt; pickers that show it as a narrow title cut it, so it
-  -- also goes to the message line, which is as wide as the screen
-  local question = ask.question(p)
-  echo(question)
-  select(items, question, function(choice) finish(choice == nil, choice) end)
+  -- through vim.ui.select the question is the prompt, which pickers show as a title and cut,
+  -- so it also goes to the message line, as wide as the screen
+  select(items, ask.question(p), function(choice) finish(choice == nil, choice) end,
+    { rows = ask.permission_rows(p), title = 'Permission', echo = true })
 end
 
 -- Approving a plan can set the mode Claude continues in (sent with the approval).
@@ -156,7 +165,8 @@ local function ask_plan(s, p, finish)
       s:answer(p.request_id, true, { updated_permissions = { vim.deepcopy(ACCEPT_EDITS) } })
     end },
     { label = 'Keep planning', run = function() s:answer(p.request_id, false, { message = KEEP_PLANNING }) end },
-  }, 'Approve Claude\'s plan?', function(choice) finish(choice == nil, choice) end)
+  }, 'Approve Claude\'s plan?', function(choice) finish(choice == nil, choice) end,
+    { rows = ask.question_rows('Approve Claude\'s plan?', 'The plan is in the transcript.'), title = 'Plan' })
 end
 
 local DONE = 'Done choosing'
@@ -181,12 +191,13 @@ local function ask_several(q, items, done)
       if not chosen[it.value] then left[#left + 1] = it end
     end
     if #left == 1 and left[1].done then return done(list) end -- every option chosen
+    local hint = 'Several answers: one per round, then ' .. DONE .. (#list > 0 and ('. Chosen: ' .. table.concat(list, ', ')) or '')
     select(left, #list > 0 and (prompt .. ' — chosen: ' .. table.concat(list, ', ')) or prompt, function(choice)
       if not choice then return done(nil) end
       if choice.done then return done(picked()) end
       chosen[choice.value] = true
       round()
-    end)
+    end, { rows = ask.question_rows(tostring(q.question), hint), title = 'Question' })
   end
   round()
 end
@@ -228,7 +239,8 @@ local function ask_questions(s, p, finish)
     if q.multiSelect == true then
       return ask_several(q, items, function(labels) answered(labels and table.concat(labels, ', ')) end)
     end
-    select(items, tostring(q.question), function(choice) answered(choice and choice.value) end)
+    select(items, tostring(q.question), function(choice) answered(choice and choice.value) end,
+      { rows = ask.question_rows(tostring(q.question)), title = 'Question' })
   end
   step(1)
 end

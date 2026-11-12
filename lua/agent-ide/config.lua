@@ -95,8 +95,10 @@ defaults = function()
     -- `:AgentsTrash empty`; keep_days (nil: keep) purges older ones at setup
     trash = { keep_days = nil },
     -- prompt buffer: `/` opens the command menu, `@` opens the file picker; prompt_label: a dim
-    -- `↑ title · model` on the prompt window's winbar naming the session it sends to
-    chat = { auto_slash = true, at_picker = true, prompt_label = true },
+    -- `↑ title · model` on the prompt window's winbar naming the session it sends to;
+    -- ask_picker: 'float' (Claude's asks in the plugin's window, the question on its own rows)
+    -- or 'select' (your `vim.ui.select`, the question as its prompt)
+    chat = { auto_slash = true, at_picker = true, prompt_label = true, ask_picker = 'float' },
     -- context: the size of a session's conversation (the input tokens of its last request; the
     -- chat's winbar shows it as `~123k`). From `threshold` tokens on (false: never) the plugin
     -- asks before a send that resumes a session without a process (Send / Compact first /
