@@ -139,9 +139,11 @@ local function ask_permission(s, p, finish)
     { label = 'Deny', run = function() s:answer(p.request_id, false) end },
   }
   vim.list_extend(items, suggestion_items(s, p))
-  local prompt = ('Claude wants to use %s: %s'):format(tostring(p.tool_name), ask.summary(p))
-  if type(p.description) == 'string' and p.description ~= '' then prompt = prompt .. ' (' .. p.description .. ')' end
-  select(items, prompt, function(choice) finish(choice == nil, choice) end)
+  -- the question is the picker's prompt; pickers that show it as a narrow title cut it, so it
+  -- also goes to the message line, which is as wide as the screen
+  local question = ask.question(p)
+  echo(question)
+  select(items, question, function(choice) finish(choice == nil, choice) end)
 end
 
 -- Approving a plan can set the mode Claude continues in (sent with the approval).

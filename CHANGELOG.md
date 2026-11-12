@@ -29,6 +29,7 @@ All notable changes to Agent-IDE.nvim are listed here. The format follows [Keep 
 
 ### Changed
 
+- A permission picker asks a question with the subject first (`Allow Bash: npm test? Run the tests`): Claude's own description of the call follows, and a command cut for the line says so (`(+2 lines)`, `…`). The same question shows on the message line, since pickers such as Snacks cut a long prompt in their title.
 - The queue panel lists every prompt sent, the first one too, instead of the last five, and opens at the end.
 - The footer no longer shows the model: the chat's winbar and the prompt window's label name it.
 - Plan mode has its own key: `<leader>am` turns it on, and off again back to the mode you had before (`keys.chat.plan`). `<S-Tab>` now cycles manual, acceptEdits and auto (`claude.modes`; add `'plan'` to have it there again), and in plan mode it leaves plan.
