@@ -176,11 +176,17 @@ require('agent-ide').setup({
     -- prompt row keys below) that handler runs instead
     drawer = { open = { '<CR>', 'o' }, fold = 'za', collapse_all = 'z0', expand_all = 'z9', refresh = 'R',
       tmux = { 'gT', '<leader>aT' }, search = { 'S', '<leader>ff', '<leader>S' }, park = 'sP', hide = 'H',
-      delete = 'D', yank = 'y', lazygit = 'glg', close = 'q', help = { '?', 'g?' }, graph = 'G', scope = '<S-Tab>',
-      legend = { 'gL', '<leader>aL' }, close_tmux = 'X',
+      delete = 'D', yank = 'y', lazygit = 'glg', close = 'q', help = { '?', 'g?' }, graph = 'G', full_diff = 'gd',
+      scope = '<S-Tab>', legend = { 'gL', '<leader>aL' }, close_tmux = 'X',
       next_session = ']s', prev_session = '[s' }, -- open the next / previous session of the project
     -- drawer, on prompt rows (elsewhere these keys keep their normal meaning)
     prompts = { edit = 'e', rename = 'r', delete = 'D', yank = 'y', to_library = 'sL' },
+    -- commit graph view, buffer-local
+    graph = { open = '<CR>', next_commit = ']]', prev_commit = '[[', full_diff = 'gd', all = 'a', refresh = 'R', more = 'L',
+      yank = 'y', lazygit = 'glg', close = 'q', help = 'g?' },
+    -- full diff view (every change of a branch in one buffer), buffer-local
+    full_diff = { open = '<CR>', next_file = ']f', prev_file = '[f', next_hunk = ']c', prev_hunk = '[c', fold = 'za',
+      collapse_all = 'z0', expand_all = 'z9', refresh = 'R', yank = 'y', lazygit = 'glg', close = 'q', help = 'g?' },
   },
   prompts = {
     library_dir = nil,  -- your templates (nil: stdpath('data') .. '/agent-ide/library')
@@ -301,6 +307,7 @@ In the drawer (`keys.drawer`; the prompt row keys are `keys.prompts`, the sessio
 | `gL`, `<leader>aL` | Show or hide the legend of the state marks (remembered) |
 | `]s`, `[s` | Open the next or previous session of the project (from the session row, else the chat shown); the drawer keeps the focus and its cursor follows |
 | `G` | Commit graph of the row's repository (a worktree session: that worktree; see [Commit graph](#commit-graph)) |
+| `gd` | Full diff of the row: its project or section (the branch, or the commits), a commit, or a file with the cursor on it (see [Full diff](#full-diff)) |
 | `glg` | Open lazygit for the row's repository (a worktree row or session: that worktree) |
 | `<S-Tab>` | Scope: only the row's project (else the working directory's), or back to all projects (see [Project scope](#project-scope)) |
 | `?`, `g?` | Help: a list of every key you can filter by typing; `<CR>` on a row presses that key (see [Help](#help)) |
@@ -447,9 +454,33 @@ Each git project in the drawer has two more sections below its sessions: `Change
 
 The right side is your own file, so the one-character keys `q`, `?` and `R` are mapped only on the left (base) side; on your file they stay macro recording, backward search and Replace mode, and the `<leader>g…` and `g?` forms work on both sides. Your own buffer-local mappings on the right side are put back when the diff closes. The keys are under `keys.diff` (and `keys.chat.diff`) in the configuration; each value is a key, a list of keys, or `false`. Git is only read (`git --no-optional-locks`, never a command that writes); acting is left to lazygit.
 
+#### Full diff
+
+To read a whole branch top to bottom instead of file by file, open its **full diff**: one read-only buffer in the main window with every changed file, the way lazygit shows a branch. Each file starts with a header line (status, path, `+added −removed`), then only its hunks with three lines of context, in Neovim folds, a blank line between files. Removed lines are red and added lines green (the chat's `AgentIdeDiffDel` and `AgentIdeDiffAdd`), the `@@` lines dim (`AgentIdeDiffHunk`). Binary files, submodules and files too large to read get a one-line note (`AgentIdeDiffNote`); untracked files show as added lines. A file whose patch is longer than 500 lines starts folded. The winbar names the scope and sums it up: `myapp · full diff · vs main · 12 files +340 −120`.
+
+Four scopes, one view: **branch** (the merge-base against your working tree, uncommitted and untracked included: what `Changes vs <base>` lists), **commits** (the merge-base against `HEAD`, committed changes only: what `Commits on branch` lists; on the default branch, the recent commits it lists), **one commit** (against its first parent), and **uncommitted** (`HEAD` against the working tree). `gd` on any row of a git project in the drawer opens the scope the row stands for: the project row, a session or the `Changes` section give the branch; a file under `Changes` the same with the cursor on that file; the `Commits` section the commits; a commit row that commit (a file under it: with the cursor on the file); the `uncommitted` row that scope. Two dimmed `full diff · gd` rows, like the `commit graph · G` row, sit at the top of an open `Changes` section and after the graph row in `Commits`. In the commit graph, `gd` on a commit opens its full diff and `q` returns to the graph. `:AgentsDiff` opens the branch scope for the current context, as `:AgentsGraph` finds it.
+
+`<CR>` on any line jumps into the side-by-side diff view of that file, the right side's cursor on the line under yours; `q` there comes back to the full diff where you were. (In the commits scope the side-by-side view shows the branch, with your working file on the right; on the default branch it shows the newest listed commit touching the file.) The view reloads when the project's git data does (a session's turn ends, `R` in the drawer or here), keeping the cursor on its file and hunk and your folds as you left them; a commit's full diff never reloads.
+
+| Key (full diff) | Action |
+|---|---|
+| `gd` (drawer, graph) | Open the full diff of the row: its project, section, commit or file |
+| `<CR>` | Side-by-side diff of this file, on this line; `q` there comes back here |
+| `]f` / `[f` | Next / previous file |
+| `]c` / `[c` | Next / previous hunk (closed files skipped) |
+| `za` | Fold or unfold this file |
+| `z0` / `z9` | Fold / unfold every file (`zM` / `zR` and the other fold keys work too) |
+| `R` | Refresh (the drawer's lists reload too) |
+| `y` | Yank the file's path (unnamed and `+` registers) |
+| `glg` | lazygit for this repository |
+| `q` | Close, back to what was shown before |
+| `g?` | Help |
+
+The keys are under `keys.full_diff` (`open`, `next_file`, `prev_file`, `next_hunk`, `prev_hunk`, `fold`, `collapse_all`, `expand_all`, `refresh`, `yank`, `lazygit`, `close`, `help`), the drawer's and the graph's key under `keys.drawer.full_diff` and `keys.graph.full_diff`; each a key, a list of keys, or `false`. The buffer is `agents://<project>/full diff`, filetype `agent-ide-fulldiff`.
+
 #### Commit graph
 
-`G` on any row of a git project in the drawer (the project row, its sections, a session), or `<CR>` on the `commit graph` row at the top of an expanded `Commits` section, opens the project's history as a graph in the main window, the way GitKraken or SourceTree show branches and merges. On a session that works in a linked worktree it shows that worktree. `:AgentsGraph` opens it for the current context: the chat's session, the diff view's repository, the drawer row, else the current file's (or the working directory's) repository. Outside a git repository you get a notice and nothing opens.
+`G` on any row of a git project in the drawer (the project row, its sections, a session), or `<CR>` on the `commit graph` row at the top of an expanded `Commits` section, opens the project's history as a graph in the main window, the way GitKraken or SourceTree show branches and merges. On a session that works in a linked worktree it shows that worktree. `:AgentsGraph` opens it for the current context: the chat's session, the full diff's or the diff view's repository, the drawer row, else the current file's (or the working directory's) repository (`:AgentsDiff` opens the [full diff](#full-diff) the same way). Outside a git repository you get a notice and nothing opens.
 
 ```
  myapp · graph · all branches                                       (winbar)
@@ -469,6 +500,7 @@ Git draws the graph (`git log --graph --date-order`); the view turns its charact
 | `G` (drawer) | Open the graph of the row's repository |
 | `<CR>` | On a commit: show / hide its changed files below it. On a file: the diff of that commit only (a merge against its first parent, the first commit against nothing); closing the diff comes back to the graph |
 | `]]` / `[[` | Next / previous commit |
+| `gd` | Full diff of the commit (on a file: with the cursor on it); `q` there comes back to the graph (see [Full diff](#full-diff)) |
 | `a` | All branches / the current branch only |
 | `R` | Refresh |
 | `L` | Load 300 more commits |
@@ -477,7 +509,7 @@ Git draws the graph (`git log --graph --date-order`); the view turns its charact
 | `q` | Close, back to what was shown before |
 | `g?` | Help |
 
-Vim motions and `/` search work as usual. The keys are under `keys.graph` (`open`, `next_commit`, `prev_commit`, `all`, `refresh`, `more`, `yank`, `lazygit`, `close`, `help`), each a key, a list of keys, or `false`; the number of commits per load is `git = { graph_limit = 300 }`. Highlight groups: `AgentIdeGraph1` to `AgentIdeGraph6` (the lane colours), `AgentIdeGraphBranch`, `AgentIdeGraphRemote`, `AgentIdeGraphTag`, `AgentIdeGraphHead` and `AgentIdeGraphHash`, all overridable by a colorscheme.
+Vim motions and `/` search work as usual. The keys are under `keys.graph` (`open`, `next_commit`, `prev_commit`, `full_diff`, `all`, `refresh`, `more`, `yank`, `lazygit`, `close`, `help`), each a key, a list of keys, or `false`; the number of commits per load is `git = { graph_limit = 300 }`. Highlight groups: `AgentIdeGraph1` to `AgentIdeGraph6` (the lane colours), `AgentIdeGraphBranch`, `AgentIdeGraphRemote`, `AgentIdeGraphTag`, `AgentIdeGraphHead` and `AgentIdeGraphHash`, all overridable by a colorscheme.
 
 ### Prompts
 
