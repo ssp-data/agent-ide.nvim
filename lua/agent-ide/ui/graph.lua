@@ -348,6 +348,16 @@ function M.close()
   end
 end
 
+---Forget the view and wipe its buffer without showing anything: another view (the full diff)
+---takes the window and what was there before.
+function M.drop()
+  if not G then return end
+  local g = G
+  G = nil
+  cache.off_update(on_update)
+  if api.nvim_buf_is_valid(g.buf) then pcall(api.nvim_buf_delete, g.buf, { force = true }) end
+end
+
 ---The open view (tests): nil when closed.
 function M.state() return G end
 

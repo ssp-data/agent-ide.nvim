@@ -73,6 +73,10 @@ defaults = function()
       -- commit graph view, buffer-local; each a key, a list of keys, or false
       graph = { open = '<CR>', next_commit = ']]', prev_commit = '[[', all = 'a', refresh = 'R', more = 'L', yank = 'y',
         lazygit = 'glg', close = 'q', help = 'g?' },
+      -- full diff view (every change of a branch in one buffer), buffer-local; each a key, a list
+      -- of keys, or false
+      full_diff = { open = '<CR>', next_file = ']f', prev_file = '[f', next_hunk = ']c', prev_hunk = '[c', fold = 'za',
+        collapse_all = 'z0', expand_all = 'z9', refresh = 'R', yank = 'y', lazygit = 'glg', close = 'q', help = 'g?' },
     },
     -- graph_limit: commits the commit graph loads at first (and L loads more of)
     git = { graph_limit = 300 },

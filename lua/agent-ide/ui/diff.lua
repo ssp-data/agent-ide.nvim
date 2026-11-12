@@ -171,6 +171,10 @@ local function apply(left_raw, right_raw, keep_cursor)
   if cursors then
     pcall(api.nvim_win_set_cursor, D.left, cursors[1])
     pcall(api.nvim_win_set_cursor, D.right, cursors[2])
+  elseif D.line then
+    -- opened on a line (the full diff): the right side goes there, once
+    pcall(api.nvim_win_set_cursor, D.right, { D.line, 0 })
+    D.line = nil
   elseif not note then
     api.nvim_win_call(D.right, function()
       vim.cmd('normal! gg')
@@ -259,8 +263,9 @@ api.nvim_create_autocmd('BufWinEnter', { group = repair_group, callback = functi
   tainted[ev.buf] = nil
 end })
 
----Open the diff view on `opts.list[opts.index]`.
----@param opts { project: table, root: string, mode: 'branch'|'commit'|'head', list: table[], index: integer, commit?: table }
+---Open the diff view on `opts.list[opts.index]`; with `opts.line` the right side's cursor goes
+---to that line instead of the first hunk.
+---@param opts { project: table, root: string, mode: 'branch'|'commit'|'head', list: table[], index: integer, commit?: table, line?: integer }
 function M.open(opts)
   local file = opts.list[opts.index]
   if not file then return end
@@ -289,7 +294,7 @@ function M.open(opts)
     autocmds()
   end
   D.root, D.project, D.mode, D.list, D.index, D.file = opts.root, opts.project, opts.mode, opts.list, opts.index, file
-  D.commit = opts.commit
+  D.commit, D.line = opts.commit, opts.line
   D.base = opts.mode == 'branch' and cache.base(opts.root) or nil
   api.nvim_set_current_win(D.right)
   -- the tab follows what is shown (as for a chat): lazygit or a picker started here sees this tree

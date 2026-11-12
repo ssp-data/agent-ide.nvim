@@ -85,6 +85,10 @@ local function exercise(keys)
       _G.gbuf = vim.api.nvim_create_buf(false, true)
       require('agent-ide.ui.graph_keys').map(_G.gbuf, {})
     end)
+    try('full diff keys', function()
+      _G.fbuf = vim.api.nvim_create_buf(false, true)
+      require('agent-ide.ui.fulldiff_keys').map(_G.fbuf, {})
+    end)
     try('search', function()
       require('agent-ide').search()
       _G.qbuf = vim.api.nvim_get_current_buf()
@@ -113,6 +117,7 @@ local function places(path)
   if group == 'search_picker' then return { { '_G.qbuf', 'n' } } end
   if group == 'diff' then return { { '_G.lbuf', 'n' }, { '_G.rbuf', 'n' } } end
   if group == 'graph' then return { { '_G.gbuf', 'n' } } end
+  if group == 'full_diff' then return { { '_G.fbuf', 'n' } } end
   if group == 'drawer' then return { { '_G.dbuf', 'n' } } end
   if group == 'prompts' then return {} end -- drawer row keys: checked through prompt_sections.keys()
   local t, p = { '_G.tbuf', 'n' }, { '_G.pbuf', 'n' }
