@@ -1,6 +1,6 @@
 # Demo
 
-`make demo` starts Neovim on synthetic data under `/tmp/agent-ide-demo`, rebuilt on every run. It runs the plugin from this checkout, so whatever you just built is what you see. It opens the drawer, starts the scenario sessions, and then you drive it to take screenshots.
+`make demo` starts Neovim on synthetic data under `/tmp/agent-ide-demo`, rebuilt on every run. It runs the plugin from this checkout, so whatever you just built is what you see. It opens the drawer, starts the scenario sessions, opens every row (`z9`) and the lineage session with its queue panel (`Q`), and then you drive it to take screenshots.
 
 `AGENT_IDE_DEMO_SHOT=chat make demo` (what `scripts/demo-screenshot.sh` uses) and `AGENT_IDE_DEMO_SHOT=graph make demo` set up the README screenshots the same way every time.
 
@@ -13,7 +13,7 @@
 | A question waiting | `Add HTML email preview` (neomd) | same |
 | A plan to approve | `Grammar pass on data contracts post` (ssp-blog) | same |
 | Done, unread, with a whole turn in the queue panel: cache written again, requests, tokens, cost per model, todos, a finished subagent | `Fix flaky dbt test on customers` (dataflow) | `Q` |
-| Running: queued prompts, todos in progress, a subagent and a background agent at work, a background shell, thinking | `Document lineage for the docs site` (dataflow-docs) | `Q`, then `e`, `dd`, `J`, `K` on a queued prompt |
+| **Everything in one chat**: a prompt with an `@` file, SQL and a table in the answer, an `Edit` as an inline diff with the changed words marked, coloured `git status` and a delta diff from Bash; running now with queued prompts, todos, a subagent and a background agent, a background shell, thinking; a draft with an attached file in the prompt; uncommitted changes for `gd` | `Document lineage for the docs site` (dataflow-docs) | `<CR>` on the row, `Q`, then `e`, `dd`, `J`, `K` on a queued prompt |
 | Failed | `Migrate config to TOML` (neomd) | |
 | Running elsewhere (busy, idle) | the two `blog` sessions (ssp-blog), from `live.json` | |
 | A large conversation (`▲ large`), the question before a resume | `Explain the DuckDB lineage graph` (dataflow, ~232k) | `Q`; send a prompt |
