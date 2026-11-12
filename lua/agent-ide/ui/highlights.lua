@@ -47,6 +47,13 @@ local GROUPS = {
   end,
   AgentIdeMode = M.dim,
   AgentIdeContext = M.dim, -- the context size (`~123k`) beside the model
+  -- the ask window (permissions, questions, plans): the question, the call's body, the counted
+  -- rest and hints, the rule above the choices, their numbers
+  AgentIdeAskQuestion = { link = 'Title' },
+  AgentIdeAskBody = { link = 'NormalFloat' },
+  AgentIdeAskMore = M.dim,
+  AgentIdeAskRule = { link = 'FloatBorder' },
+  AgentIdeAskNumber = M.dim,
   AgentIdeLarge = { link = 'WarningMsg' }, -- `▲ large` in the queue panel: a heavy conversation
   AgentIdeModeHot = { link = 'WarningMsg' },
   -- the prompt window's label (`↑ title · model`, ui/prompt_label.lua); a prompt that is not the
