@@ -1,7 +1,7 @@
 You are drafting the GitHub release notes for Agent-IDE.nvim {{VERSION}} (a Neovim plugin that manages Claude Code sessions from inside Neovim: a drawer of sessions per repository, a chat in native buffers, git review, search over all sessions, reusable prompts, a statusline and an Omarchy bar widget). Write them to the file RELEASE_NOTES.md in the current directory, overwriting it. Do not commit, do not touch any other file, do not run the test suite.
 
 Sources, in this order of authority:
-1. CHANGELOG.md, the `## [Unreleased]` section at the top: everything since the previous release {{PREV}}, under Added, Changed, Fixed and Removed. Each bullet there already explains what changed and why; condense, do not copy.
+1. CHANGELOG.md, the `## [Unreleased]` section at the top (if it is empty because the version was already cut, the `## [{{NUMBER}}]` section instead): everything since the previous release {{PREV}}, under Added, Changed, Fixed and Removed. Each bullet there already explains what changed and why; condense, do not copy.
 2. `git log --no-merges --format='%s%n%b' {{PREV}}..HEAD` for anything the changelog missed. Subjects name the part of the plugin first (`queue panel: …`, `drawer: …`); bodies explain the why.
 3. README.md, only to phrase a feature the way the documentation does (key names, option names, highlight groups).
 4. The current RELEASE_NOTES.md, if it exists, only as a template for shape and tone; its content belongs to the previous release and must be replaced.

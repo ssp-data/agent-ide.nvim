@@ -19,7 +19,7 @@ git rev-parse -q --verify "$prev^{commit}" >/dev/null || { echo "unknown revisio
 echo "Drafting RELEASE_NOTES.md for v$version (changes since $prev)…"
 if command -v claude >/dev/null; then
   # env -u ANTHROPIC_API_KEY: the Claude Code login, not a stray API key from the shell.
-  sed -e "s/{{VERSION}}/v$version/g" -e "s/{{PREV}}/$prev/g" scripts/release-notes-prompt.md \
+  sed -e "s/{{VERSION}}/v$version/g" -e "s/{{NUMBER}}/$version/g" -e "s/{{PREV}}/$prev/g" scripts/release-notes-prompt.md \
     | env -u ANTHROPIC_API_KEY claude -p --allowedTools "Read,Write,Bash(git log:*),Bash(git diff:*),Bash(git describe:*),Bash(head:*)"
 else
   {
@@ -28,7 +28,7 @@ else
     echo "**Fixes**"; echo; echo "- "; echo
     echo "<!-- sources, for editing by hand; delete when done -->"; echo
     echo "<!-- CHANGELOG.md [Unreleased] -->"; echo
-    scripts/changelog-section.sh Unreleased; echo
+    { scripts/changelog-section.sh Unreleased | grep . || scripts/changelog-section.sh "$version"; }; echo
     echo "<!-- commits since $prev -->"; echo
     git log --no-merges --format='- %s' "$prev..HEAD"
   } > RELEASE_NOTES.md
