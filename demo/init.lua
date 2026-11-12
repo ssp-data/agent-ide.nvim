@@ -101,13 +101,16 @@ local function press_on(text, keys, anchor)
   end
 end
 
--- Sessions that run the scenarios of demo/scenarios: permission, done (unread), failed, and one that
--- keeps running with prompts queued behind its turn (the queue panel, `Q`).
+-- Sessions that run the scenarios of demo/scenarios: a permission, a question and a plan waiting,
+-- done (unread) with a whole turn's numbers, failed, and one that keeps running with subagents, a
+-- background shell and prompts queued behind its turn (the queue panel, `Q`).
 local function run_scenarios()
   local runs = {
     { id = '2042fade-b41d-4f9a-b527-9a1f633fdd24', title = 'Backfill 2025 partitions', dir = repo_dir, prompts = { 'Backfill the 2025 partitions into orders.' } },
     { id = '5392a4f0-0939-436f-9d18-fb627d96ceb0', title = 'Fix flaky dbt test on customers', dir = repo_dir, prompts = { 'Fix the flaky freshness test on customers.' } },
     { id = 'afced7c9-3cf0-4a51-8d77-02865b03c0b0', title = 'Migrate config to TOML', dir = root .. '/git/neomd', prompts = { 'Migrate config.yaml to TOML.' } },
+    { id = '60b132d2-43e5-42ff-b527-bd69645a7ce3', title = 'Add HTML email preview', dir = root .. '/git/neomd', prompts = { 'Add a preview for HTML mails.' } },
+    { id = '4509b83c-d371-4ebe-a7fa-ad29166d552e', title = 'Grammar pass on data contracts post', dir = root .. '/git/ssp-blog', prompts = { 'Plan a grammar pass on the data contracts post.' } },
     { id = '4cc9c6cb-e2e5-4c3c-87e9-90a1d01fde20', title = 'Document lineage for the docs site', dir = root .. '/git/dataflow-docs', prompts = {
       'Add the orders and customers models to docs/lineage.md as a mermaid diagram.',
       'Link each model in the diagram to its SQL file.',
@@ -118,7 +121,11 @@ local function run_scenarios()
   for _, r in ipairs(runs) do
     local path = root .. '/projects/' .. (r.dir:gsub('[/.]', '-')) .. '/' .. r.id .. '.jsonl'
     local s = require('agent-ide.session').open({ id = r.id, cwd = r.dir, path = path, title = r.title })
-    for _, p in ipairs(r.prompts) do s:send(p) end
+    -- sent once the size of the conversation so far is known: the panel's `cache written again`
+    -- compares the turn's first request with it
+    require('agent-ide.session.context').refresh(s, function()
+      for _, p in ipairs(r.prompts) do s:send(p) end
+    end)
   end
 end
 

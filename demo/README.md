@@ -8,18 +8,26 @@
 
 | Feature | Where | Keys |
 |---|---|---|
-| Sessions grouped by repository, branches | `dataflow`, `dataflow-docs`, `neomd`, `ssp-blog` | `<leader>a`, `z9` opens all |
-| Waiting for a permission | `Backfill 2025 partitions` (dataflow) | `<CR>` on the row |
-| Done, unread | `Fix flaky dbt test on customers` (dataflow) | |
+| Sessions grouped by repository, branches | `dataflow`, `dataflow-docs`, `neomd`, `ssp-blog` | `<leader>a`, `z9` opens all, `]s` / `[s` between sessions |
+| A permission waiting | `Backfill 2025 partitions` (dataflow) | `<CR>` on the row, `<leader>ay` in the chat |
+| A question waiting | `Add HTML email preview` (neomd) | same |
+| A plan to approve | `Grammar pass on data contracts post` (ssp-blog) | same |
+| Done, unread, with a whole turn in the queue panel: cache written again, requests, tokens, cost per model, todos, a finished subagent | `Fix flaky dbt test on customers` (dataflow) | `Q` |
+| Running: queued prompts, todos in progress, a subagent and a background agent at work, a background shell, thinking | `Document lineage for the docs site` (dataflow-docs) | `Q`, then `e`, `dd`, `J`, `K` on a queued prompt |
 | Failed | `Migrate config to TOML` (neomd) | |
-| Running with queued prompts | `Document lineage for the docs site` (dataflow-docs) | `Q` on the row |
 | Running elsewhere (busy, idle) | the two `blog` sessions (ssp-blog), from `live.json` | |
-| A long chat with tools and tables | `Incremental load for the orders model` (dataflow) | `<CR>` |
-| The model in the prompt's winbar | any chat; sessions without a model start with `prefs.json`'s | |
-| Uncommitted changes, branch commits, full diff | dataflow on `feat/incremental-orders` | `Changes` rows, `gd` |
-| Commit graph with a merged side branch | dataflow | `:AgentsGraph` |
+| A large conversation (`▲ large`), the question before a resume | `Explain the DuckDB lineage graph` (dataflow, ~232k) | `Q`; send a prompt |
+| A long chat with tools and tables | `Incremental load for the orders model` (dataflow, ~77k) | `<CR>` |
+| An `Edit` as an inline diff (added lines, context, the rest counted) | same chat | `gd` on the fold opens the file's diff |
+| Bash output in its colours: a diff through delta, a `git log --graph` | same chat | |
+| The model and size in the winbars | every chat; sessions without a model start with `prefs.json`'s | |
+| Names | any session row | `r` |
+| Uncommitted changes, branch commits, full diff | dataflow on `feat/incremental-orders` | `Changes` rows, `gd`, `:AgentsDiff` |
+| Commit graph with a merged side branch | dataflow | `:AgentsGraph`, `gd` on a commit |
 | Prompt library, saved prompts, commands, skills | `prompts/` | `Prompts` in the drawer, `/` in a prompt |
 | Quota in the footer | `quota.json`, stamped at start | |
+
+Every past session has a size (the usage of its last answer in `history/`). The sessions above that run start a few seconds after Neovim; the done one finishes after about five seconds.
 
 ## Adding to it
 
