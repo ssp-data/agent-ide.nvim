@@ -59,7 +59,7 @@ make helper        # build the helper after changing helper/ or pulling
 make test-omarchy  # widget tests (node)
 make test-real     # real Claude on the subscription; not part of `make test`, run on purpose only
 make release-notes # print the changelog section that would be released
-make demo          # Neovim on the synthetic demo (demo/): sessions, repos, prompts under /tmp/agent-ide-demo; for screenshots
+make demo          # Neovim on the synthetic demo (demo/, see demo/README.md) under /tmp/agent-ide-demo; you drive, for screenshots
 make release VERSION=x.y.z   # see "Releasing"
 ```
 
