@@ -79,7 +79,7 @@ function Decoder:task(obj, st)
   if st == 'task_started' then
     local quiet = obj.is_backgrounded == false
     local name = str(obj.description) or id
-    self.tasks[id] = { name = name, quiet = quiet }
+    self.tasks[id] = { name = name, quiet = quiet, tool = str(obj.tool_use_id) }
     if quiet then return {} end
     local kind, notes = str(obj.subagent_type), {}
     if kind and obj.task_type then notes[#notes + 1] = tostring(obj.task_type) end
@@ -94,7 +94,11 @@ function Decoder:task(obj, st)
     if str(obj.run_id) then ids[#ids + 1] = 'run ' .. obj.run_id end
     if str(obj.tool_use_id) then ids[#ids + 1] = 'tool call ' .. obj.tool_use_id end
     lines[#lines + 1] = table.concat(ids, ', ')
-    return task_event('task started: ' .. name, lines)
+    local acts = task_event('task started: ' .. name, lines)
+    if obj.is_backgrounded == true and str(obj.tool_use_id) then
+      acts[#acts + 1] = { type = 'task', tool = obj.tool_use_id, status = 'started' }
+    end
+    return acts
   end
   local task = self.tasks[id] or { name = id }
   if task.quiet then return {} end
@@ -116,7 +120,13 @@ function Decoder:task(obj, st)
   if type(u.duration_ms) == 'number' then usage[#usage + 1] = duration(u.duration_ms) end
   if #usage > 0 then lines[#lines + 1] = table.concat(usage, ', ') end
   if str(obj.output_file) then lines[#lines + 1] = 'output: ' .. obj.output_file end
-  return task_event(('task %s: %s'):format(str(obj.status) or 'done', task.name), lines)
+  local acts = task_event(('task %s: %s'):format(str(obj.status) or 'done', task.name), lines)
+  local tool = str(obj.tool_use_id) or task.tool
+  if tool then
+    acts[#acts + 1] = { type = 'task', tool = tool, status = str(obj.status) or 'completed',
+      tool_uses = type(u.tool_uses) == 'number' and u.tool_uses or nil }
+  end
+  return acts
 end
 
 function Decoder:system(obj, raw)
@@ -218,6 +228,18 @@ function Decoder:assistant(obj, raw)
   local streamed = self.streamed and not sidechain
   if streamed then self.streamed = false end
   local acts = event_actions(kept, sidechain, streamed)
+  -- one request to the model (the queue panel counts them and sizes each subagent); not a
+  -- synthetic message, which no request produced
+  if obj.local_command_run == nil and obj.message.model ~= '<synthetic>' then
+    local tools = {}
+    for _, ev in ipairs(kept) do
+      if ev.kind == 'tool_call' and type(ev.name) == 'string' then tools[#tools + 1] = ev.name end
+    end
+    table.insert(acts, 1, {
+      type = 'call', parent = sidechain and obj.parent_tool_use_id or nil, id = str(obj.message.id),
+      tokens = require('agent-ide.claude.usage').context(obj.message.usage), tools = tools,
+    })
+  end
   -- the input of this request (cached or not): the size of the conversation. Not from a
   -- subagent (its own context) nor a synthetic message (a local command's output)
   if not sidechain and obj.local_command_run == nil and obj.message.model ~= '<synthetic>' then

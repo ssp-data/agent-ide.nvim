@@ -47,6 +47,7 @@ local GROUPS = {
   end,
   AgentIdeMode = M.dim,
   AgentIdeContext = M.dim, -- the context size (`~123k`) beside the model
+  AgentIdeLarge = { link = 'WarningMsg' }, -- `▲ large` in the queue panel: a heavy conversation
   AgentIdeModeHot = { link = 'WarningMsg' },
   -- the prompt window's label (`↑ title · model`, ui/prompt_label.lua); a prompt that is not the
   -- transcript's in a warning colour

@@ -5,13 +5,16 @@ local T = MiniTest.new_set()
 
 local function slurp(p) local f = assert(io.open(p)); local s = f:read('a'); f:close(); return s end
 
--- Feed raw lines to one decoder; return the flat Action list.
-local function feed_lines(lines, dec)
+-- Feed raw lines to one decoder; return the flat Action list. The `call` and `task` actions
+-- (the queue panel's counts, tested on their own below) are left out unless `all`.
+local function feed_lines(lines, dec, all)
   dec = dec or stream.new()
   local out = {}
   for _, line in ipairs(lines) do
     local obj = vim.json.decode(line, parse.DECODE_OPTS)
-    for _, a in ipairs(dec:feed(obj, line)) do out[#out + 1] = a end
+    for _, a in ipairs(dec:feed(obj, line)) do
+      if all or (a.type ~= 'call' and a.type ~= 'task') then out[#out + 1] = a end
+    end
   end
   return out
 end
@@ -225,7 +228,7 @@ T['parent_tool_use_id decoded as vim.NIL is the main thread'] = function()
   eq(d, { { type = 'delta', text = 'x' } })
   local a = dec:feed({ type = 'assistant', parent_tool_use_id = vim.NIL,
     message = { content = { { type = 'text', text = 'x' } } } }, '{"type":"assistant","message":{"content":[{"type":"text","text":"x"}]},"parent_tool_use_id":null}')
-  eq(a, { { type = 'event', event = { kind = 'text', text = 'x' }, streamed = true } })
+  eq(a, { { type = 'call', tools = {} }, { type = 'event', event = { kind = 'text', text = 'x' }, streamed = true } })
   local u = dec:feed({ type = 'user', parent_tool_use_id = vim.NIL,
     message = { content = { { type = 'tool_result', tool_use_id = 't', content = 'ok' } } } }, nil)
   eq(u[1].event.sidechain, nil)
@@ -297,6 +300,29 @@ T['compact_boundary: the transcript parser\'s meta fold and a compact action'] =
   eq(b[2].post_tokens, 2)
   eq((parse.parse_record(rec))[1], { kind = 'meta', label = 'system: compact_boundary', text = 'Conversation compacted' })
   eq(#pick(a, 'unknown'), 0)
+end
+
+T['call: every request to the model, its message id, context, tool names and the subagent it belongs to'] = function()
+  local a = feed_lines({
+    '{"type":"assistant","message":{"id":"m1","model":"x","role":"assistant","content":[{"type":"tool_use","id":"ag","name":"Agent","input":{"description":"look","subagent_type":"Explore"}}],"usage":{"input_tokens":5,"cache_read_input_tokens":1000}},"parent_tool_use_id":null}',
+    '{"type":"assistant","message":{"id":"m2","model":"x","role":"assistant","content":[{"type":"tool_use","id":"g1","name":"Grep","input":{}},{"type":"tool_use","id":"r1","name":"Read","input":{}}],"usage":{"input_tokens":300}},"parent_tool_use_id":"ag"}',
+    '{"type":"assistant","message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"x"}]},"parent_tool_use_id":null,"local_command_run":{"command":"context","args":""}}',
+  }, nil, true)
+  local calls = vim.tbl_filter(function(x) return x.type == 'call' end, a)
+  eq(calls, {
+    { type = 'call', id = 'm1', tokens = 1005, tools = { 'Agent' } },
+    { type = 'call', parent = 'ag', id = 'm2', tokens = 300, tools = { 'Grep', 'Read' } },
+  })
+  eq(a[1].type, 'call') -- before the message's events, so their redraw already counts it
+end
+
+T['task: a background agent started and finished, by the tool call that started it'] = function()
+  local a = feed_lines({
+    '{"type":"system","subtype":"task_started","task_id":"k","tool_use_id":"t","description":"Scan","is_backgrounded":true}',
+    '{"type":"system","subtype":"task_notification","task_id":"k","status":"completed","usage":{"tool_uses":4}}',
+  }, nil, true)
+  local tasks = vim.tbl_filter(function(x) return x.type == 'task' end, a)
+  eq(tasks, { { type = 'task', tool = 't', status = 'started' }, { type = 'task', tool = 't', status = 'completed', tool_uses = 4 } })
 end
 
 return T

@@ -25,12 +25,15 @@ local function first_line(text)
 end
 
 ---Rows of the panel for session `s` and `width` columns: lines, highlights and, per line, what
----it stands for ({ kind = 'sent'|'running'|'queued', event = i | n = k }). Pure.
+---it stands for ({ kind = 'sent'|'running'|'queued', event = i | n = k }, or an agent's
+---`{ kind = 'agent', id }`). With `activity` (`{ now, large }`), the session's size and its
+---turn's agents follow the prompts (ui/queue_activity.lua). Pure.
 ---@param s table Session
 ---@param width integer
 ---@param icons table
+---@param activity? { now: integer, large: integer|false|nil }
 ---@return { lines: string[], hl: table[], rows: table[] }
-function M.layout(s, width, icons)
+function M.layout(s, width, icons, activity)
   local truncate = require('agent-ide.ui.layout').truncate
   local out = { lines = {}, hl = {}, rows = {} }
   local function add(text, group, row, prefix, prefix_group)
@@ -61,14 +64,19 @@ function M.layout(s, width, icons)
     add(text, nil, { kind = 'queued', n = k }, ('%d. '):format(k), 'AgentIdeSection')
   end
   if #out.lines == 1 then add('nothing sent yet', 'AgentIdeAge', nil, '', nil) end
+  if activity then
+    require('agent-ide.ui.queue_activity').append(out, s, width,
+      { icons = icons, now = activity.now, large = activity.large })
+  end
   return out
 end
 
 local function render()
   if not (Q.s and Q.buf and api.nvim_buf_is_valid(Q.buf)) then return end
   local width = valid_win(Q.win) and api.nvim_win_get_width(Q.win) or M.WIDTH
-  local icons = require('agent-ide.config').get().icons or {}
-  local l = M.layout(Q.s, width, icons)
+  local cfg = require('agent-ide.config').get()
+  local large = (cfg.context or {}).large
+  local l = M.layout(Q.s, width, cfg.icons or {}, { now = vim.uv.now(), large = large })
   vim.bo[Q.buf].modifiable = true
   api.nvim_buf_set_lines(Q.buf, 0, -1, false, l.lines)
   vim.bo[Q.buf].modifiable = false
@@ -90,7 +98,14 @@ local function open_row()
   if not row then return end
   local s = Q.s
   if row.kind == 'queued' then return chat().focus_prompt(s, false) end
-  local line = require('agent-ide.transcript.locate').line(s.events, row.event)
+  local event = row.event
+  if row.kind == 'agent' then -- the Agent call that started it
+    for i, ev in ipairs(s.events) do
+      if ev.kind == 'tool_call' and ev.id == row.id then event = i; break end
+    end
+    if not event then return end
+  end
+  local line = require('agent-ide.transcript.locate').line(s.events, event)
   local twin = chat()._windows().transcript
   if not line or not valid_win(twin) then return end
   api.nvim_set_current_win(twin)
@@ -143,7 +158,7 @@ end
 
 local function help()
   require('agent-ide.ui.help').open('Agent-IDE queue', {
-    { key = '<CR>', desc = 'sent or running prompt: go to it in the transcript; queued: focus the prompt' },
+    { key = '<CR>', desc = 'sent or running prompt: go to it in the transcript; queued: focus the prompt; agent: its call in the transcript' },
     { key = 'x', desc = 'queued prompt: take it out of the queue, back into the prompt buffer' },
     { key = 'e', desc = 'queued prompt: edit it in a buffer; :w puts it back in the queue' },
     { key = 'dd', desc = 'queued prompt: delete it (the text goes to the unnamed register)' },
@@ -153,8 +168,27 @@ local function help()
   }, { win = Q.win })
 end
 
+-- While the panel shows a running turn, its clock ticks once a second (no other work).
+local clock
+local function tick()
+  local running = Q.s and valid_win(Q.win) and (Q.s.state == 'busy' or Q.s.state == 'waiting')
+  if running and not clock then
+    clock = vim.uv.new_timer()
+    clock:start(1000, 1000, vim.schedule_wrap(function()
+      if Q.s and valid_win(Q.win) and (Q.s.state == 'busy' or Q.s.state == 'waiting') then
+        render()
+      elseif clock then
+        clock:stop(); clock:close(); clock = nil
+      end
+    end))
+  end
+end
+
 local function on_session(s, what)
-  if s == Q.s and (what == 'meta' or what == 'state' or what == 'events') then render() end
+  if s == Q.s and (what == 'meta' or what == 'state' or what == 'events' or what == 'activity') then
+    render()
+    tick()
+  end
 end
 
 local function ensure_buf(s)
@@ -213,8 +247,15 @@ function M.open(s)
     session.on_change(on_session)
   end
   render()
-  -- every prompt is listed: a panel just shown starts at the end, where the work is
-  if fresh and valid_win(Q.win) then pcall(api.nvim_win_set_cursor, Q.win, { api.nvim_buf_line_count(buf), 0 }) end
+  tick()
+  -- every prompt is listed: a panel just shown starts at the last one, where the work is
+  if fresh and valid_win(Q.win) then
+    local last = 1
+    for line, row in pairs(Q.rows) do
+      if row.kind ~= 'agent' and line > last then last = line end
+    end
+    pcall(api.nvim_win_set_cursor, Q.win, { last, 0 })
+  end
 end
 
 ---Close the panel (the session stays known, so `Q` reopens it there).

@@ -1,4 +1,6 @@
 -- How a Session reacts to decoded stream Actions and to the exit of its process.
+local activity = require('agent-ide.session.activity')
+
 local M = {}
 
 local ECHO_WARNING = 'Prompt echoed by Claude differs from what was sent'
@@ -14,7 +16,10 @@ end
 
 -- Claude started a turn by itself (e.g. after a background task): busy without a prompt.
 local function turn_begins(s)
-  if s.state ~= 'busy' and s.state ~= 'waiting' then s:_set_state('busy') end
+  if s.state ~= 'busy' and s.state ~= 'waiting' then
+    activity.turn(s.activity, vim.uv.now())
+    s:_set_state('busy')
+  end
 end
 
 local H = {}
@@ -70,7 +75,17 @@ function H.event(s, a)
   ev.streamed = nil
   if a.streamed then s.streaming = '' end
   if a.command_stdout then model_command(s) end
+  activity.event(s.activity, ev, vim.uv.now())
   s:_append(ev)
+end
+
+-- A request to the model and a background agent's task: counted for the queue panel. They come
+-- before the events of their message, whose redraw shows them.
+function H.call(s, a) activity.call(s.activity, a) end
+
+function H.task(s, a)
+  activity.task(s.activity, a, vim.uv.now())
+  s:_emit('activity')
 end
 
 function H.echo(s, a)
@@ -180,6 +195,7 @@ end
 
 function H.result(s, a)
   s:_flush_streaming()
+  activity.finish(s.activity, vim.uv.now())
   -- a mode sent with a permission answer is reported within the turn; never pending for ever
   if s.mode_by_answer then
     if s.mode_requested == s.mode_by_answer then
@@ -223,6 +239,7 @@ end
 ---@param tail string|nil stderr tail
 function M.on_exit(s, code, tail)
   s.proc, s.owned, s.echo_expected, s.interrupted = nil, false, nil, false
+  activity.finish(s.activity, vim.uv.now())
   -- requests in flight die with the process (deferred ones were sent at its start)
   if s.mode_requested or s.model_requested then
     s.mode_requested, s.model_requested = nil, nil

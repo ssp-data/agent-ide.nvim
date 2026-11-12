@@ -545,7 +545,7 @@ function M.refresh()
 end
 
 local function on_change(_, what)
-  if what == 'delta' then return end -- streaming text does not change the status
+  if what == 'delta' or what == 'activity' then return end -- streaming text, the queue panel's counts: no status change
   M.refresh()
 end
 

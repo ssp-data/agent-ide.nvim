@@ -29,7 +29,8 @@ A Neovim plugin that manages Claude Code sessions from inside Neovim: a drawer w
 | `lua/agent-ide/ui/` | drawer, chat, prompt, permission, diff, graph, search picker, help palette, highlights, icons |
 | `lua/agent-ide/ui/drafts.lua` | the prompt buffer's text kept in `drafts/<session id>.md`, brought back when the prompt opens |
 | `lua/agent-ide/ui/prompt_label.lua` | the prompt window's winbar (`↑ title · model`); which session a prompt window should follow |
-| `lua/agent-ide/ui/queue.lua`, `queue_edit.lua` | the queue panel (`Q`): prompts sent, running and queued, left of the transcript; `e`, `dd`, `J`, `K` on queued ones |
+| `lua/agent-ide/ui/queue.lua`, `queue_edit.lua`, `queue_activity.lua` | the queue panel (`Q`): prompts sent, running and queued, left of the transcript; `e`, `dd`, `J`, `K` on queued ones; below them the session's size and its turn's requests and subagents |
+| `lua/agent-ide/session/activity.lua` | what a turn does, from the stream's `call` and `task` actions and the Agent calls (pure): requests, subagents, their context and tools |
 | `lua/agent-ide/ui/drawer_legend.lua`, `drawer_session_keys.lua` | the drawer's legend of state marks (`gL`, remembered in `prefs.json`); the chat's keys on a session row |
 | `lua/agent-ide/ui/graph.lua`, `graph_render.lua`, `graph_keys.lua`, `graph_context.lua` | commit graph: window, pure lane layout, keys, which repository |
 | `lua/agent-ide/ui/fulldiff.lua`, `fulldiff_render.lua`, `fulldiff_keys.lua`, `fulldiff_open.lua`, `fulldiff_cursor.lua` | full diff (`gd`, `:AgentsDiff`): window and reload, pure rendering of a patch into lines and folds, keys, a drawer row to its scope and `<CR>` into the side-by-side view, cursor and fold state across redraws |

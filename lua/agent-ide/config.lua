@@ -101,8 +101,9 @@ defaults = function()
     -- chat's winbar shows it as `~123k`). From `threshold` tokens on (false: never) the plugin
     -- asks before a send that resumes a session without a process (Send / Compact first /
     -- Cancel: the resume reads the whole conversation again) and, on park, offers to compact
-    -- first; confirm_resume and compact_before_park turn either question off
-    context = { threshold = 50000, confirm_resume = true, compact_before_park = true },
+    -- first; confirm_resume and compact_before_park turn either question off. From `large`
+    -- tokens on (false: never) the queue panel marks the session `▲ large`
+    context = { threshold = 50000, confirm_resume = true, compact_before_park = true, large = 200000 },
     -- a soft chime when a session needs you (waiting); chime: two, soft, bell, rising or pop
     -- (`:AgentsChime <name>` plays one); cmd: the player (nil: pw-play, paplay, aplay or afplay,
     -- whichever exists), the chime's WAV path is appended
