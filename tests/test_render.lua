@@ -89,13 +89,44 @@ T['edit caps removed and added lines separately at 30 each'] = function()
     if vim.startswith(l, '│ + ') then plus = plus + 1 end
   end
   eq({ minus, plus }, { 30, 2 })
-  eq(r.lines[32], '│ … 40 more lines')
+  eq(r.lines[32], '│ … 40 more removed lines')
   eq({ r.lines[33], r.lines[34] }, { '│ + n1', '│ + n2' })
   local both = render.render({ { kind = 'tool_call', id = 'e', name = 'Edit',
     input = { file_path = '/f', old_string = string.rep('o\n', 34) .. 'o', new_string = string.rep('n\n', 31) .. 'n' } } })
   eq(#both.lines, 1 + 30 + 1 + 30 + 1)
-  eq(both.lines[32], '│ … 5 more lines')
-  eq(both.lines[#both.lines], '│ … 2 more lines')
+  eq(both.lines[32], '│ … 5 more removed lines')
+  eq(both.lines[#both.lines], '│ … 2 more added lines')
+end
+
+T['edit: unchanged lines stay as context, only the changes are - and +, the changed text is marked'] = function()
+  local r = render.render({ { kind = 'tool_call', id = 'e', name = 'Edit', input = { file_path = '/f',
+    old_string = 'local x = compute(1)\nlocal y = 2\nlocal z = 3',
+    new_string = 'local x = compute(2)\nlocal y = 2\nlocal z = 3\nlocal w = 4' } } })
+  eq(r.lines, { '▸ Edit: /f', '│ - local x = compute(1)', '│ + local x = compute(2)', '│   local y = 2', '│   local z = 3',
+    '│ + local w = 4' })
+  eq({ r.removed, r.added }, { { 2 }, { 3, 6 } })
+  -- the changed text of a removed line and the added line paired with it (after the gutter)
+  local g = #'│ '
+  eq(r.ansi, { { line = 2, col = g + 20, end_col = g + 21, hl = 'AgentIdeDiffDelText' },
+    { line = 3, col = g + 20, end_col = g + 21, hl = 'AgentIdeDiffAddText' } })
+  eq(r.edits, { 1 })
+  eq(r.folds, { { first = 1, last = 6, edit = true } })
+end
+
+T['edit: three lines of context around a change, the rest counted'] = function()
+  local old, new = {}, {}
+  for i = 1, 20 do old[i], new[i] = 'l' .. i, 'l' .. i end
+  old[21], new[21] = 'END', 'END2'
+  for i = 22, 31 do old[i], new[i] = 'l' .. i, 'l' .. i end
+  local r = render.render({ { kind = 'tool_call', id = 'e', name = 'Edit',
+    input = { file_path = '/f', old_string = table.concat(old, '\n'), new_string = table.concat(new, '\n') } } })
+  eq(r.lines, { '▸ Edit: /f', '│ … 17 unchanged lines', '│   l18', '│   l19', '│   l20', '│ - END', '│ + END2', '│   l22',
+    '│   l23', '│   l24', '│ … 7 unchanged lines' })
+  -- a pure insertion: the lines around it, nothing removed
+  r = render.render({ { kind = 'tool_call', id = 'e', name = 'Edit',
+    input = { file_path = '/f', old_string = 'a\nb', new_string = 'a\nNEW\nb' } } })
+  eq(r.lines, { '▸ Edit: /f', '│   a', '│ + NEW', '│   b' })
+  eq({ r.removed, r.added, r.ansi }, { {}, { 3 }, {} })
 end
 T['tool input shows empty objects as {} however they were decoded'] = function()
   local a = render.render({ { kind = 'tool_call', id = 'a', name = 'Foo', input = vim.json.decode('{"x":{}}') } })

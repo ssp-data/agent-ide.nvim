@@ -22,6 +22,16 @@ function M.foldexpr(lnum)
   return b and b.levels and b.levels[lnum] or '0'
 end
 
+-- Open the folds starting at `firsts` in `win` (a fold inside a closed outer fold stays).
+local function open_folds(win, firsts)
+  if #firsts == 0 or not api.nvim_win_is_valid(win) then return end
+  api.nvim_win_call(win, function()
+    for _, l in ipairs(firsts) do
+      if vim.fn.foldclosed(l) == l then vim.cmd(('silent! %dfoldopen'):format(l)) end
+    end
+  end)
+end
+
 local WIN_OPTS = {
   wrap = true,
   linebreak = true,
@@ -41,6 +51,7 @@ function M.apply_win(win, buf)
   end
   local b = bufs[buf]
   api.nvim_set_option_value('winbar', b and b.winbar or '', { scope = 'local', win = win })
+  if b and b.edits then open_folds(win, b.edits) end
   -- 'list' as it was before the raw view (ui/raw.lua) turned it off in this window
   local list = vim.w[win].agent_ide_list
   if list ~= nil then
@@ -68,6 +79,28 @@ function M.setup_buf(buf)
   require('agent-ide.util.ts_conceal').keep_off(buf, augroup)
   vim.schedule(function()
     if api.nvim_buf_is_valid(buf) then require('agent-ide.util.ts_conceal').off(buf) end
+  end)
+end
+
+---The `Edit` folds of `buf` (their first lines, 1-based) start open, so a change is seen as it
+---comes: opened now in every window showing `buf` and remembered for windows that show it
+---later (`apply_win`). Those from line `from` on are replaced; earlier ones stay as the user
+---left them.
+---@param buf integer
+---@param from integer
+---@param firsts integer[]
+function M.set_edits(buf, from, firsts)
+  M.setup_buf(buf)
+  local kept = {}
+  for _, l in ipairs(bufs[buf].edits or {}) do
+    if l < from then kept[#kept + 1] = l end
+  end
+  bufs[buf].edits = vim.list_extend(kept, firsts)
+  if #firsts == 0 then return end
+  -- after the lines just written are folded (the windows fold them on their next update)
+  vim.schedule(function()
+    if not api.nvim_buf_is_valid(buf) then return end
+    for _, win in ipairs(vim.fn.win_findbuf(buf)) do open_folds(win, firsts) end
   end)
 end
 
@@ -152,9 +185,11 @@ function M.mark_diff(buf, from, marks)
     end
   end
   local highlights = require('agent-ide.ui.highlights')
+  local prefix = require('agent-ide.transcript.ansi').PREFIX
   for _, a in ipairs(marks.ansi or {}) do
     if a.line >= from and a.line <= count then
-      highlights.ansi(a.hl)
+      -- a colour-code group is defined from its name; the Edit text groups exist already
+      if a.hl:sub(1, #prefix) == prefix then highlights.ansi(a.hl) end
       local len = #api.nvim_buf_get_lines(buf, a.line - 1, a.line, false)[1]
       if a.col < len then
         api.nvim_buf_set_extmark(buf, ns_diff, a.line - 1, a.col,

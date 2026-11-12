@@ -57,22 +57,7 @@ function M.decode(raw, line)
   return out
 end
 
-local function continuation(byte) return byte ~= nil and byte >= 0x80 and byte < 0xC0 end
-
--- The part of `a` and `b` (the lines without their markers) that differs: the common prefix
--- and suffix lengths, on character boundaries; nil when the lines have nothing in common or
--- nothing different.
-local function changed(a, b)
-  local la, lb = #a, #b
-  local p = 0
-  while p < la and p < lb and a:byte(p + 1) == b:byte(p + 1) do p = p + 1 end
-  while p > 0 and continuation(a:byte(p + 1)) do p = p - 1 end
-  local s = 0
-  while s < la - p and s < lb - p and a:byte(la - s) == b:byte(lb - s) do s = s + 1 end
-  while s > 0 and continuation(a:byte(la - s + 1)) do s = s - 1 end
-  if p + s == 0 or (p + s >= la and p + s >= lb) then return nil end
-  return p, s
-end
+local changed = require('agent-ide.util.textdiff').changed
 
 ---@class agent_ide.FullDiffRender
 ---@field lines string[]
