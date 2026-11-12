@@ -10,8 +10,10 @@ local M = {}
 -- Tool calls that start a subagent (`Task` in older Claude Code versions).
 local AGENT_TOOLS = { Agent = true, Task = true }
 
--- A main-thread request that writes at least this many tokens to the cache, and more than it
--- reads from it, wrote the conversation again: the cache had expired or the prompt changed.
+-- A main-thread request that writes at least this many tokens more to the cache than the
+-- conversation grew since the request before wrote the conversation again: the cache had
+-- expired (a pause, a resume) or the model changed. The first request of a conversation writes
+-- it the first time; that is no rewrite.
 M.REBUILT_MIN = 20000
 
 local function str(v) return type(v) == 'string' and v ~= '' and v or nil end
@@ -21,7 +23,7 @@ local function str(v) return type(v) == 'string' and v ~= '' and v or nil end
 function M.new()
   return {
     started = nil, ended = nil, calls = 0, agent_calls = 0, msgs = {},
-    read = 0, write = 0, input = 0, out = 0, rebuilt = nil, thinking = nil,
+    read = 0, write = 0, input = 0, out = 0, rebuilt = nil, thinking = nil, ctx = nil,
     agents = {}, order = {}, shells = {}, shell_order = {}, tasks = {}, todos = nil, last = nil,
   }
 end
@@ -36,10 +38,13 @@ local function keep_running(map, order)
 end
 
 ---A turn starts at `now`: the counts begin again; agents and shells still running (in the
----background) stay, and so do the todos (Claude's plan spans turns).
+---background) stay, and so do the todos (Claude's plan spans turns). `ctx` is the size of the
+---conversation known before it (from the transcript), when this activity knows none yet.
 ---@param act table
 ---@param now integer
-function M.turn(act, now)
+---@param ctx? integer
+function M.turn(act, now, ctx)
+  if not act.ctx then act.ctx = ctx end
   act.started, act.ended, act.calls, act.agent_calls, act.msgs = now, nil, 0, 0, {}
   act.read, act.write, act.input, act.out, act.rebuilt, act.thinking, act.last = 0, 0, 0, 0, nil, nil, nil
   act.order = keep_running(act.agents, act.order)
@@ -121,7 +126,12 @@ function M.call(act, c)
   end
   if not c.parent then
     act.thinking = nil -- the message came: the thinking it estimated is in it
-    if cur.write >= M.REBUILT_MIN and cur.write > cur.read and not act.rebuilt then act.rebuilt = cur.write end
+    -- the first part of a message: compare its write with how much the conversation grew
+    if not prev and c.tokens then
+      local growth = act.ctx and math.max(0, c.tokens - act.ctx) or nil
+      if growth and cur.write - growth >= M.REBUILT_MIN and not act.rebuilt then act.rebuilt = cur.write end
+      act.ctx = c.tokens
+    end
   end
   local a = c.parent and act.agents[c.parent]
   if not a then return end

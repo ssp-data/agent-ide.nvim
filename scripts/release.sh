@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Cut a release locally: changelog section, helper version, commit, annotated tag. Never pushes.
+# Requires a committed RELEASE_NOTES.md newer than the last tag (`make release-notes`). Tests are
+# not run here; run `make test` before.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -15,13 +17,16 @@ branch="$(git rev-parse --abbrev-ref HEAD)"
 [ -z "$(git status --porcelain)" ] || { echo "the working tree is not clean" >&2; exit 1; }
 git rev-parse -q --verify "refs/tags/$tag" >/dev/null && { echo "tag $tag exists" >&2; exit 1; }
 grep -q '^## \[Unreleased\]' CHANGELOG.md || { echo "CHANGELOG.md has no [Unreleased] section" >&2; exit 1; }
-notes="$(scripts/release-notes.sh Unreleased)"
-[ -n "$notes" ] || { echo "nothing under [Unreleased] in CHANGELOG.md" >&2; exit 1; }
+[ -n "$(scripts/changelog-section.sh Unreleased)" ] || { echo "nothing under [Unreleased] in CHANGELOG.md" >&2; exit 1; }
 
-if [ "${SKIP_TESTS:-}" != 1 ]; then
-  make test
-  if command -v cargo >/dev/null; then make test-helper; fi
+# The release notes: written by `make release-notes`, reviewed and committed before this.
+[ -s RELEASE_NOTES.md ] || { echo "RELEASE_NOTES.md is missing: run make release-notes VERSION=$version, review, commit" >&2; exit 1; }
+prev="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+if [ -n "$prev" ] && git cat-file -e "$prev:RELEASE_NOTES.md" 2>/dev/null && git diff --quiet "$prev" -- RELEASE_NOTES.md; then
+  echo "RELEASE_NOTES.md is unchanged since $prev: run make release-notes VERSION=$version, review, commit" >&2
+  exit 1
 fi
+notes="$(cat RELEASE_NOTES.md)"
 
 today="$(date +%Y-%m-%d)"
 awk -v v="$version" -v d="$today" '

@@ -60,7 +60,8 @@ make test-helper   # Rust tests
 make helper        # build the helper after changing helper/ or pulling
 make test-omarchy  # widget tests (node)
 make test-real     # real Claude on the subscription; not part of `make test`, run on purpose only
-make release-notes # print the changelog section that would be released
+make changelog     # print the [Unreleased] changelog section (VERSION=x.y.z for a released one)
+make release-notes VERSION=x.y.z   # draft RELEASE_NOTES.md with Claude Code; see "Releasing"
 make demo          # Neovim on the synthetic demo (demo/, see demo/README.md) under /tmp/agent-ide-demo; you drive, for screenshots
 make release VERSION=x.y.z   # see "Releasing"
 ```
@@ -124,9 +125,9 @@ Decisions taken on the owner's behalf, recorded as `Ruling:` lines in the build 
 
 Versions follow semantic versioning; tags are `vX.Y.Z`.
 
-1. `make release-notes` shows what is under `## [Unreleased]`.
-2. `make release VERSION=0.1.0` requires a clean tree on `main` and green tests, then renames the Unreleased section to the version with today's date, opens a fresh Unreleased section, sets the helper's version, commits `release vX.Y.Z` and creates an annotated tag with the notes. It does not push.
-3. Publishing is a separate, deliberate step: `make publish VERSION=0.1.0` pushes `main` and the tag and creates the GitHub release from the same notes (needs `gh`).
+1. `make release-notes VERSION=0.1.0` drafts `RELEASE_NOTES.md` from the `## [Unreleased]` section and the commits since the last tag (`PREV=vX.Y.Z` to override), with Claude Code (`claude -p`, prompt in `scripts/release-notes-prompt.md`): a short summary of what changed, **Highlights** and **Fixes**. Without `claude` it writes the sources into the file for editing by hand. Review it and commit it.
+2. `make release VERSION=0.1.0` does not run the tests (run `make test` before). It requires a clean tree on `main` and a `RELEASE_NOTES.md` changed since the last tag, then renames the Unreleased section to the version with today's date, opens a fresh Unreleased section, sets the helper's version, commits `release vX.Y.Z` and creates an annotated tag with `RELEASE_NOTES.md` as its message. It does not push.
+3. Publishing is a separate, deliberate step: `make publish VERSION=0.1.0` pushes `main` and the tag and creates the GitHub release from the tag's `RELEASE_NOTES.md` (needs `gh`).
 
 ## Git etiquette
 

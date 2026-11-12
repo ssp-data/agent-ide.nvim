@@ -1,4 +1,4 @@
-.PHONY: deps test helper test-helper bench release-notes release publish demo
+.PHONY: deps test helper test-helper bench changelog release-notes release publish demo
 
 deps:
 	@test -d deps/mini.nvim || git clone --depth 1 https://github.com/echasnovski/mini.nvim deps/mini.nvim
@@ -36,11 +36,17 @@ test-omarchy:
 install-omarchy:
 	cp -r omarchy/io.github.sspaeti.agent-ide ~/.config/omarchy/plugins/
 
-# The changelog section that a release would carry (VERSION=x.y.z prints a released one).
-release-notes:
-	@scripts/release-notes.sh $(if $(VERSION),$(VERSION),Unreleased)
+# Print a changelog section: [Unreleased] by default, VERSION=x.y.z for a released one.
+changelog:
+	@scripts/changelog-section.sh $(if $(VERSION),$(VERSION),Unreleased)
 
-# Local only: changelog section, helper version, commit and annotated tag. `make publish` pushes.
+# Draft RELEASE_NOTES.md (summary, highlights, fixes) with Claude Code from the changelog and the
+# commits since the last tag (PREV=vX.Y.Z to override). Review and commit it before `make release`.
+release-notes:
+	@scripts/release-notes.sh "$(VERSION)" "$(PREV)"
+
+# Local only, no tests (run `make test` before): changelog section, helper version, commit and
+# annotated tag with RELEASE_NOTES.md as its message. `make publish` pushes.
 release:
 	@scripts/release.sh "$(VERSION)"
 
