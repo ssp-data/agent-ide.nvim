@@ -1,6 +1,9 @@
 # Agent-IDE.nvim (Agents Drawer)
 
-A Neovim plugin to run and review all your Claude Code sessions from one place: a drawer lists every session grouped by git repository, you chat in native buffers (a prompt buffer to write, a markdown buffer to read), and you review what the agent changed with git diffs, without leaving Neovim.
+A Neovim plugin to run and review all your Claude Code sessions from one place: a drawer lists every session grouped by git repository, you chat in native buffers (a prompt buffer to write, a Markdown buffer to read), and you review what the agent changed with git diffs, without leaving Neovim.
+
+YT Video with demoing the features:
+[![YouTube Video](docs/images/main.png)](https://www.youtube.com/watch?v=0uQ2r7eiQjE)
 
 > [!NOTE]
 > **Agent-IDE is built for Claude Code.** Every feature here targets the Claude Code CLI on your subscription. Support for other agents (Gemini CLI, opencode, and Codex through Zed's [codex-acp](https://github.com/zed-industries/codex-acp)) exists on the [`acp`](../../tree/acp) branch, via the Agent Client Protocol. That branch is parked: matching every Claude Code feature for other agents isn't worth the effort yet, as I use Claude Code exclusively. The architecture is ready for other agents if that changes.
@@ -44,7 +47,7 @@ You might ask why not a terminal-based TUI, now that Herdr, Rex, and others are 
 - git integration with lazygit and other shortcuts
 - the place to navigate and being an IDE for agents, as it has so many functionalities and is super extensible and composable
 
-## Features
+### Features List (short)
 - **One drawer for all sessions**, grouped by git repository, with live state: input required, running, done, idle
 - **Chat in native buffers**: write prompts with your own Vim setup, read answers as rendered markdown, tool calls folded
 - **Never interrupts typing**: permission requests and finished sessions wait; one key jumps to the next one
@@ -56,7 +59,7 @@ You might ask why not a terminal-based TUI, now that Herdr, Rex, and others are 
 - **Fast**: Rust helper for scanning, search and file watching, with a Lua fallback
 
 
-## Why Not Tmux, Or Herdr?
+### Why Not Tmux, Or Herdr?
 Although it's not the same, the agents-IDE does an fraction of it. What's comparable is that you manage all agents sessions in one UI (currently optimized for Claude Code), but you have one "harness" for all sessions. What is not the same, it does not do any multi-plexing, obvisouly, or also can't integrate Claude Web apps, it's a terminal first, inside Neovim.
 
 ## Status
@@ -206,7 +209,9 @@ Icon keys: `open`, `closed` (fold arrows), `prompts`, `changes`, `commits`, `wor
 
 `:Agents` (or the toggle key) opens the Agents tab with the drawer. Inside the Agents tab it closes or reopens the drawer; from any other tab it switches to the Agents tab.
 
-## Drawer
+
+## Components
+### Drawer
 
 The drawer has no header line; `?` lists every key. Each row shows its state mark and title on the left and, aligned to the right edge, what needs you and how old it is; a title too long for the drawer is cut with `…`, the right part never.
 
@@ -224,19 +229,7 @@ Ages read `now`, `5m`, `3h`, `12d`, then months (`14mo`) and years (`2y`). Colou
 
 **Hidden sessions.** `H` on a session row hides it: nothing is deleted, the session only moves into a collapsed, dimmed `Hidden (n)` group, the last row of its project's `Sessions (n)` section (which counts the visible ones only). `<CR>` or `za` expands the group; its rows open like any other session, and `H` on one shows it again. Hidden sessions do not count for the project's age, order or state mark, except while one needs you: a hidden session that is waiting, busy, done-unread or failed is listed among the normal rows (and counted in the roll-up, the footer and `<leader>an`) for as long as that lasts. A project whose sessions are all hidden still shows, with `Sessions (0)` and its group. Search finds hidden sessions as usual. The list is kept in `hidden.json` (see [Privacy](#privacy)); several Neovims share it.
 
-### Deleting sessions
-
-Claude Code has no command to delete one session. `D` on a session row (also in a `Hidden` group) moves what Claude keeps of it into the plugin's trash, after a confirm (default: no). Claude's folder is the parent of `projects_dir` (by default `~/.claude`). Moved, when present:
-
-- the transcript `projects/<slug>/<id>.jsonl` and the folder beside it, `projects/<slug>/<id>/` (subagents, tool results);
-- `file-history/<id>/`, `session-env/<id>/`, `tasks/<id>/`;
-- the lines of `history.jsonl` that belong to the session (the prompts you typed); every other line stays byte for byte, and the plugin detects and carries over lines appended during the rewrite.
-
-Not removed: pasted-text cache files (`paste-cache/`), usage statistics (`stats-cache.json`) and settings. Only an inactive session can be deleted: `D` is refused while the session is active in this Neovim (park it first with `sP`), handed to native Claude, running in another Claude (asked afresh with `claude agents --json`; when that fails, nothing is deleted), or while its prompt holds unsent text. Its chat and raw buffers are closed and it leaves `hidden.json`.
-
-The trash is `stdpath('data')/agent-ide/trash/<YYYYMMDD-HHMMSS>-<id>/` (folder `0700`; files keep their modes): the moved entries in their layout, `history.jsonl` with the removed lines and `manifest.json` (where each entry came from, title, project, time). **The trash still holds the whole session**, prompts and answers included, until you empty it: for sensitive data run `:AgentsTrash empty` afterwards. `:AgentsTrash` lists the trashed sessions to restore one (refused when something is at its old place; the history lines go back in time order) or delete it for good; `:AgentsTrash empty` deletes all of them for good after a confirm. Nothing is purged automatically unless you set `trash = { keep_days = 30 }`, which purges older entries at setup.
-
-## Project scope
+### Project scope
 
 With many sessions across many repositories, large ones can bury the session you are after. The project scope narrows Agent-IDE to one repository: the drawer, search, `<leader>an` and the footer then show only that project. You can, for example, run one Neovim per project in project scope, and open the overview only now and then.
 
@@ -254,12 +247,24 @@ Open a terminal straight into a project:
 ```sh
 nvim +'Agents project'
 ```
+### Deleting sessions
 
-### Closing terminal sessions
+Claude Code has no command to delete one session. `D` on a session row (also in a `Hidden` group) moves what Claude keeps of it into the plugin's trash, after a confirm (default: no). Claude's folder is the parent of `projects_dir` (by default `~/.claude`). Moved, when present:
+
+- the transcript `projects/<slug>/<id>.jsonl` and the folder beside it, `projects/<slug>/<id>/` (subagents, tool results);
+- `file-history/<id>/`, `session-env/<id>/`, `tasks/<id>/`;
+- the lines of `history.jsonl` that belong to the session (the prompts you typed); every other line stays byte for byte, and the plugin detects and carries over lines appended during the rewrite.
+
+Not removed: pasted-text cache files (`paste-cache/`), usage statistics (`stats-cache.json`) and settings. Only an inactive session can be deleted: `D` is refused while the session is active in this Neovim (park it first with `sP`), handed to native Claude, running in another Claude (asked afresh with `claude agents --json`; when that fails, nothing is deleted), or while its prompt holds unsent text. Its chat and raw buffers are closed and it leaves `hidden.json`.
+
+The trash is `stdpath('data')/agent-ide/trash/<YYYYMMDD-HHMMSS>-<id>/` (folder `0700`; files keep their modes): the moved entries in their layout, `history.jsonl` with the removed lines and `manifest.json` (where each entry came from, title, project, time). **The trash still holds the whole session**, prompts and answers included, until you empty it: for sensitive data run `:AgentsTrash empty` afterwards. `:AgentsTrash` lists the trashed sessions to restore one (refused when something is at its old place; the history lines go back in time order) or delete it for good; `:AgentsTrash empty` deletes all of them for good after a confirm. Nothing is purged automatically unless you set `trash = { keep_days = 30 }`, which purges older entries at setup.
+
+
+#### Closing terminal sessions
 
 `X` on a session row that runs in another Claude in a tmux pane (the row shows `tmux <window>.<pane>`) ends that Claude the way you would there: Ctrl-C into the pane, and again 300 ms later (Claude's own exit). Text typed in that Claude's input box is lost. The confirm (default: no) comes first, right on the key; a session that is working or waiting for input asks a second time. Only then does the plugin check, afresh: Claude still lists the session with the same process (and still idle, if idle is what you confirmed); that process is a Claude (`claude`, or `node` for an npm install) on the terminal of a tmux pane and is that terminal's foreground program (so not suspended with Ctrl-Z behind another program, not a Claude another Neovim started, not one in a Neovim `:terminal`); the pane is in no mode (such as copy mode) and its window does not synchronize panes. If any of that does not hold, nothing is sent and a notice says why. The process itself is never signalled. If Claude still runs 5 s later, a notice says so and nothing more happens. Outside tmux `X` says it cannot reach the session (`gT` jumps to it); for a session running in this Neovim use `sP`. `:AgentsCloseIdle` closes every Claude that is idle in a tmux pane after one confirm (with their count when the drawer's live state is current), the same checks for each, and then says how many it closed and how many it skipped and why; in project scope only those of the project (`:AgentsCloseIdle!` for all).
 
-## Keys
+### Keys
 
 Global:
 
@@ -335,11 +340,11 @@ In the chat (transcript and prompt buffer, unless noted):
 
 The history buffer is markdown with folds for tool calls, results and thinking. Claude's own words, an answer or a remark between two tool calls, start with a green `●` (`AgentIdeAnswerMark`; virtual text, so yanks and the `ir` / `ar` text objects copy the words only), while it streams too. In an `Edit` fold the removed lines are red and the added ones green (`AgentIdeDiffDel`, `AgentIdeDiffAdd`), and `gd` on the fold opens the branch diff of that file. In a `Bash` fold the command has its own colour (`AgentIdeCommand`), apart from its output. Colour codes in tool output show as the colours they stand for, from your colorscheme's terminal palette, and the raw view keeps the exact bytes. Anything the viewer does not understand is shown as a fold marked `unknown`, never dropped, and truncated output says how many lines are hidden.
 
-### Help
+#### Help
 
 `?` in the drawer and `g?` in every view open the keys of that view as a palette: a query line over the list. Type to filter it (fuzzy: `legnd` finds the legend key), `<C-n>` / `<C-p>` or the arrows move, `<CR>` closes the help and presses the selected key in the window you came from, so the help doubles as a command palette. `<Esc>` leaves the query line, and `<Esc>` or `q` there closes the help. With an empty query the keys show in their groups.
 
-## Chat
+### Chat
 
 Open a session from the drawer, or start one with `+ New session` under a project. The transcript fills the main window of the Agents tab and a prompt buffer opens below it. Opening a session shows its history without starting Claude; the first prompt you send starts `claude -p` for it (resuming the session when it has a history), and the process keeps running until you park the session (`<leader>ax`, or `x` in the drawer), hand it to native Claude, or quit Neovim. Parking asks first when Claude is working, puts queued prompts back into the prompt buffer, and keeps the transcript; the next prompt resumes the session. The winbar shows the state as the drawer does (its mark and word in the same colours: `● permission: Bash`, `◐ busy`, `✓ done, unread`, `✗ failed: <reason>`, `◐ tmux 2.1`), the number of queued prompts, the project in bold and the title, and on the right the model in italic (`AgentIdeModel`) and the permission mode as a badge (`[manual]` in `AgentIdeMode`; any other mode, such as `[acceptEdits]`, `[plan]`, `[auto]` or `[bypassPermissions]`, in `AgentIdeModeHot`, linked to `WarningMsg`). It fits its window: the title is cut with `…` first, then the model, the queue count and the badge give way (the project takes what is left), and only last the state word is cut. In a tabline, a bufferline or `:ls` the chat's buffers are named after the session: `agents://<project>/<title>` for the transcript and `… · prompt` for the prompt buffer (`agents://drawer`, `agents://help` and so on for the rest); the names follow the title, never stand for a file and change nothing about `:w` or `ZZ`.
 
@@ -363,7 +368,7 @@ Open a session from the drawer, or start one with `+ New session` under a projec
 
 **Subscription.** The plugin removes `ANTHROPIC_API_KEY` from the environment of every Claude process it starts, so Claude uses your subscription login and never bills an API key (`claude.strip_api_key = false` keeps it).
 
-## Background sessions
+### Background sessions
 
 Every Claude the plugin starts runs under a **keeper**: a small headless Neovim of the plugin's own (`nvim --headless --clean -l lua/agent-ide/keeper/main.lua`), started detached, that owns Claude's pipes and keeps every line sent and received. Quitting Neovim, on purpose or by a crash, leaves Claude running: a turn goes on, an ask waits, and the prompts still queued are handed to the keeper, which sends them one after the other as each turn ends. Nothing is lost and nothing asks you before you quit.
 
@@ -373,7 +378,7 @@ An idle Claude with no Neovim attached is closed by its keeper after `keeper.idl
 
 Rules that still hold: the keeper is the plugin's own process, started with the same command, folder and environment (the API key stripped) as a direct Claude would be; nothing is ever sent to a Claude the plugin did not start; the keeper's files are in the plugin's runtime folder, 0600 in 0700, and go with the keeper. `keeper = { enabled = false }` returns to Claude as a child of Neovim.
 
-## Footer
+### Footer (Statusline in Neovim)
 
 `require('agent-ide').statusline()` gives a short text for a statusline: the state of all sessions, the model of the chat you are in (before its first prompt: the one it will start with) and the quota used (percent used, with a small bar that fills as you use it):
 
@@ -417,7 +422,7 @@ With a lazy-loaded plugin, a component that does not load it:
 
 **Status files.** Each Neovim writes `status-<pid>.json` to `$XDG_RUNTIME_DIR/agent-ide/` (else `stdpath('run')/agent-ide/`) with `version, pid, updated, level, name, waiting, review, busy` and the sessions that are not parked. A reader (such as the Omarchy indicator) combines all `status-*.json` files and ignores a file whose pid is not running, or whose `updated` is older than 90 seconds while its `level` is above 1.
 
-## Git: what an agent changed
+### Git: what an agent changed
 
 Each git project in the drawer has two more sections below its sessions: `Changes vs <base>` (everything on the branch since it left the default branch, uncommitted and untracked files included; on the default branch, uncommitted changes against `HEAD`) and `Commits on branch` (`Recent commits` on the default branch), each commit expanding to its files. The commits section starts with the `commit graph` row and `uncommitted (n)`: what is not committed yet, the working tree and the index against `HEAD` with untracked files, expanding to its files like a commit; `<CR>` on one of them diffs your working file against `HEAD`. The project row shows the branch when it is not the default branch. The lists refresh when a session of the project run in this Neovim finishes a turn, on `R`, and when you come back to the drawer after more than 5 s.
 
@@ -436,7 +441,7 @@ Each git project in the drawer has two more sections below its sessions: `Change
 
 The right side is your own file, so the one-character keys `q`, `?` and `R` are mapped only on the left (base) side; on your file they stay macro recording, backward search and Replace mode, and the `<leader>g…` and `g?` forms work on both sides. Your own buffer-local mappings on the right side are put back when the diff closes. The keys are under `keys.diff` (and `keys.chat.diff`) in the configuration; each value is a key, a list of keys, or `false`. Git is only read (`git --no-optional-locks`, never a command that writes); acting is left to lazygit.
 
-## Commit graph
+#### Commit graph
 
 `G` on any row of a git project in the drawer (the project row, its sections, a session), or `<CR>` on the `commit graph` row at the top of an expanded `Commits` section, opens the project's history as a graph in the main window, the way GitKraken or SourceTree show branches and merges. On a session that works in a linked worktree it shows that worktree. `:AgentsGraph` opens it for the current context: the chat's session, the diff view's repository, the drawer row, else the current file's (or the working directory's) repository. Outside a git repository you get a notice and nothing opens.
 
@@ -468,7 +473,7 @@ Git draws the graph (`git log --graph --date-order`); the view turns its charact
 
 Vim motions and `/` search work as usual. The keys are under `keys.graph` (`open`, `next_commit`, `prev_commit`, `all`, `refresh`, `more`, `yank`, `lazygit`, `close`, `help`), each a key, a list of keys, or `false`; the number of commits per load is `git = { graph_limit = 300 }`. Highlight groups: `AgentIdeGraph1` to `AgentIdeGraph6` (the lane colours), `AgentIdeGraphBranch`, `AgentIdeGraphRemote`, `AgentIdeGraphTag`, `AgentIdeGraphHead` and `AgentIdeGraphHash`, all overridable by a colorscheme.
 
-## Prompts
+### Prompts
 
 Reusable prompts one keypress away, in a `Prompts` node at the top of the drawer (it reads its folders only when you open it) and in a picker (`<leader>al` in the chat, or `require('agent-ide').prompts()`):
 
@@ -498,7 +503,7 @@ To keep your library in git, point `library_dir` at a folder of a repository you
 opts = { prompts = { library_dir = '~/notes/prompts' } }
 ```
 
-## Search
+### Search
 
 `<leader>as` (or `:AgentsSearch [query]`, or `require('agent-ide').search()`) opens a floating picker that searches the titles, your prompts and Claude's answers of every session, live as you type. `<leader>aP` opens the same picker on your prompts only, newest first: the prompt history of all sessions. In the drawer, `S` searches the project under the cursor.
 
@@ -527,6 +532,110 @@ Tool calls are searched only on request (`<C-f>`), tool output never. The index 
 ## How it works
 
 The plugin reads the local Claude Code transcripts (JSONL files), builds an index of projects and sessions, and renders a transcript as markdown on demand. A small Rust helper (`agent-ide-helper`) can do the scanning, parsing and file watching off the Neovim process. When the helper is not built, or fails, a pure Lua implementation takes over and gives identical results for the drawer and the history; search without the helper is limited (titles and prompts, exact words). Neither path blocks the editor: the drawer opens in under 50 ms with 60 projects, a 1 MB history in under 150 ms with the helper, and a cold Lua scan never blocks the UI for more than 16 ms at a time.
+
+### The Architecture
+
+The different pieces involved you see here with the **session states**:
+
+```mermaid
+flowchart LR
+  subgraph NVIM["Neovim (Lua)"]
+    direction TB
+    UI["UI<br/>drawer · chat transcript · prompt buffer<br/>diff · commit graph · search · help · footer"]
+    SES["Session<br/>state · queue · events · pending asks"]
+    DEC["Stream decoder<br/>claude/stream.lua (pure)"]
+    REN["Transcript render<br/>transcript/render.lua (pure)"]
+    IDX["Index client<br/>index/ + Lua fallback"]
+    GIT["git queries<br/>read-only, async"]
+    LIVE["live.lua<br/>polls claude agents --json"]
+    STAT["status.lua<br/>footer + status file"]
+  end
+
+  subgraph PROCS["Processes the plugin starts"]
+    direction TB
+    KEEP["Keeper<br/>nvim --headless -l keeper/main.lua"]
+    CLAUDE["claude -p<br/>stream-json in/out"]
+    HELP["agent-ide-helper (Rust)<br/>scan · history · watch · search"]
+  end
+
+  DISK[("~/.claude/projects/*.jsonl<br/>transcripts")]
+  REPO[("git repositories")]
+  API(["Anthropic"])
+  BAR["Omarchy bar widget"]
+  TMUX["tmux pane<br/>claude --resume"]
+
+  UI <--> SES
+  SES -- "JSON lines" --> KEEP
+  KEEP <--> CLAUDE
+  KEEP -- "replayed + live lines" --> DEC
+  DEC -- Actions --> SES
+  SES -- Events --> REN --> UI
+  CLAUDE <--> API
+  CLAUDE -- writes --> DISK
+  HELP -- reads --> DISK
+  IDX <--> HELP
+  IDX --> UI
+  GIT --> REPO
+  GIT --> UI
+  LIVE --> UI
+  SES --> STAT --> BAR
+  UI -. "gT hand-off" .-> TMUX
+```
+
+Modules jobs:
+
+| Module | Job |
+|---|---|
+| `claude/process.lua` | one long-lived `claude -p` child: spawn, write a line, read lines, stop (close stdin, SIGTERM after 500 ms). No protocol knowledge |
+| `claude/stream.lua` | Claude's stream objects → Actions (`init`, `delta`, `event`, `permission`, `result`, `quota`, `unknown`, …). Pure |
+| `session/object.lua`, `session/actions.lua` | the Session: prompt queue, state machine, pending asks, model and mode requests; reacts to Actions and to the process exit |
+| `keeper/` | the detached process that owns Claude's pipes, its socket client, discovery of running keepers |
+| `transcript/parse.lua`, `render.lua`, `live.lua` | transcript lines → Events (the same rules as the Rust parser), Events → markdown lines and folds, the live buffer that only rewrites the current turn |
+| `index/`, `helper/` | scan, history, file watching and search, in Rust over stdio with a Lua fallback |
+| `git*.lua` | read-only git (`--no-optional-locks`), parsed by pure functions, cached |
+| `live.lua` | which sessions run in another terminal (`claude agents --json` every 5 s) |
+| `status.lua` | the overall level, the statusline text, `status-<pid>.json` for the bar |
+| `ui/` | everything you see; pure layout (`tree.lua`, `layout.lua`, `graph_render.lua`) is kept apart from windows |
+
+
+The **keeper**, the agent abstraction of the **parked** `acp` branch and more are drawn in [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## Token usage
+
+Agent-IDE never talks to a model itself. Every chat is the Claude Code CLI (`claude -p` speaking stream-json), started in the project folder with your usual settings, `CLAUDE.md`, skills, hooks and MCP servers, so a prompt costs about what the same prompt costs in Claude Code's own terminal UI.
+
+What the plugin adds, and what it costs in model tokens:
+
+| What | How | Tokens |
+|---|---|---|
+| A prompt you send | one user message, sent verbatim; no extra system prompt, no buffers, diagnostics or editor state added | the same as typing it into `claude` |
+| `[attach]` and `@` | become `@<path>`, Claude Code's own file mention | the same as `@<path>` in `claude` |
+| Drawer, history, search, diffs, commit graph | read from the transcript files on disk and git | none |
+| Which sessions run elsewhere | `claude agents --json` every 5 s; it reads Claude's local session files and answers without a network | none, nothing sent to Anthropic |
+| The model picker's list | a short-lived Claude that is only asked `initialize`: no prompt, no turn, and it answers without a network (your `SessionStart` hooks do run) | none |
+| Permissions, questions, plans | answered over Claude's control channel instead of its terminal UI | none beyond what Claude Code asks anyway |
+| Footer quota | read from the rate-limit objects Claude already sends | none |
+| Raw view, queue panel, drafts | local | none |
+
+**What talks to Anthropic.** Only the `claude -p` process of a session you chat in. Everything else (the drawer, `claude agents --json`, the model picker, search, git) stays on your machine. The plugin never starts a turn on its own: no title generation, no summary, no suggestion request.
+
+The flags the plugin passes to `claude -p` (stream-json in and out, partial messages, replaying your prompt, permissions over the pipe) change what Claude prints and where it asks, not what the model reads or writes. `--bare` is not used, so hooks, skills, MCP servers and `CLAUDE.md` load as in an interactive session, and your usual `/usage` attribution applies.
+
+Where it can cost more is a **restart of a session's process**. Claude Code sends the whole conversation with every request, in the terminal as much as here: the API keeps no state between requests. While you work, that history is read from Anthropic's prompt cache at the cached rate, a fraction of the price. Opening a session from the drawer costs nothing: Claude starts only when you send a prompt. Parking (`<leader>ax`), handing a session to native Claude and back (`gT`), or quitting with `keeper = { enabled = false }` stops the process, and the next prompt starts `claude --resume`. The conversation is the same, but a new process may rebuild parts of its prompt, and after a pause the cache has expired anyway, so the first turn after a resume can read the whole conversation uncached. That is what `claude --resume` in a terminal costs too; the plugin only makes it one key away. `keeper.idle_minutes` frees memory and does not change tokens: the cache expires after a pause whether the process still runs or not.
+
+Running several sessions at once costs what each of them costs; the drawer only makes that easy.
+
+### Using the fewest tokens
+
+- **Pick the model per session.** `<leader>aM` (or `/model`) before the first prompt; `claude.model` sets the default. A smaller model is plenty for renames, small fixes and questions about the code.
+- **One task per session.** Every turn sends the conversation so far, so a long session makes every new prompt more expensive. Start unrelated work with `+ New session`; keep related work in one session so you do not explain the context twice.
+- **Do not park a session you are still working in**, and avoid going back and forth with `gT` in the middle of a task. Parking a session you are done with costs nothing.
+- **Write the whole prompt, then send it.** The prompt buffer is made for long prompts: one complete prompt costs less than a short one and three corrections, since each follow-up sends the conversation again. Keep instructions you repeat as saved or library prompts (`:w`, `<leader>W`).
+- **Attach only what is needed.** `[attach]` makes Claude read the whole file. For a large file, name the function or the lines in the prompt and let Claude read what it needs.
+- **Interrupt early.** `<C-c>` stops a turn that goes the wrong way; queued prompts come back to the prompt buffer so you can rewrite them.
+- **Look at the context.** `/context` from the `/` menu runs inside Claude Code without a model turn and shows what fills the context. `/compact` (also in the `/` menu) summarizes the conversation: that is one request that reads the whole history, and every turn after it is smaller. Worth it before you step away from a long session you will come back to; for a fresh start, `+ New session` costs nothing.
+- **Keep the shared part small.** As in Claude Code: a short `CLAUDE.md`, and only the MCP servers a project needs, since their tool definitions travel with every turn.
+- **Watch it.** The footer shows the quota windows; the raw view (`gr`) shows each turn's `result` line with its `usage`.
 
 ## Privacy
 
