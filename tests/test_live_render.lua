@@ -242,6 +242,41 @@ T['a permission reads as a question, subject first, cuts counted'] = function()
   eq(q({ tool_name = 'mcp__x__y', input = {} }), 'Allow mcp__x__y?')
 end
 
+T['the ask window: the question first, then the call, its body capped and counted'] = function()
+  local ask = require('agent-ide.transcript.ask')
+  local function texts(rows)
+    local out = {}
+    for i, r in ipairs(rows) do out[i] = r.text end
+    return out
+  end
+  -- a command is its own subject: no line repeats it above the body
+  local rows = ask.permission_rows({ tool_name = 'Bash', input = { command = 'grep -rn x\nmake', description = 'Find refs' },
+    description = 'Find refs' })
+  eq(texts(rows), { 'Allow Bash?', 'Find refs', '', '$ grep -rn x', 'make' })
+  eq({ rows[1].hl, rows[4].hl }, { 'AgentIdeAskQuestion', 'AgentIdeAskBody' })
+  eq(texts(ask.permission_rows({ tool_name = 'Edit', input = { file_path = '/x/a.txt', old_string = 'a', new_string = 'b' } })),
+    { 'Allow Edit?', '/x/a.txt', '', '- a', '+ b' })
+  local long = {}
+  for i = 1, ask.MAX_BODY + 5 do long[i] = 'l' .. i end
+  rows = ask.permission_rows({ tool_name = 'Write', input = { file_path = '/x/a.txt', content = table.concat(long, '\n') } })
+  eq(#rows, 4 + ask.MAX_BODY)
+  eq(rows[#rows], { text = '… 5 more lines in the transcript', hl = 'AgentIdeAskMore' })
+  eq(texts(ask.question_rows('Pick\na colour?', 'Several answers')), { 'Pick', 'a colour?', 'Several answers' })
+end
+
+T['the ask window lays out the question, a rule as wide as the window, numbered choices'] = function()
+  local L = require('agent-ide.ui.ask_float').layout({ { text = 'Allow Bash?', hl = 'AgentIdeAskQuestion' }, { text = 'ls' } },
+    { 'Allow', 'Deny' })
+  eq(L.lines, { 'Allow Bash?', 'ls', ('─'):rep(30), '1. Allow', '2. Deny' })
+  eq({ L.first, L.last, L.width }, { 4, 5, 30 })
+  eq(L.hls[1], { line = 1, hl = 'AgentIdeAskQuestion' })
+  eq(L.hls[2], { line = 4, hl = 'AgentIdeAskNumber', col = 0, end_col = 3 })
+  local labels = {}
+  for i = 1, 10 do labels[i] = 'c' .. i end
+  local wide = require('agent-ide.ui.ask_float').layout({ { text = ('w'):rep(40) } }, labels)
+  eq({ wide.lines[2], wide.lines[#wide.lines] }, { ('─'):rep(40), '   c10' }) -- past nine, no number
+end
+
 T['open asks show below the events and the streaming lines, unfolded, and go when answered'] = function()
   local ask = require('agent-ide.transcript.ask')
   local s, buf = stub(), new_buf()

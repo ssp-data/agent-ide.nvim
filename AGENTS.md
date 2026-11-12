@@ -27,6 +27,7 @@ A Neovim plugin that manages Claude Code sessions from inside Neovim: a drawer w
 | `lua/agent-ide/git*.lua` | read-only, asynchronous git queries, parsing, cache; `git_patch.lua` the full diff's patch per scope and its untracked reads |
 | `lua/agent-ide/prompts/` | prompt library, skills and commands, saved prompts |
 | `lua/agent-ide/ui/` | drawer, chat, prompt, permission, diff, graph, search picker, help palette, highlights, icons |
+| `lua/agent-ide/ui/ask_float.lua` | the window for Claude's asks (permission, question, plan): the question's rows, a rule, numbered choices; `chat.ask_picker = 'select'` uses `vim.ui.select` instead |
 | `lua/agent-ide/ui/drafts.lua` | the prompt buffer's text kept in `drafts/<session id>.md`, brought back when the prompt opens |
 | `lua/agent-ide/ui/prompt_label.lua` | the prompt window's winbar (`↑ title · model`); which session a prompt window should follow |
 | `lua/agent-ide/ui/queue.lua`, `queue_edit.lua`, `queue_activity.lua` | the queue panel (`Q`): prompts sent, running and queued, left of the transcript; `e`, `dd`, `J`, `K` on queued ones; below them the session's size and its turn's requests and subagents |

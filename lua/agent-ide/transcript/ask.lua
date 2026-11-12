@@ -47,6 +47,47 @@ function M.question(p)
   return out
 end
 
+M.MAX_BODY = 12 -- rows of a call's body in the ask window; the rest is counted
+
+---Rows of the ask window for a tool permission: `Allow Bash?`, Claude's description of the call
+---and the ask's reason, the subject (unless the body starts with it, as a command does), then
+---the call's body as the transcript shows it, at most `MAX_BODY` rows and the rest counted.
+---@param p table pending ask { tool_name, input, description }
+---@return agent-ide.AskRow[]
+function M.permission_rows(p)
+  local input = type(p.input) == 'table' and p.input or {}
+  local field = render.summary_field(input)
+  local subject, body = render.tool_parts(p.tool_name or '?', p.input)
+  local rows = { { text = ('Allow %s?'):format(render.first_line(p.tool_name or '?')), hl = 'AgentIdeAskQuestion' } }
+  local said = {}
+  for _, extra in ipairs({ field ~= 'description' and str(input.description) or '', str(p.description) }) do
+    for _, l in ipairs(split(extra)) do
+      if l ~= '' and not said[l] then
+        said[l] = true
+        rows[#rows + 1] = { text = l }
+      end
+    end
+  end
+  if field ~= 'command' and subject ~= '' and not said[subject] then rows[#rows + 1] = { text = subject } end
+  if #body > 0 then rows[#rows + 1] = { text = '' } end
+  for i = 1, math.min(#body, M.MAX_BODY) do rows[#rows + 1] = { text = body[i], hl = 'AgentIdeAskBody' } end
+  if #body > M.MAX_BODY then
+    rows[#rows + 1] = { text = ('… %d more lines in the transcript'):format(#body - M.MAX_BODY), hl = 'AgentIdeAskMore' }
+  end
+  return rows
+end
+
+---Rows of the ask window for one of Claude's questions: its text, then `hint` dimmed.
+---@param question string
+---@param hint? string
+---@return agent-ide.AskRow[]
+function M.question_rows(question, hint)
+  local rows = {}
+  for _, l in ipairs(split(question)) do rows[#rows + 1] = { text = l, hl = 'AgentIdeAskQuestion' } end
+  if hint then rows[#rows + 1] = { text = hint, hl = 'AgentIdeAskMore' } end
+  return rows
+end
+
 local function question_lines(p, out)
   out[#out + 1] = '▸ Question from Claude'
   for _, q in ipairs(list(type(p.input) == 'table' and p.input.questions)) do
