@@ -66,7 +66,10 @@ cp "$src/demo/repos/dataflow-docs/pipeline.py" .
 mkdir models && cp "$src/demo/repos/dataflow-docs/models/"*.sql models/
 git add -A && commit "3 weeks" "Initial commit"
 git checkout -q -b docs/lineage
-mkdir docs && cp "$src/demo/repos/dataflow-docs/docs/lineage.md" docs/
+# A stub committed on the branch, rewritten by the session and not committed yet: a real diff.
+mkdir docs && printf '# Lineage\n\norders -> customers -> revenue\n' > docs/lineage.md
+git add -A && commit "1 day" "docs: lineage stub"
+cp "$src/demo/repos/dataflow-docs/docs/lineage.md" docs/
 
 repo neomd
 cp "$src/demo/repos/neomd/main.go" "$src/demo/repos/neomd/config.yaml" .

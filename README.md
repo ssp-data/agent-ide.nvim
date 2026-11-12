@@ -6,7 +6,7 @@ YT Video with demoing the features:
 [![YouTube Video](docs/images/main.png)](https://www.youtube.com/watch?v=0uQ2r7eiQjE)
 
 > [!NOTE]
-> **Agent-IDE is built for Claude Code.** Every feature here targets the Claude Code CLI on your subscription. Support for other agents (Gemini CLI, opencode, and Codex through Zed's [codex-acp](https://github.com/zed-industries/codex-acp)) exists on the [`acp`](../../tree/acp) branch, via the Agent Client Protocol. That branch is parked: matching every Claude Code feature for other agents isn't worth the effort yet, as I use Claude Code exclusively. The architecture is ready for other agents if that changes.
+> **Agent-IDE is built for Claude Code.** Every feature here targets the Claude Code CLI on your subscription. Support for other agents (Gemini CLI, opencode, and Codex through Zed's [codex-acp](https://github.com/zed-industries/codex-acp)) exists on the [`acp`](../../tree/acp) branch, via the Agent Client Protocol. That branch is parked for now as I use Claude Code exclusively, but might change later. The architecture is ready for other agents if that changes.
 
 ## Why I built Agent-IDE?
 

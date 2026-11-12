@@ -101,15 +101,18 @@ local function press_on(text, keys, anchor)
   end
 end
 
--- Sessions that run the scenarios of demo/scenarios: permission, done (unread), failed, and one that
--- keeps running with prompts queued behind its turn (the queue panel, `Q`).
+-- Sessions that run the scenarios of demo/scenarios: a permission, a question and a plan waiting,
+-- done (unread) with a whole turn's numbers, failed, and one that keeps running with subagents, a
+-- background shell and prompts queued behind its turn (the queue panel, `Q`).
 local function run_scenarios()
   local runs = {
     { id = '2042fade-b41d-4f9a-b527-9a1f633fdd24', title = 'Backfill 2025 partitions', dir = repo_dir, prompts = { 'Backfill the 2025 partitions into orders.' } },
     { id = '5392a4f0-0939-436f-9d18-fb627d96ceb0', title = 'Fix flaky dbt test on customers', dir = repo_dir, prompts = { 'Fix the flaky freshness test on customers.' } },
     { id = 'afced7c9-3cf0-4a51-8d77-02865b03c0b0', title = 'Migrate config to TOML', dir = root .. '/git/neomd', prompts = { 'Migrate config.yaml to TOML.' } },
+    { id = '60b132d2-43e5-42ff-b527-bd69645a7ce3', title = 'Add HTML email preview', dir = root .. '/git/neomd', prompts = { 'Add a preview for HTML mails.' } },
+    { id = '4509b83c-d371-4ebe-a7fa-ad29166d552e', title = 'Grammar pass on data contracts post', dir = root .. '/git/ssp-blog', prompts = { 'Plan a grammar pass on the data contracts post.' } },
     { id = '4cc9c6cb-e2e5-4c3c-87e9-90a1d01fde20', title = 'Document lineage for the docs site', dir = root .. '/git/dataflow-docs', prompts = {
-      'Add the orders and customers models to docs/lineage.md as a mermaid diagram.',
+      'Map every ref() and source() of the models into the diagram.',
       'Link each model in the diagram to its SQL file.',
       'Add a short section on how the incremental load of orders works.',
       'Check the docs build and fix any broken links.',
@@ -118,18 +121,30 @@ local function run_scenarios()
   for _, r in ipairs(runs) do
     local path = root .. '/projects/' .. (r.dir:gsub('[/.]', '-')) .. '/' .. r.id .. '.jsonl'
     local s = require('agent-ide.session').open({ id = r.id, cwd = r.dir, path = path, title = r.title })
-    for _, p in ipairs(r.prompts) do s:send(p) end
+    -- sent once the history is loaded (it is not while Claude runs) and the size of the conversation
+    -- so far is known: the panel's `cache written again` compares the turn's first request with it
+    s:load(function()
+      require('agent-ide.session.context').refresh(s, function()
+        for _, p in ipairs(r.prompts) do s:send(p) end
+      end)
+    end)
   end
 end
 
 -- A prompt that was typed and not sent yet: the prompt buffer of the chat brings it back.
-local function write_draft()
+local function write_draft(id, cwd, text)
   local dir = root .. '/xdg/state/nvim/agent-ide/drafts'
   vim.fn.mkdir(dir, 'p')
-  local f = io.open(dir .. '/' .. chat_id .. '.md', 'w')
-  f:write('---\nagent-ide: draft\nsession: ' .. chat_id .. '\ncwd: ' .. repo_dir .. '\n---\n'
-    .. '[attach] models/schema.yml\n\nRun the full dbt build and summarise what changed in the docs.\n')
+  local f = io.open(dir .. '/' .. id .. '.md', 'w')
+  f:write('---\nagent-ide: draft\nsession: ' .. id .. '\ncwd: ' .. cwd .. '\n---\n' .. text)
   f:close()
+end
+
+-- The drafts of the demo: the chat of the README screenshot, and the lineage session (live).
+local function write_drafts()
+  write_draft(chat_id, repo_dir, '[attach] models/schema.yml\n\nRun the full dbt build and summarise what changed in the docs.\n')
+  write_draft('4cc9c6cb-e2e5-4c3c-87e9-90a1d01fde20', root .. '/git/dataflow-docs',
+    '[attach] models/customers.sql\n\nExplain this model the same way and add it to the lineage doc.\n')
 end
 
 local function open_chat()
@@ -154,8 +169,23 @@ vim.schedule(function()
   end
   require('agent-ide').toggle()
   if shot == 'live' then
-    -- the data and the running sessions only; every view is yours to open (see demo/README.md)
-    return vim.defer_fn(run_scenarios, 300)
+    -- the running sessions, every row open, and the lineage session (the one that shows the most)
+    -- with its queue panel, as `z9` and `Q` on its row would; the rest is yours (demo/README.md)
+    write_drafts()
+    vim.defer_fn(run_scenarios, 300)
+    return vim.defer_fn(function()
+      local win = drawer_win()
+      if not win then return end
+      vim.api.nvim_set_current_win(win)
+      vim.api.nvim_feedkeys('z9', 'x', false)
+      local lines = vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(win), 0, -1, false)
+      for i, l in ipairs(lines) do
+        if l:find('Document lineage', 1, true) then
+          vim.api.nvim_win_set_cursor(win, { i, 0 })
+          return vim.api.nvim_feedkeys('Q', 'x', false)
+        end
+      end
+    end, 2500)
   end
   vim.defer_fn(function()
     if drawer_win() then vim.api.nvim_set_current_win(drawer_win()) end
@@ -171,7 +201,7 @@ vim.schedule(function()
     -- the Library again: the first press can land before the Prompts node has been drawn
     vim.defer_fn(function() press_on('Library (', '<CR>') end, 800 * (#steps + 1))
     vim.defer_fn(function()
-      write_draft()
+      write_drafts()
       open_chat()
     end, 800 * (#steps + 3))
   end, 300)
