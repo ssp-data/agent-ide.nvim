@@ -31,6 +31,9 @@ local GROUPS = {
   -- the removed and added lines of an Edit fold in a transcript (red, green)
   AgentIdeDiffAdd = { fg = '#9ece6a', ctermfg = 114 },
   AgentIdeDiffDel = { fg = '#f7768e', ctermfg = 204 },
+  -- the changed text inside a modified line of an Edit fold: the line's colour as a background
+  AgentIdeDiffAddText = { fg = '#9ece6a', ctermfg = 114, reverse = true },
+  AgentIdeDiffDelText = { fg = '#f7768e', ctermfg = 204, reverse = true },
   -- the full diff view: the `@@` hunk lines and the one-line notes (binary, submodule), dimmed
   AgentIdeDiffHunk = M.dim,
   AgentIdeDiffNote = M.dim,

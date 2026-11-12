@@ -3,6 +3,7 @@
 -- removed and added lines of an `Edit`, the command of a `Bash` and the colour codes of tool
 -- output (`ansi`, the codes left out of the text) are listed too: the view colours them.
 local ansi = require('agent-ide.transcript.ansi')
+local textdiff = require('agent-ide.util.textdiff')
 
 local M = {}
 
@@ -87,10 +88,91 @@ local function summary(input)
   return ''
 end
 
+local EDIT_CONTEXT = 3 -- unchanged lines shown around a change of an Edit
+
+-- The body of an `Edit` as a diff of its old and new text: unchanged lines as context (`  `),
+-- three around each change and the rest counted (`… n unchanged lines`), removed lines `- `,
+-- added lines `+ `, at most 30 of each (the rest counted). `signs` says which index is which;
+-- `spans` marks the changed text of a removed line and the added line paired with it (0-based
+-- byte columns in the line, the group as `ansi` spans carry it).
+local function edit_body(old, new)
+  local lines, signs, spans = {}, {}, {}
+  local n_del, n_add = 0, 0
+  local function context(from, to)
+    for i = from, to do lines[#lines + 1] = '  ' .. old[i] end
+  end
+  local function gap(from, to)
+    if to < from then return end
+    if to - from + 1 <= EDIT_CONTEXT then return context(from, to) end
+    lines[#lines + 1] = ('… %d unchanged lines'):format(to - from + 1 - EDIT_CONTEXT)
+    context(to - EDIT_CONTEXT + 1, to)
+  end
+  -- unchanged lines between two changes: three after the one, three before the other
+  local function between(from, to)
+    if to - from + 1 <= 2 * EDIT_CONTEXT then return context(from, to) end
+    context(from, from + EDIT_CONTEXT - 1)
+    lines[#lines + 1] = ('… %d unchanged lines'):format(to - from + 1 - 2 * EDIT_CONTEXT)
+    context(to - EDIT_CONTEXT + 1, to)
+  end
+  local hunks = vim.diff(table.concat(old, '\n') .. '\n', table.concat(new, '\n') .. '\n', { result_type = 'indices' })
+  local pos = 1 -- the next line of `old` not shown yet
+  for _, h in ipairs(hunks or {}) do
+    local sa, ca, sb, cb = h[1], h[2], h[3], h[4]
+    local before = ca == 0 and sa or sa - 1 -- a pure insertion comes after line `sa`
+    if pos <= before then
+      if pos == 1 then gap(pos, before) else between(pos, before) end
+    end
+    local del_first = #lines + 1
+    local more_del, more_add = 0, 0 -- of this change, beyond the caps: counted right after its lines
+    for i = sa, sa + ca - 1 do
+      if n_del < CAP_EDIT_SIDE then
+        n_del = n_del + 1
+        lines[#lines + 1] = '- ' .. old[i]
+        signs[#lines] = '-'
+      else
+        more_del = more_del + 1
+      end
+    end
+    if more_del > 0 then lines[#lines + 1] = ('… %d more removed lines'):format(more_del) end
+    for j = 0, cb - 1 do
+      if n_add < CAP_EDIT_SIDE then
+        n_add = n_add + 1
+        lines[#lines + 1] = '+ ' .. new[sb + j]
+        signs[#lines] = '+'
+        -- the removed line this one replaces, when both are shown: its changed text
+        local del = del_first + j
+        if j < ca and signs[del] == '-' then
+          local a, b = old[sa + j], new[sb + j]
+          local p, s = textdiff.changed(a, b)
+          if p then
+            if #a - s > p then spans[del] = { { 2 + p, 2 + #a - s, 'AgentIdeDiffDelText' } } end
+            if #b - s > p then spans[#lines] = { { 2 + p, 2 + #b - s, 'AgentIdeDiffAddText' } } end
+          end
+        end
+      else
+        more_add = more_add + 1
+      end
+    end
+    if more_add > 0 then lines[#lines + 1] = ('… %d more added lines'):format(more_add) end
+    pos = before + 1 + ca
+  end
+  if pos <= #old then
+    -- the unchanged tail: three lines, the rest counted (no change at all: the same, from the start)
+    local last = #old
+    if last - pos + 1 <= EDIT_CONTEXT then
+      context(pos, last)
+    else
+      context(pos, pos + EDIT_CONTEXT - 1)
+      lines[#lines + 1] = ('… %d unchanged lines'):format(last - (pos + EDIT_CONTEXT - 1))
+    end
+  end
+  return lines, signs, spans
+end
+
 ---Body lines of a tool call; for an `Edit` also which of them are removed (`-`) or added (`+`)
 ---lines, for a `Bash` which are the command (`$`), by index (the `… n more lines` markers are
----none of these).
----@return string[] lines, table<integer, string>|nil signs
+---none of these), and the spans of changed text in an `Edit` (by index, as `ansi` spans).
+---@return string[] lines, table<integer, string>|nil signs, table<integer, table[]>|nil spans
 local function call_body(call)
   local input = type(call.input) == 'table' and call.input or {}
   local lines
@@ -100,14 +182,8 @@ local function call_body(call)
     for i = 1, math.min(#lines, CAP_INPUT) do signs[i] = '$' end
     return cut_lines(cap(lines, CAP_INPUT), M.MAX_FOLD_LINE), signs
   elseif call.name == 'Edit' then
-    -- each side capped on its own, so a long removal never hides the added lines
-    local old, new = split(input.old_string), split(input.new_string)
-    lines = cap(prefixed(old, '- '), CAP_EDIT_SIDE)
-    local signs, plus = {}, #lines
-    for i = 1, math.min(#old, CAP_EDIT_SIDE) do signs[i] = '-' end
-    vim.list_extend(lines, cap(prefixed(new, '+ '), CAP_EDIT_SIDE))
-    for i = 1, math.min(#new, CAP_EDIT_SIDE) do signs[plus + i] = '+' end
-    return cut_lines(lines, M.MAX_FOLD_LINE), signs
+    local lines, signs, spans = edit_body(split(input.old_string), split(input.new_string))
+    return cut_lines(lines, M.MAX_FOLD_LINE), signs, spans
   elseif call.name == 'Write' then
     lines = split(input.content)
   else
@@ -184,9 +260,10 @@ local function emit(events, results, known, out, nested)
         local j = i
         while j <= #events and events[j].sidechain do j = j + 1 end
         local group = vim.list_slice(events, i, j - 1)
-        local inner = { lines = {}, folds = {}, answers = {}, added = {}, removed = {}, commands = {}, ansi = {} }
+        local inner = { lines = {}, folds = {}, answers = {}, added = {}, removed = {}, commands = {}, ansi = {}, edits = {} }
         emit(group, results, known, inner, true)
         local first = block(('▸ subagent (%d events)'):format(#group), inner.lines)
+        -- a subagent's Edit folds are not folds of their own here (the whole group is one fold)
         for _, l in ipairs(inner.added) do out.added[#out.added + 1] = first + l end
         for _, l in ipairs(inner.removed) do out.removed[#out.removed + 1] = first + l end
         for _, l in ipairs(inner.commands) do out.commands[#out.commands + 1] = first + l end
@@ -200,14 +277,19 @@ local function emit(events, results, known, out, nested)
           plain(cut_lines(split(ev.text), M.MAX_TEXT_LINE))
           plain({ '' })
         elseif ev.kind == 'tool_call' then
-          local body, signs = call_body(ev)
+          local body, signs, edit_spans = call_body(ev)
           local n, spans = #body, {}
+          for k, list in pairs(edit_spans or {}) do spans[k] = list end
           for _, res in ipairs(results[ev.id] or {}) do
             local lines, sp = result_lines(res)
             for k, list in pairs(sp) do spans[#body + k] = list end
             vim.list_extend(body, lines)
           end
           local first = block(('▸ %s: %s'):format(first_line(ev.name or '?'), summary(ev.input)), body, spans)
+          if ev.name == 'Edit' then
+            out.folds[#out.folds].edit = true
+            out.edits[#out.edits + 1] = first
+          end
           for k = 1, signs and n or 0 do
             if signs[k] == '+' then
               out.added[#out.added + 1] = first + k
@@ -269,14 +351,15 @@ end
 
 ---Render events turn by turn; the result is the concatenation of each turn rendered alone.
 ---`answers`: the first line of every main-thread `text` event (a subagent's text is not one).
----`added`, `removed`: the `+` and `-` lines of every `Edit`, a subagent's included.
+---`added`, `removed`: the `+` and `-` lines of every `Edit`, a subagent's included; `edits`: the first
+---line of every `Edit` fold of its own (they start open; a subagent's are inside its fold).
 ---`commands`: the command lines of every `Bash` call, a subagent's included.
 ---`ansi`: the coloured spans of tool results (0-based byte columns, end exclusive), with the
 ---highlight group `ansi.spec` defines.
 ---@param events table[]
----@return { lines: string[], folds: { first: integer, last: integer }[], answers: integer[], added: integer[], removed: integer[], commands: integer[], ansi: { line: integer, col: integer, end_col: integer, hl: string }[] }
+---@return { lines: string[], folds: { first: integer, last: integer, edit: boolean|nil }[], answers: integer[], added: integer[], removed: integer[], commands: integer[], ansi: { line: integer, col: integer, end_col: integer, hl: string }[], edits: integer[] }
 function M.render(events)
-  local out = { lines = {}, folds = {}, answers = {}, added = {}, removed = {}, commands = {}, ansi = {} }
+  local out = { lines = {}, folds = {}, answers = {}, added = {}, removed = {}, commands = {}, ansi = {}, edits = {} }
   local first = 1
   for i = 2, #events + 1 do
     if i > #events or M.starts_turn(events[i]) then

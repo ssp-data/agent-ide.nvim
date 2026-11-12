@@ -106,12 +106,13 @@ end
 SEQ.turns300 = many_turns(300)
 
 local function concat_turns(events)
-  local lines, folds, answers, added, removed, commands, ansi = {}, {}, {}, {}, {}, {}, {}
+  local lines, folds, answers, added, removed, commands, ansi, edits = {}, {}, {}, {}, {}, {}, {}, {}
   local seg = {}
   local function flush()
     if #seg == 0 then return end
     local r = render.render(seg)
-    for _, f in ipairs(r.folds) do folds[#folds + 1] = { first = f.first + #lines, last = f.last + #lines } end
+    for _, f in ipairs(r.folds) do folds[#folds + 1] = { first = f.first + #lines, last = f.last + #lines, edit = f.edit } end
+    for _, e in ipairs(r.edits) do edits[#edits + 1] = e + #lines end
     for _, a in ipairs(r.answers) do answers[#answers + 1] = a + #lines end
     for _, l in ipairs(r.added) do added[#added + 1] = l + #lines end
     for _, l in ipairs(r.removed) do removed[#removed + 1] = l + #lines end
@@ -127,7 +128,8 @@ local function concat_turns(events)
     seg[#seg + 1] = ev
   end
   flush()
-  return { lines = lines, folds = folds, answers = answers, added = added, removed = removed, commands = commands, ansi = ansi }
+  return { lines = lines, folds = folds, answers = answers, added = added, removed = removed, commands = commands, ansi = ansi,
+    edits = edits }
 end
 
 T['render is compositional over turns'] = function()
