@@ -889,4 +889,97 @@ T['gd inside a subagent fold: a nested Edit opens its file, a look-alike in a ne
   wait_for(function() local v = view(); return v ~= vim.NIL and v.path == 'a.lua' end, 'nested Edit header')
 end
 
+-- The full diff ----------------------------------------------------------------------------------
+
+-- The full diff view as seen: nil when closed.
+local function fd()
+  return child.lua_get([[(function()
+    local v = require('agent-ide.ui.fulldiff').state()
+    if not v or not vim.api.nvim_buf_is_valid(v.buf) then return vim.NIL end
+    local w = vim.fn.win_findbuf(v.buf)[1]
+    local out = { root = v.root, kind = v.scope.kind, loading = v.loading, short = v.scope.commit and v.scope.commit.short,
+      lines = vim.api.nvim_buf_get_lines(v.buf, 0, -1, false), shown = w ~= nil }
+    if w then out.cursor = vim.api.nvim_win_get_cursor(w)[1] end
+    return out
+  end)()]])
+end
+
+local function wait_fd(kind)
+  wait_for(function() local v = fd(); return v ~= vim.NIL and v.kind == kind and v.loading == false end, 'full diff ' .. kind)
+  return fd()
+end
+
+T['drawer: full diff rows in Changes and Commits; <CR> opens the branch / commits scope'] = function()
+  start()
+  child.lua('require("agent-ide").toggle()')
+  press_on(' r  ')
+  press_on('Changes vs main (5)')
+  wait_for(function() return has_line(drawer_lines(), 'full diff · gd') ~= nil end, 'full diff row')
+  press_on('Commits on branch (2)')
+  wait_for(function()
+    local l = drawer_lines()
+    local first = has_line(l, 'full diff · gd')
+    return first ~= nil and has_line({ unpack(l, first + 1) }, 'full diff · gd') ~= nil
+  end, 'second full diff row')
+  local l = drawer_lines()
+  eq(has_line(l, 'Changes vs main') < has_line(l, 'full diff · gd'), true)
+  eq(has_line(l, 'full diff · gd') < has_line(l, 'M a.lua'), true)
+  local graph_row = has_line(l, 'commit graph · G')
+  eq(l[graph_row + 1]:find('full diff · gd', 1, true) ~= nil, true)
+  eq(l[graph_row + 2]:find('uncommitted', 1, true) ~= nil, true)
+  press_on('full diff · gd')
+  local v = wait_fd('branch')
+  eq({ v.root, v.lines[1]:sub(1, 9) }, { repo, 'v M a.lua' })
+  child.lua('local s = require("agent-ide.ui.drawer").state(); vim.api.nvim_set_current_win(s.win)')
+  child.lua('vim.api.nvim_win_set_cursor(require("agent-ide.ui.drawer").state().win, { ..., 0 })', { graph_row + 1 })
+  child.type_keys('<CR>')
+  v = wait_fd('commits')
+  eq(has_line(v.lines, 'v ? u.txt'), nil) -- committed only
+end
+
+T['gd on rows: Changes file focuses that file; a commit row its commit; uncommitted its scope; Prompts: a notice'] = function()
+  start()
+  child.lua('require("agent-ide").toggle()')
+  press_on(' r  ')
+  press_on('Changes vs main (5)')
+  press_on('      D del.txt', 'gd')
+  local v = wait_fd('branch')
+  eq(v.lines[v.cursor]:sub(1, 11), 'v D del.txt')
+  press_on('Commits on branch (2)')
+  press_on(' two ', 'gd')
+  v = wait_fd('commit')
+  eq(v.short, vim.trim(R.git(repo, { 'rev-parse', '--short', 'HEAD' })))
+  eq(has_line(v.lines, 'v A new.lua') ~= nil, true)
+  press_on('uncommitted (2)', 'gd')
+  v = wait_fd('head')
+  eq(has_line(v.lines, 'v ? u.txt') ~= nil, true)
+  press_on(' r  ', 'gd') -- the project row: the branch scope
+  wait_fd('branch')
+  press_on('Prompts', 'gd')
+  eq(child.lua_get('_G.notes[#_G.notes]'), 'Agent-IDE: not a git project')
+  eq(fd().kind, 'branch')
+end
+
+T['? lists gd; a drawer gd while the graph shows replaces it, q goes to the chat'] = function()
+  start()
+  child.lua('require("agent-ide").toggle()')
+  press_on(' r  ')
+  press_on('Work on it')
+  wait_for(function() return child.lua_get('require("agent-ide.ui.chat")._windows().prompt ~= nil') end, 'chat')
+  press_on('Work on it', 'G')
+  wait_for(function() return child.lua_get('require("agent-ide.ui.graph").state() ~= nil') end, 'graph')
+  press_on('Work on it', 'gd')
+  wait_fd('branch')
+  eq(child.lua_get('require("agent-ide.ui.graph").state()'), vim.NIL)
+  child.lua('require("agent-ide.ui.fulldiff").close()')
+  wait_for(function() return child.lua_get('require("agent-ide.ui.chat")._windows().prompt ~= nil') end, 'chat back')
+  eq(child.lua_get('vim.b[vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().transcript)].agent_ide_session'), ID)
+  local rows = child.lua_get('require("agent-ide.ui.drawer").help_rows()')
+  local found = false
+  for _, r in ipairs(rows) do
+    if r.key == 'gd' then found = r.desc end
+  end
+  eq(found, 'full diff of the row: its project, section, commit or file')
+end
+
 return T

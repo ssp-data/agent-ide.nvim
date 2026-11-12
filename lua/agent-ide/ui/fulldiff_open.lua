@@ -1,9 +1,35 @@
--- From the full diff into the side-by-side diff view (`<CR>`): the file under the cursor with
--- the list and mode the drawer would use for it.
+-- Into and out of the full diff: a drawer row to its scope (`gd`), and from the full diff into
+-- the side-by-side diff view (`<CR>`) with the list and mode the drawer would use for the file.
 local cache = require('agent-ide.git_cache')
 local git = require('agent-ide.git')
 
 local M = {}
+
+---Open the full diff a drawer row stands for: the row's project, section, commit or file. The
+---scope follows the row (its work tree as `G` picks it); a file row puts the cursor on that
+---file. false when the row is not in a git project.
+---@param node table|nil
+---@return boolean
+function M.from_node(node)
+  local root, project = require('agent-ide.ui.graph_context').node_root(node)
+  if not root then return false end
+  local scope, focus = { kind = 'branch' }, nil
+  local t = node.type
+  if t == 'git_file' then
+    scope = { kind = node.mode == 'commit' and 'commit' or node.mode == 'head' and 'head' or 'branch', commit = node.commit }
+    focus = node.file.path
+  elseif t == 'git_commit' then
+    scope = { kind = 'commit', commit = node.commit }
+  elseif t == 'git_uncommitted' then
+    scope = { kind = 'head' }
+  elseif t == 'git_fulldiff' then
+    scope = { kind = node.kind }
+  elseif t == 'git_graph' or (t == 'git_section' and node.name == 'commits') then
+    scope = { kind = 'commits' }
+  end
+  require('agent-ide.ui.fulldiff').open({ root = root, project = project, scope = scope, focus_path = focus })
+  return true
+end
 
 local function notify(msg) vim.notify('Agent-IDE: ' .. msg, vim.log.levels.INFO) end
 

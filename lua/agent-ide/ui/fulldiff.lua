@@ -103,8 +103,8 @@ local function draw()
   if not (V and api.nvim_buf_is_valid(V.buf)) then return end
   local ws = wins()
   local keep = {}
-  for _, w in ipairs(ws) do keep[w] = V.restore or cursor.key(w, V.t) end
-  V.restore = nil
+  for _, w in ipairs(ws) do keep[w] = (V.res and V.restore) or cursor.key(w, V.t) end
+  if V.res then V.restore = nil end -- a `loading…` draw keeps it for the content
   local lines, t, note_hl
   if V.res then
     V.closed = cursor.read_closed(ws[1], V.t) or V.closed

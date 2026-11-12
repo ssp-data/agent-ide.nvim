@@ -494,6 +494,7 @@ local ACTIONS = {
   { 'close', 'close drawer' },
   { 'help', 'this help (type to filter; <CR> presses the key)' },
   { 'graph', 'commit graph of the project (or the row\'s worktree)' },
+  { 'full_diff', 'full diff of the row: its project, section, commit or file' },
   { 'scope', 'scope: only this project / all projects' },
   { 'legend', 'show or hide the legend of the state marks' },
   { 'next_session', 'open the next session of the project (from the row, else the chat shown)' },
@@ -573,6 +574,10 @@ function actions.graph()
   local root, p = graph.node_root(current_node())
   if not root then return notify('not a git project') end
   graph.open({ root = root, project = p })
+end
+
+function actions.full_diff()
+  if not require('agent-ide.ui.fulldiff_open').from_node(current_node()) then notify('not a git project') end
 end
 
 ---Help rows of the drawer: its own keys as configured, `/`, the row keys of the providers and
