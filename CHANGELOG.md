@@ -6,6 +6,7 @@ All notable changes to Agent-IDE.nvim are listed here. The format follows [Keep 
 
 ### Added
 
+- `Q` (`keys.chat.queue`) also works in the drawer, on any row, and in the queue panel itself: show or hide the panel of the chat; on a session row while no chat is open it opens that session with its panel. The drawer's `?` lists it.
 - `r` on a drawer session row names the session: the drawer, the chat's winbar, the buffer names, search results and the footer show your name instead of Claude's title. Kept in the plugin's own `names.json` (`keys.drawer.rename`); Claude's files are not touched. An empty answer brings the title back.
 - The chat's winbar shows the size of the conversation beside the model (`~123k`: the input tokens of the session's last request, what the next prompt reads again), live while Claude runs and from the transcript for a parked session (`AgentIdeContext`).
 - A send that resumes a parked session with a large conversation asks first: Send, Compact first (`/compact` goes first, the prompt after it) or Cancel. From `context.threshold` tokens on (50 000); `context.confirm_resume = false` turns the question off.

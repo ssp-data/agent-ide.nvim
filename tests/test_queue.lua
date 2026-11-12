@@ -195,9 +195,39 @@ T['Q opens the panel left of the transcript; it shows the running and queued pro
   child.lua('vim.api.nvim_set_current_win(...)', { panel().win })
   child.lua('_G.rows = nil; require("agent-ide.ui.help").open = function(_, rows) _G.rows = rows end')
   child.type_keys('g?')
-  eq(vim.tbl_map(function(r) return r.key end, child.lua_get('_G.rows')), { '<CR>', 'x', 'q' })
+  eq(vim.tbl_map(function(r) return r.key end, child.lua_get('_G.rows')), { '<CR>', 'x', 'q', 'Q / <leader>aQ' })
   child.type_keys('q')
   eq(panel().win, nil)
+end
+
+T['Q in the drawer: opens the session under the cursor with its panel, then toggles; Q in the panel closes; ? lists it'] = function()
+  start({})
+  expand()
+  drawer_cursor_to('Alpha basics')
+  local dwin = child.lua_get('require("agent-ide.ui.drawer").state().win')
+  child.type_keys('Q')
+  wait_for(function() return current() ~= vim.NIL and panel().win ~= nil end, 'chat and panel')
+  eq(current().id, FIXTURE_ID)
+  eq(panel().sid, FIXTURE_ID)
+  eq(child.lua_get('vim.api.nvim_get_current_win()'), dwin) -- the focus stays in the drawer
+  -- on a non-session row: toggles the panel of the chat shown
+  drawer_cursor_to('Sessions (')
+  child.type_keys('Q')
+  eq(panel().win, nil)
+  child.type_keys('Q')
+  eq(panel().win ~= nil, true)
+  -- Q inside the panel closes it
+  child.lua('vim.api.nvim_set_current_win(...)', { panel().win })
+  child.type_keys('Q')
+  eq(panel().win, nil)
+  -- the drawer's help lists it
+  child.lua('vim.api.nvim_set_current_win(...)', { dwin })
+  local rows = child.lua_get('require("agent-ide.ui.drawer").help_rows()')
+  local found
+  for _, r in ipairs(rows) do
+    if r.key and r.key:find('Q', 1, true) and r.desc:find('queue panel', 1, true) then found = r end
+  end
+  eq(found ~= nil, true)
 end
 
 return T

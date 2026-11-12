@@ -290,8 +290,11 @@ T['a remapped chat key applies in the drawer too; the help lists them under a he
   local at
   for i, r in ipairs(rows) do if r.heading == 'On a session row' then at = i end end
   eq(at ~= nil, true)
-  local after = vim.tbl_map(function(r) return r.key end, vim.list_slice(rows, at + 1))
+  local after = vim.tbl_map(function(r) return r.key end, vim.list_slice(rows, at + 1, at + 3))
   eq(after, { '<leader>aM / <leader>M', 'gm', '<C-c>' }) -- native: the drawer's own tmux key (gT)
+  -- then the keys that work on any row
+  eq(rows[at + 4].heading, 'On any row')
+  eq({ rows[at + 5].key, #rows }, { 'Q / <leader>aQ', at + 5 })
 end
 
 return T

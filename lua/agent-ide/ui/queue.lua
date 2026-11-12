@@ -122,6 +122,7 @@ local function help()
     { key = '<CR>', desc = 'sent or running prompt: go to it in the transcript; queued: focus the prompt' },
     { key = 'x', desc = 'queued prompt: take it out of the queue, back into the prompt buffer' },
     { key = 'q', desc = 'close the panel' },
+    { key = require('agent-ide.util.keys').label(require('agent-ide.ui.chat_keys').keys().queue) or 'Q', desc = 'close the panel (the same key shows it again from the chat or the drawer)' },
   }, { win = Q.win })
 end
 
@@ -139,6 +140,9 @@ local function ensure_buf(s)
   map('<CR>', open_row, 'go to the prompt')
   map('x', unqueue, 'take a queued prompt back')
   map('q', function() M.close() end, 'close')
+  for _, lhs in ipairs(require('agent-ide.util.keys').list(require('agent-ide.ui.chat_keys').keys().queue)) do
+    map(lhs, function() M.close() end, 'close')
+  end
   map('g?', help, 'help')
   Q.buf = buf
   return buf
