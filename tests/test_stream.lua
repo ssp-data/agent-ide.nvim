@@ -5,15 +5,15 @@ local T = MiniTest.new_set()
 
 local function slurp(p) local f = assert(io.open(p)); local s = f:read('a'); f:close(); return s end
 
--- Feed raw lines to one decoder; return the flat Action list. The `call` and `task` actions
--- (the queue panel's counts, tested on their own below) are left out unless `all`.
+-- Feed raw lines to one decoder; return the flat Action list. The `call`, `task` and `thinking`
+-- actions (the queue panel's counts, tested on their own below) are left out unless `all`.
 local function feed_lines(lines, dec, all)
   dec = dec or stream.new()
   local out = {}
   for _, line in ipairs(lines) do
     local obj = vim.json.decode(line, parse.DECODE_OPTS)
     for _, a in ipairs(dec:feed(obj, line)) do
-      if all or (a.type ~= 'call' and a.type ~= 'task') then out[#out + 1] = a end
+      if all or not (a.type == 'call' or a.type == 'task' or a.type == 'thinking') then out[#out + 1] = a end
     end
   end
   return out
@@ -310,8 +310,8 @@ T['call: every request to the model, its message id, context, tool names and the
   }, nil, true)
   local calls = vim.tbl_filter(function(x) return x.type == 'call' end, a)
   eq(calls, {
-    { type = 'call', id = 'm1', tokens = 1005, tools = { 'Agent' } },
-    { type = 'call', parent = 'ag', id = 'm2', tokens = 300, tools = { 'Grep', 'Read' } },
+    { type = 'call', id = 'm1', tokens = 1005, tools = { 'Agent' }, input = 5, read = 1000 },
+    { type = 'call', parent = 'ag', id = 'm2', tokens = 300, tools = { 'Grep', 'Read' }, input = 300 },
   })
   eq(a[1].type, 'call') -- before the message's events, so their redraw already counts it
 end
@@ -322,7 +322,42 @@ T['task: a background agent started and finished, by the tool call that started 
     '{"type":"system","subtype":"task_notification","task_id":"k","status":"completed","usage":{"tool_uses":4}}',
   }, nil, true)
   local tasks = vim.tbl_filter(function(x) return x.type == 'task' end, a)
-  eq(tasks, { { type = 'task', tool = 't', status = 'started' }, { type = 'task', tool = 't', status = 'completed', tool_uses = 4 } })
+  eq(tasks, {
+    { type = 'task', id = 'k', tool = 't', status = 'started', desc = 'Scan', background = true },
+    { type = 'task', id = 'k', tool = 't', status = 'completed', tool_uses = 4 },
+  })
+end
+
+T['task: a background shell by its task id; its update carries the status'] = function()
+  local a = feed_lines({
+    '{"type":"system","subtype":"task_started","task_id":"sh","description":"npm run dev","is_backgrounded":true,"task_type":"local_bash"}',
+    '{"type":"system","subtype":"task_updated","task_id":"sh","patch":{"status":"killed"}}',
+  }, nil, true)
+  local tasks = vim.tbl_filter(function(x) return x.type == 'task' end, a)
+  eq(tasks, {
+    { type = 'task', id = 'sh', status = 'started', task_type = 'local_bash', desc = 'npm run dev', background = true },
+    { type = 'task', id = 'sh', status = 'killed', task_type = 'local_bash' },
+  })
+end
+
+T['thinking: the main thread estimate; a subagent one is dropped'] = function()
+  local a = feed_lines({
+    '{"type":"system","subtype":"thinking_tokens","estimated_tokens":800,"estimated_tokens_delta":10}',
+    '{"type":"system","subtype":"thinking_tokens","estimated_tokens":5,"parent_tool_use_id":"x"}',
+  }, nil, true)
+  eq(a, { { type = 'thinking', tokens = 800 } })
+end
+
+T['result: cost, per-model usage (largest first), api error status and terminal reason'] = function()
+  local a = feed_lines({ vim.json.encode({ type = 'result', is_error = true, result = 'boom', total_cost_usd = 3.1,
+    num_turns = 4, duration_api_ms = 9000, api_error_status = 529, terminal_reason = 'api_error',
+    modelUsage = {
+      ['claude-opus-5-5'] = { inputTokens = 1, outputTokens = 2, cacheReadInputTokens = 3, cacheCreationInputTokens = 4, costUSD = 0.1 },
+      ['claude-fable-5-1'] = { inputTokens = 10, outputTokens = 20, cacheReadInputTokens = 3000, costUSD = 3 },
+    } }) })
+  eq(a, { { type = 'result', is_error = true, text = 'boom', cost = 3.1, num_turns = 4, duration_api_ms = 9000,
+    api_error_status = 529, terminal_reason = 'api_error', models = {
+      { model = 'claude-fable-5-1', tokens = 3030, cost = 3 }, { model = 'claude-opus-5-5', tokens = 10, cost = 0.1 } } } })
 end
 
 return T

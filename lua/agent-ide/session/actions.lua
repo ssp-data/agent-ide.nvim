@@ -193,9 +193,32 @@ function H.compact(s, a)
   s:_emit('meta')
 end
 
+function H.thinking(s, a) activity.thinking(s.activity, a.tokens) end -- the panel's clock shows it
+
+-- What an API error status means, in a few words (the status and Claude's own text stay).
+local API_ERRORS = {
+  [400] = 'bad request', [401] = 'not logged in or the login expired', [403] = 'not allowed',
+  [404] = 'not found (the model?)', [413] = 'request too large (the conversation?)',
+  [429] = 'rate or usage limit reached', [500] = 'server error at Anthropic', [529] = 'Anthropic is overloaded',
+}
+
+-- The error line of a failed turn: Claude's text, then the API status and the reason it ended.
+local function failure_text(a)
+  local text = a.text or 'Turn failed'
+  local why = {}
+  if a.api_error_status then
+    local what = API_ERRORS[a.api_error_status] or (a.api_error_status >= 500 and 'server error' or nil)
+    why[#why + 1] = ('API error %d%s'):format(a.api_error_status, what and (': ' .. what) or '')
+  end
+  if a.terminal_reason and a.terminal_reason ~= 'completed' then why[#why + 1] = 'ended: ' .. a.terminal_reason end
+  if #why > 0 then text = text .. '\n(' .. table.concat(why, '; ') .. ')' end
+  return text
+end
+M._failure_text = failure_text
+
 function H.result(s, a)
   s:_flush_streaming()
-  activity.finish(s.activity, vim.uv.now())
+  activity.finish(s.activity, vim.uv.now(), a)
   -- a mode sent with a permission answer is reported within the turn; never pending for ever
   if s.mode_by_answer then
     if s.mode_requested == s.mode_by_answer then
@@ -205,7 +228,7 @@ function H.result(s, a)
     s.mode_by_answer = nil
   end
   s.echo_expected = nil
-  if a.is_error then s:_append(live_meta('error', a.text or 'Turn failed')) end
+  if a.is_error then s:_append(live_meta('error', failure_text(a))) end
   clear_permissions(s)
   -- after an interrupt or while parking, the queue does not go on by itself
   local hold = s.interrupted or s.parking
@@ -239,7 +262,7 @@ end
 ---@param tail string|nil stderr tail
 function M.on_exit(s, code, tail)
   s.proc, s.owned, s.echo_expected, s.interrupted = nil, false, nil, false
-  activity.finish(s.activity, vim.uv.now())
+  activity.stopped(s.activity, vim.uv.now())
   -- requests in flight die with the process (deferred ones were sent at its start)
   if s.mode_requested or s.model_requested then
     s.mode_requested, s.model_requested = nil, nil
