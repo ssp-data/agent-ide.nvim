@@ -88,6 +88,17 @@ function M.graph(opts)
   graph.open_context()
 end
 
+---Full diff (every change of the branch in one buffer) of the repository of the current
+---context, as `M.graph` finds it; `opts.root` / `opts.dir` pick one, `opts.scope` another scope.
+---@param opts? { root?: string, dir?: string, project?: table, scope?: table }
+function M.full_diff(opts)
+  local fulldiff = require('agent-ide.ui.fulldiff')
+  if opts and (opts.root or opts.dir) then
+    return fulldiff.open(vim.tbl_extend('keep', opts, { scope = { kind = 'branch' } }))
+  end
+  fulldiff.open_context()
+end
+
 ---@return string text for a statusline (percent signs doubled)
 function M.statusline() return require('agent-ide.status').statusline() end
 

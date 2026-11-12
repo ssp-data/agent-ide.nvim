@@ -104,6 +104,13 @@ local loaders = {
       with_base(root, e, function(b) git.commits(root, done, b) end)
     end)
   end,
+  -- the files of the commits scope of the full diff: the branch's commits against their start
+  -- (git_patch.start), committed changes only
+  committed = function(root)
+    load(root, 'committed', function(done, e)
+      with_base(root, e, function(b) require('agent-ide.git_patch').committed(root, b, done) end)
+    end)
+  end,
   -- what is not committed yet: the working tree and the index against HEAD, untracked files
   -- included (the same query as the branch changes, with HEAD for the base)
   uncommitted = function(root)
@@ -145,6 +152,13 @@ function M.commits(root)
   return e.data.commits, e.data.base
 end
 
+---@return table[]|nil files of the branch's commits (merge-base to HEAD; the listed recent commits on the default branch)
+function M.committed(root)
+  local e = entry(root)
+  if not e.loaded.committed then loaders.committed(root) end
+  return e.data.committed
+end
+
 ---@return table[]|nil files changed in the working tree and the index against HEAD (untracked too)
 function M.uncommitted(root)
   local e = entry(root)
@@ -166,7 +180,7 @@ end
 
 local getters -- kind -> getter, filled below
 
----Call `cb(value)` once `kind` ('changes', 'commits', 'uncommitted', 'base', 'files:<hash>') of `root` is
+---Call `cb(value)` once `kind` ('changes', 'commits', 'committed', 'uncommitted', 'base', 'files:<hash>') of `root` is
 ---loaded (at once when it already is), starting the load when needed.
 ---@param root string
 ---@param kind string
@@ -255,7 +269,8 @@ function M.off_update(fn)
   end
 end
 
-getters = { changes = M.changes, commits = M.commits, base = M.base, head = M.head, uncommitted = M.uncommitted }
+getters = { changes = M.changes, commits = M.commits, base = M.base, head = M.head, uncommitted = M.uncommitted,
+  committed = M.committed }
 
 ---Test only: store `value` as loaded data of `kind` (bumps the generation: running loads are dropped).
 function M._set(root, kind, value)

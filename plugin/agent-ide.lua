@@ -16,6 +16,9 @@ end, { nargs = '*', desc = 'Agent-IDE: search all sessions' })
 vim.api.nvim_create_user_command('AgentsGraph', function() require('agent-ide').graph() end,
   { desc = 'Agent-IDE: commit graph of the current project' })
 
+vim.api.nvim_create_user_command('AgentsDiff', function() require('agent-ide').full_diff() end,
+  { desc = 'Agent-IDE: full diff of the current project\'s branch' })
+
 -- In project scope only that project's sessions; `!` means every project.
 vim.api.nvim_create_user_command('AgentsCloseIdle', function(o) require('agent-ide.ui.tmux_close').command(o.bang) end,
   { bang = true, desc = 'Agent-IDE: close every Claude idle in a tmux pane (asks first; ! for all projects)' })

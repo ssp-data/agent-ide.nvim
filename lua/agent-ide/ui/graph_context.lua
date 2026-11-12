@@ -16,13 +16,17 @@ function M.node_root(node)
   return node.root or (node.session and tree_of(node.session.cwd)) or p.root, p
 end
 
----What `:AgentsGraph` opens: the open graph's repository, the diff view's, the chat session's,
----the drawer row's, else the work tree of the current file (or of the working directory).
+---What `:AgentsGraph` (and `:AgentsDiff`) opens: the open graph's repository, the full diff's,
+---the diff view's, the chat session's, the drawer row's, else the work tree of the current file
+---(or of the working directory).
 ---@param view table|nil the open graph (ui/graph.lua state)
 ---@return { root?: string, dir?: string, project?: table }
 function M.target(view)
   local buf, win = api.nvim_get_current_buf(), api.nvim_get_current_win()
   if view and buf == view.buf then return { root = view.root, project = view.project } end
+  local fulldiff = package.loaded['agent-ide.ui.fulldiff']
+  local fd = fulldiff and fulldiff.state()
+  if fd and buf == fd.buf then return { root = fd.root, project = fd.project } end
   local diff = package.loaded['agent-ide.ui.diff']
   local d = diff and diff.state()
   if d and (win == d.left or win == d.right) then return { root = d.root, project = d.project } end
