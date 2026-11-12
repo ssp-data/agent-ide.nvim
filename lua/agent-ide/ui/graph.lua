@@ -209,6 +209,19 @@ function A.yank()
   notify('yanked ' .. hash)
 end
 
+---The full diff of the commit under the cursor (on a file row: with the cursor on that file);
+---the graph stays underneath and `q` there returns to it.
+function A.full_diff()
+  local node = current()
+  if not (node and node.row) then return notify('no commit under the cursor') end
+  local r = node.row
+  G.restore = node_key(node)
+  vim.bo[G.buf].bufhidden = 'hide' -- kept while the full diff shows
+  require('agent-ide.ui.fulldiff').open({ root = G.root, project = G.project, keep_graph = true,
+    scope = { kind = 'commit', commit = { hash = r.hash, short = r.short, subject = r.subject, date = r.time } },
+    focus_path = node.type == 'file' and node.file.path or nil })
+end
+
 function A.lazygit() require('agent-ide.ui.lazygit').open(G.root) end
 
 function A.close() M.close() end
@@ -277,9 +290,13 @@ local function show(root, project)
     api.nvim_set_current_win(win)
     return
   end
-  local prev
+  local prev, drop_fulldiff
+  local fulldiff = package.loaded['agent-ide.ui.fulldiff']
+  local fd = fulldiff and fulldiff.state()
   if G and G.buf == shown then
     prev = G.prev -- another project's graph: back to what was there before that one
+  elseif fd and fd.buf == shown then
+    prev, drop_fulldiff = fd.prev, true -- a full diff: replaced the same way
   else
     local chat = package.loaded['agent-ide.ui.chat']
     prev = { buf = shown, chat = chat and chat.session_of(shown) or nil }
@@ -294,8 +311,9 @@ local function show(root, project)
   cache.on_update(on_update)
   cache.head(root) -- an entry for the repository: its invalidations reach this view
   api.nvim_win_set_buf(win, G.buf)
-  -- another project's graph goes once this one has its window
+  -- another project's graph (or the full diff) goes once this one has its window
   if old and api.nvim_buf_is_valid(old.buf) then pcall(api.nvim_buf_delete, old.buf, { force = true }) end
+  if drop_fulldiff then fulldiff.drop() end
   apply_win(win)
   api.nvim_set_current_win(win)
   if config.get().tcd and vim.fn.isdirectory(root) == 1 then

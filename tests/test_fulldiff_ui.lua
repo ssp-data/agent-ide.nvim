@@ -110,7 +110,7 @@ local function cursor_on(text)
 end
 
 local function open(scope, extra)
-  child.lua('require("agent-ide").toggle()')
+  child.lua('if not require("agent-ide.ui.drawer").state().tab then require("agent-ide").toggle() end')
   child.lua('require("agent-ide.ui.fulldiff").open(vim.tbl_extend("force", { root = ..., scope = select(2, ...) }, select(3, ...) or {}))',
     { repo, scope, extra or {} })
   wait_for(function() local v = view(); return v ~= vim.NIL and v.kind == scope.kind and v.loading == false end, 'full diff')
@@ -238,6 +238,58 @@ T['an invalidated cache reloads: the cursor stays on its file and hunk; a closed
   eq({ v.cursor, v.lines[v.cursor] }, { row, '@@ -1,4 +1,4 @@' })
   eq({ v.closed[1], v.lines[1]:sub(1, 1) }, { true, '>' })
   eq(v.focused, true)
+end
+
+T[':AgentsDiff: the chat\'s repository; from the full diff itself; a folder outside git notifies'] = function()
+  start()
+  child.lua('require("agent-ide").toggle()')
+  child.lua([[local d = require('agent-ide.ui.drawer'); local s = d.state(); vim.api.nvim_set_current_win(s.win)]])
+  local lines = child.lua_get('vim.api.nvim_buf_get_lines(require("agent-ide.ui.drawer").state().buf, 0, -1, false)')
+  child.lua('vim.api.nvim_win_set_cursor(require("agent-ide.ui.drawer").state().win, { ..., 0 })', { has_line(lines, ' r  ') })
+  child.type_keys('<CR>')
+  wait_for(function()
+    lines = child.lua_get('vim.api.nvim_buf_get_lines(require("agent-ide.ui.drawer").state().buf, 0, -1, false)')
+    return has_line(lines, 'Work on it') ~= nil
+  end, 'session row')
+  child.lua('vim.api.nvim_win_set_cursor(require("agent-ide.ui.drawer").state().win, { ..., 0 })', { has_line(lines, 'Work on it') })
+  child.type_keys('<CR>')
+  wait_for(function() return child.lua_get('require("agent-ide.ui.chat")._windows().prompt ~= nil') end, 'chat')
+  child.lua('vim.cmd("AgentsDiff")')
+  wait_for(function() local v = view(); return v ~= vim.NIL and v.loading == false end, 'full diff of the chat')
+  eq({ view().root, view().kind }, { repo, 'branch' })
+  child.lua('vim.cmd("AgentsDiff")') -- from the full diff itself: the same view stays
+  vim.wait(200)
+  eq({ view().root, view().kind, view().shown }, { repo, 'branch', true })
+  child.type_keys('q')
+  local plain = tmp .. '/plain'
+  vim.fn.mkdir(plain, 'p')
+  child.lua('vim.cmd.tabnew(); vim.cmd.tcd(...); vim.cmd("AgentsDiff")', { plain })
+  wait_for(function() return child.lua_get('_G.notes[#_G.notes] or ""'):find('not a git repository', 1, true) ~= nil end, 'notice')
+  eq(view(), vim.NIL)
+end
+
+T['G in the drawer while the full diff shows replaces it; q then returns to the chat'] = function()
+  start()
+  child.lua('require("agent-ide").toggle()')
+  child.lua([[local d = require('agent-ide.ui.drawer'); local s = d.state(); vim.api.nvim_set_current_win(s.win)]])
+  local lines = child.lua_get('vim.api.nvim_buf_get_lines(require("agent-ide.ui.drawer").state().buf, 0, -1, false)')
+  child.lua('vim.api.nvim_win_set_cursor(require("agent-ide.ui.drawer").state().win, { ..., 0 })', { has_line(lines, ' r  ') })
+  child.type_keys('<CR>')
+  wait_for(function()
+    lines = child.lua_get('vim.api.nvim_buf_get_lines(require("agent-ide.ui.drawer").state().buf, 0, -1, false)')
+    return has_line(lines, 'Work on it') ~= nil
+  end, 'session row')
+  child.lua('vim.api.nvim_win_set_cursor(require("agent-ide.ui.drawer").state().win, { ..., 0 })', { has_line(lines, 'Work on it') })
+  child.type_keys('<CR>')
+  wait_for(function() return child.lua_get('require("agent-ide.ui.chat")._windows().prompt ~= nil') end, 'chat')
+  open({ kind = 'branch' })
+  child.lua('vim.api.nvim_set_current_win(require("agent-ide.ui.drawer").state().win)')
+  child.type_keys('G')
+  wait_for(function() return child.lua_get('require("agent-ide.ui.graph").state() ~= nil and require("agent-ide.ui.graph").state().state == "ok"') end, 'graph')
+  eq(view(), vim.NIL)
+  child.lua('require("agent-ide.ui.graph").close()')
+  wait_for(function() return child.lua_get('require("agent-ide.ui.chat")._windows().prompt ~= nil') end, 'chat back')
+  eq(child.lua_get('vim.b[vim.api.nvim_win_get_buf(require("agent-ide.ui.chat")._windows().transcript)].agent_ide_session'), ID)
 end
 
 T['q returns to the chat that was open; the buffer is wiped'] = function()

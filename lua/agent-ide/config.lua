@@ -71,8 +71,8 @@ defaults = function()
       -- drawer, on prompt rows (elsewhere these keys keep their normal meaning)
       prompts = { edit = 'e', rename = 'r', delete = 'D', yank = 'y', to_library = 'sL' },
       -- commit graph view, buffer-local; each a key, a list of keys, or false
-      graph = { open = '<CR>', next_commit = ']]', prev_commit = '[[', all = 'a', refresh = 'R', more = 'L', yank = 'y',
-        lazygit = 'glg', close = 'q', help = 'g?' },
+      graph = { open = '<CR>', next_commit = ']]', prev_commit = '[[', full_diff = 'gd', all = 'a', refresh = 'R', more = 'L',
+        yank = 'y', lazygit = 'glg', close = 'q', help = 'g?' },
       -- full diff view (every change of a branch in one buffer), buffer-local; each a key, a list
       -- of keys, or false
       full_diff = { open = '<CR>', next_file = ']f', prev_file = '[f', next_hunk = ']c', prev_hunk = '[c', fold = 'za',

@@ -9,6 +9,7 @@ M.HELP = {
   { 'open', 'commit: show / hide its files; file: diff of this commit only; last line: load more' },
   { 'next_commit', 'next commit' },
   { 'prev_commit', 'previous commit' },
+  { 'full_diff', 'full diff of the commit (on a file: with the cursor on it); q there comes back' },
   { 'all', 'all branches <-> current branch only' },
   { 'refresh', 'refresh' },
   { 'more', 'load more commits' },

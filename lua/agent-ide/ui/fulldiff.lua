@@ -372,6 +372,15 @@ function M.open(opts)
   end)
 end
 
+---`:AgentsDiff`: the branch scope of the current context (the open graph's or full diff's
+---repository, the diff view's, the chat session's, the drawer row's, else the current file's;
+---see ui/graph_context.lua).
+function M.open_context()
+  local graph = package.loaded['agent-ide.ui.graph']
+  local target = require('agent-ide.ui.graph_context').target(graph and graph.state() or nil)
+  M.open(vim.tbl_extend('force', target, { scope = { kind = 'branch' } }))
+end
+
 ---Close the view; the main window shows what it showed before (a chat when one was open).
 function M.close()
   if not V then return end
