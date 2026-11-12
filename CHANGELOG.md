@@ -4,6 +4,8 @@ All notable changes to Agent-IDE.nvim are listed here. The format follows [Keep 
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-12
+
 ### Added
 
 - Queue panel, more of what a turn does: a `⚠ cache written again` line when a request had to write the conversation to the cache anew (the expensive moment after a pause or a resume), the tokens the turn read, wrote and produced, `thinking ~8k` while the model thinks, and after the turn what it weighed at API prices and per model. Claude's todo list (`Todos · 2/5 done`, the item it works on in its own words) and the shells it runs in the background (`Shells`, with their time; stopped when the process ends). Still nothing asks the model.
