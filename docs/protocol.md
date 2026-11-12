@@ -81,6 +81,11 @@ starts, before the first prompt and any deferred setting.
   only `result` does.
 - `thinking_tokens`: `estimated_tokens, estimated_tokens_delta` — a running estimate while
   the model thinks. Several per thinking block.
+- `compact_boundary`: the conversation was summarized (`/compact`, or on its own near the
+  limit). Per the Agent SDK docs: `compact_metadata{trigger ("manual" | "auto"), pre_tokens}`,
+  `uuid, session_id`; not yet observed on the wire here. The transcript record is
+  `{type:"system", subtype:"compact_boundary", content:"Conversation compacted",
+  compactMetadata{trigger, preTokens, postTokens, durationMs, ...}}`.
 - `hook_started`: `hook_id, hook_name, hook_event`. `hook_response`: `hook_id, hook_name,
   hook_event, outcome, exit_code, output, stdout, stderr` (only without safe mode).
 - Background subagent bookkeeping: `background_tasks_changed` (`tasks[{task_id, run_id,
@@ -433,13 +438,14 @@ non-table object gives `unknown`.
 | `system/task_updated` | `event{meta, label "task <patch.status>: <description or task id>", text: the other patch fields as "key: value"}`; nothing for a foreground task |
 | `system/task_notification` | `event{meta, label "task <status>: <description or task id>", text: summary, "<n> tokens, <n> tool uses, <duration>", "output: <output_file>"}`; nothing for a foreground task |
 | `system/hook_started`, `system/hook_response` | nothing; if `outcome == "error"`, a non-zero `exit_code` or an `error` field: `event{meta, label "hook", text "<hook_name>: <stderr or output or error>"}` |
+| `system/compact_boundary` | `event{meta, label "system: compact_boundary", text: content, else "conversation compacted (<trigger>), <n> tokens before"}` (the transcript parser's fold), then `compact{trigger, pre_tokens, post_tokens}` (the Session takes `post_tokens`, else unknown, as the size) |
 | any other `system/<subtype>` | `unknown{label "system/<subtype>", raw}` |
 | `stream_event` text_delta, main thread | `delta{text}`; marks the current content block as streamed |
 | `stream_event` text_delta whose `parent_tool_use_id` is a string | nothing (dropped). Not observed: subagent messages came only whole. Main-thread blocks were always followed by their full `assistant` object, so the full message is expected to follow; see Open questions |
 | `stream_event` content_block_start | nothing; a main-thread one resets the streamed mark (a subagent's does not) |
 | `stream_event` message_start, content_block_stop, message_delta, message_stop; deltas input_json, thinking, signature | nothing (the full `assistant` object carries the same content) |
 | `stream_event` other inner type / delta type | `unknown{label "stream_event/<type>" or "stream_event/content_block_delta/<delta type>", raw}` |
-| `assistant` | `event` per content block through `transcript/parse.lua` block rules (`text`, `thinking` if non-empty, `tool_call`, `image` as `meta{label "image"}`, `unknown`). A `text` event whose block was streamed carries `streamed = true` on the action. A `tool_use` id already reported is not reported again. `parent_tool_use_id` a string → `sidechain = true`. With `local_command_run` (slash command output) the text becomes `event{meta, label "command output"}`. API error messages (`error` field) are plain `text` events; the failure is in `result.is_error` |
+| `assistant` | `event` per content block through `transcript/parse.lua` block rules (`text`, `thinking` if non-empty, `tool_call`, `image` as `meta{label "image"}`, `unknown`). A `text` event whose block was streamed carries `streamed = true` on the action. A `tool_use` id already reported is not reported again. `parent_tool_use_id` a string → `sidechain = true`. With `local_command_run` (slash command output) the text becomes `event{meta, label "command output"}`. API error messages (`error` field) are plain `text` events; the failure is in `result.is_error`. A main-thread message with `usage` (not a subagent's, not a synthetic one) adds `context{tokens = input_tokens + cache_read_input_tokens + cache_creation_input_tokens}` after its events: the size of the conversation |
 | `user` with `isReplay:true`, not command output | `echo{text}` |
 | `user` with string content `<local-command-stdout>…` (replayed or not) | `event{meta, label "command output", text}` with `command_stdout = true` on the action (the Session puts a `/model <name>` prompt before it when its own `set_model` is pending) |
 | `user` tool results | `event{tool_result}` (sidechain when `parent_tool_use_id` is a string) |

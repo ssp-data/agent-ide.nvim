@@ -261,4 +261,42 @@ T['feed never raises'] = function()
   eq(dec:feed({ type = 5 }, '{"type":5}'), { { type = 'unknown', label = '?', raw = '{"type":5}' } })
 end
 
+T['context: an assistant message carries the input of its request; not a subagent\'s'] = function()
+  local a = feed_lines({
+    vim.json.encode({ type = 'assistant', message = { id = 'm', role = 'assistant', model = 'claude-haiku-5-5',
+      content = { { type = 'text', text = 'hi' } },
+      usage = { input_tokens = 10, cache_read_input_tokens = 120000, cache_creation_input_tokens = 3000, output_tokens = 5 } } }),
+    vim.json.encode({ type = 'assistant', parent_tool_use_id = 't1', message = { id = 'm2', role = 'assistant',
+      content = { { type = 'text', text = 'sub' } }, usage = { input_tokens = 999 } } }),
+    vim.json.encode({ type = 'assistant', local_command_run = { command = 'context', args = '' },
+      message = { id = 'm3', role = 'assistant', model = '<synthetic>',
+        content = { { type = 'text', text = 'ctx' } }, usage = { input_tokens = 5 } } }),
+    vim.json.encode({ type = 'assistant', message = { id = 'm4', role = 'assistant',
+      content = { { type = 'text', text = 'no usage' } } } }),
+  })
+  local ctx = pick(a, 'context')
+  eq(#ctx, 1)
+  eq(ctx[1].tokens, 123010)
+  -- the event comes first, the size after it
+  eq(a[1].type, 'event')
+  eq(a[2].type, 'context')
+end
+
+T['compact_boundary: the transcript parser\'s meta fold and a compact action'] = function()
+  local line = vim.json.encode({ type = 'system', subtype = 'compact_boundary', session_id = 'x', uuid = 'u',
+    compact_metadata = { trigger = 'manual', pre_tokens = 241211 } })
+  local a = feed_lines({ line })
+  eq(#a, 2)
+  eq(a[1].event, { kind = 'meta', label = 'system: compact_boundary', text = 'conversation compacted (manual), 241k tokens before' })
+  eq(a[2], { type = 'compact', trigger = 'manual', pre_tokens = 241211 })
+  -- with a content string (as the transcript record has) that text is shown, as the parser does
+  local rec = vim.json.encode({ type = 'system', subtype = 'compact_boundary', content = 'Conversation compacted',
+    compact_metadata = { trigger = 'auto', pre_tokens = 1, post_tokens = 2 } })
+  local b = feed_lines({ rec })
+  eq(b[1].event.text, 'Conversation compacted')
+  eq(b[2].post_tokens, 2)
+  eq((parse.parse_record(rec))[1], { kind = 'meta', label = 'system: compact_boundary', text = 'Conversation compacted' })
+  eq(#pick(a, 'unknown'), 0)
+end
+
 return T

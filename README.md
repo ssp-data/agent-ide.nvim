@@ -159,7 +159,8 @@ require('agent-ide').setup({
     chat = { send = '<C-CR>', send_alt = '<leader><CR>', interrupt = '<C-c>', prompt = '<leader>ap', help = 'g?',
       history_prev = '<C-p>', history_next = '<C-n>', attach = '<leader>af',
       answer_inner = 'ir', answer_outer = 'ar', mode = '<S-Tab>', plan = '<leader>am', model = { '<leader>aM', '<leader>M' },
-      answer = '<leader>ay', raw = 'gr', raw_event = 'gR', park = '<leader>ax', diff = { 'gd', '<leader>gd' },
+      answer = '<leader>ay', raw = 'gr', raw_event = 'gR', park = '<leader>ax', compact = '<leader>aC',
+      diff = { 'gd', '<leader>gd' },
       -- native: continue in native Claude in a tmux pane; a typed key (gT) works in the transcript
       -- only, since the prompt buffer is where you edit text (gT stays Vim's there)
       native = { 'gT', '<leader>aT' },
@@ -191,6 +192,10 @@ require('agent-ide').setup({
   quota = { file = nil }, -- footer quota from a file another tool writes (see Footer); nil: off
   trash = { keep_days = nil }, -- deleted sessions (D) older than this are purged at setup; nil: kept until :AgentsTrash empty
   chat = { auto_slash = true, at_picker = true }, -- `/` opens the command menu, `@` the file picker
+  -- the size of a session's conversation (see Token usage): from `threshold` tokens on (false: never)
+  -- a send that resumes a parked session asks first (Send / Compact first / Cancel) and parking
+  -- offers a /compact first; each question can be turned off on its own
+  context = { threshold = 50000, confirm_resume = true, compact_before_park = true },
   -- a soft chime when a session needs you; chime: 'two', 'soft', 'bell', 'rising' or 'pop'
   -- (:AgentsChime <name> plays one); cmd: the player (nil: pw-play, paplay, aplay or afplay,
   -- whichever exists), the chime's WAV path is appended to it
@@ -318,7 +323,8 @@ In the chat (transcript and prompt buffer, unless noted):
 | `<S-Tab>` | Next permission mode (manual, acceptEdits, auto); in plan mode, leaves it |
 | `<leader>am` | Plan mode on, or off again (back to the mode you had before) |
 | `<leader>aM`, `<leader>M` | Pick the model |
-| `<leader>ax` | Park the session: stop its Claude process (asks when it is working); the next send resumes it |
+| `<leader>ax` | Park the session: stop its Claude process (asks when it is working; a large conversation is offered a `/compact` first); the next send resumes it |
+| `<leader>aC` | Send `/compact`: Claude summarizes the conversation in one request that reads all of it, and every turn after it is smaller. Queued behind a running turn; a parked session is resumed for it |
 | `gT`, `<leader>aT` | Continue the session in native Claude in a tmux pane; while it is there, take it back (`gT` in the transcript only; the prompt buffer keeps Vim's `gT`) |
 | `gr` | Transcript: raw view of what was sent and received; `q` or `gr` returns |
 | `gR` | Transcript: raw view at the line of the `unknown` fold under the cursor |
@@ -346,7 +352,7 @@ The history buffer is markdown with folds for tool calls, results and thinking. 
 
 ### Chat
 
-Open a session from the drawer, or start one with `+ New session` under a project. The transcript fills the main window of the Agents tab and a prompt buffer opens below it. Opening a session shows its history without starting Claude; the first prompt you send starts `claude -p` for it (resuming the session when it has a history), and the process keeps running until you park the session (`<leader>ax`, or `x` in the drawer), hand it to native Claude, or quit Neovim. Parking asks first when Claude is working, puts queued prompts back into the prompt buffer, and keeps the transcript; the next prompt resumes the session. The winbar shows the state as the drawer does (its mark and word in the same colours: `● permission: Bash`, `◐ busy`, `✓ done, unread`, `✗ failed: <reason>`, `◐ tmux 2.1`), the number of queued prompts, the project in bold and the title, and on the right the model in italic (`AgentIdeModel`) and the permission mode as a badge (`[manual]` in `AgentIdeMode`; any other mode, such as `[acceptEdits]`, `[plan]`, `[auto]` or `[bypassPermissions]`, in `AgentIdeModeHot`, linked to `WarningMsg`). It fits its window: the title is cut with `…` first, then the model, the queue count and the badge give way (the project takes what is left), and only last the state word is cut. In a tabline, a bufferline or `:ls` the chat's buffers are named after the session: `agents://<project>/<title>` for the transcript and `… · prompt` for the prompt buffer (`agents://drawer`, `agents://help` and so on for the rest); the names follow the title, never stand for a file and change nothing about `:w` or `ZZ`.
+Open a session from the drawer, or start one with `+ New session` under a project. The transcript fills the main window of the Agents tab and a prompt buffer opens below it. Opening a session shows its history without starting Claude; the first prompt you send starts `claude -p` for it (resuming the session when it has a history), and the process keeps running until you park the session (`<leader>ax`, or `x` in the drawer), hand it to native Claude, or quit Neovim. Parking asks first when Claude is working (and, between turns, offers to compact a large conversation first), puts queued prompts back into the prompt buffer, and keeps the transcript; the next prompt resumes the session. The winbar shows the state as the drawer does (its mark and word in the same colours: `● permission: Bash`, `◐ busy`, `✓ done, unread`, `✗ failed: <reason>`, `◐ tmux 2.1`), the number of queued prompts, the project in bold and the title, and on the right the model in italic (`AgentIdeModel`), the size of the conversation (`~123k`, in `AgentIdeContext`; see [Token usage](#token-usage)) and the permission mode as a badge (`[manual]` in `AgentIdeMode`; any other mode, such as `[acceptEdits]`, `[plan]`, `[auto]` or `[bypassPermissions]`, in `AgentIdeModeHot`, linked to `WarningMsg`). It fits its window: the title is cut with `…` first, then the model, the queue count and the badge give way (the project takes what is left), and only last the state word is cut. In a tabline, a bufferline or `:ls` the chat's buffers are named after the session: `agents://<project>/<title>` for the transcript and `… · prompt` for the prompt buffer (`agents://drawer`, `agents://help` and so on for the rest); the names follow the title, never stand for a file and change nothing about `:w` or `ZZ`.
 
 **Prompt buffer.** A normal markdown buffer (long lines wrap): write as much as you like and send it with `<C-CR>`. Its text is sent as typed, except that an `[attach] <path>` line outside a fenced code block (a fence starting at column 0) becomes `@<path>` on the same line (`@"<path>"` when the path holds spaces), which makes Claude read the file; nothing is moved or reordered. `@` at the start of a line or after a space, outside a fenced code block, opens a file picker and puts the file where you typed `@`: in a line of text as `@<path>` followed by a space, on an empty line as an `[attach] <path>` line, so references stay in place in a long text. Text you type while the file list loads does not move that spot. Cancelling the picker leaves the `@` you typed. `<leader>af` in normal mode adds an `[attach]` line above the cursor's line. `/` on an empty line opens the command menu: the commands the session listed and the commands and skills the Prompts node finds on disk and, on top, two of the plugin's own, marked `plugin`: `/model` opens the model picker and `/copy` copies the last answer to the unnamed and `+` registers. They act when chosen from the menu or sent as the whole prompt, and are never sent to Claude. Claude sends its command list with each turn, so before a session's first turn the menu is filled from the last list known for its project (else the most recent list of any project), kept across restarts in `commands.json`. `<C-p>` and `<C-n>` step through the prompts of the session, in normal and insert mode, as do `<Up>` on the first line and `<Down>` on the last (elsewhere the arrows move the cursor; while a completion menu is open the keys work the menu). The draft you were writing comes back when you step past the newest prompt.
 
@@ -623,17 +629,24 @@ The flags the plugin passes to `claude -p` (stream-json in and out, partial mess
 
 Where it can cost more is a **restart of a session's process**. Claude Code sends the whole conversation with every request, in the terminal as much as here: the API keeps no state between requests. While you work, that history is read from Anthropic's prompt cache at the cached rate, a fraction of the price. Opening a session from the drawer costs nothing: Claude starts only when you send a prompt. Parking (`<leader>ax`), handing a session to native Claude and back (`gT`), or quitting with `keeper = { enabled = false }` stops the process, and the next prompt starts `claude --resume`. The conversation is the same, but a new process may rebuild parts of its prompt, and after a pause the cache has expired anyway, so the first turn after a resume can read the whole conversation uncached. That is what `claude --resume` in a terminal costs too; the plugin only makes it one key away. `keeper.idle_minutes` frees memory and does not change tokens: the cache expires after a pause whether the process still runs or not.
 
+**The size of a conversation.** The chat's winbar shows it beside the model: `~123k`, the input tokens of the session's last request, which is what the next prompt reads again. It follows the stream while Claude runs and comes from the end of the transcript for a parked session; nothing asks the model. From `context.threshold` tokens on (50 000 by default; `false` never asks):
+
+- a send that would resume a parked session asks first: **Send** (reads the ~123k once, then every turn), **Compact first** (`/compact` goes first, your prompt after it: the same read once, then every turn is smaller) or **Cancel** (the text stays in the prompt). `context.confirm_resume = false` turns it off;
+- parking a session between turns (`<leader>ax`, `sP`) offers **Park now**, **Compact, then park** (so the next resume reads less) or **Cancel**. `context.compact_before_park = false` turns it off.
+
+`<leader>aC` sends `/compact` at any time; behind a running turn it is queued. A compaction shows as a `system: compact_boundary` fold, and the size after it.
+
 Running several sessions at once costs what each of them costs; the drawer only makes that easy.
 
 ### Using the fewest tokens
 
 - **Pick the model per session.** `<leader>aM` (or `/model`) before the first prompt; `claude.model` sets the default. A smaller model is plenty for renames, small fixes and questions about the code.
 - **One task per session.** Every turn sends the conversation so far, so a long session makes every new prompt more expensive. Start unrelated work with `+ New session`; keep related work in one session so you do not explain the context twice.
-- **Do not park a session you are still working in**, and avoid going back and forth with `gT` in the middle of a task. Parking a session you are done with costs nothing.
+- **Do not park a session you are still working in**, and avoid going back and forth with `gT` in the middle of a task. Parking a session you are done with costs nothing; parking one you will come back to is the moment to compact (the offer on `<leader>ax`), so the resume reads less.
 - **Write the whole prompt, then send it.** The prompt buffer is made for long prompts: one complete prompt costs less than a short one and three corrections, since each follow-up sends the conversation again. Keep instructions you repeat as saved or library prompts (`:w`, `<leader>W`).
 - **Attach only what is needed.** `[attach]` makes Claude read the whole file. For a large file, name the function or the lines in the prompt and let Claude read what it needs.
 - **Interrupt early.** `<C-c>` stops a turn that goes the wrong way; queued prompts come back to the prompt buffer so you can rewrite them.
-- **Look at the context.** `/context` from the `/` menu runs inside Claude Code without a model turn and shows what fills the context. `/compact` (also in the `/` menu) summarizes the conversation: that is one request that reads the whole history, and every turn after it is smaller. Worth it before you step away from a long session you will come back to; for a fresh start, `+ New session` costs nothing.
+- **Look at the context.** The winbar's `~123k` is the size; `/context` from the `/` menu runs inside Claude Code without a model turn and shows what fills it. `<leader>aC` (or `/compact`) summarizes the conversation: one request that reads the whole history, and every turn after it is smaller. Worth it before you step away from a long session you will come back to; for a fresh start, `+ New session` costs nothing.
 - **Keep the shared part small.** As in Claude Code: a short `CLAUDE.md`, and only the MCP servers a project needs, since their tool definitions travel with every turn.
 - **Watch it.** The footer shows the quota windows; the raw view (`gr`) shows each turn's `result` line with its `usage`.
 

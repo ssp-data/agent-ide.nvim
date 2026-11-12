@@ -46,6 +46,7 @@ defaults = function()
         -- transcript: the prompt buffer is where you edit text, gT stays Vim's there)
         native = { 'gT', '<leader>aT' },
         park = '<leader>ax', -- park: stop the session's Claude process (the next send resumes)
+        compact = '<leader>aC', -- send /compact: Claude summarizes the conversation
         diff = { 'gd', '<leader>gd' },
         save_library = '<leader>W', -- prompt: save the prompt to the library (asks for a name)
         queue = { 'Q', '<leader>aQ' }, -- show or hide the queue panel (Q: Ex mode, which the prompt does not need)
@@ -88,6 +89,12 @@ defaults = function()
     trash = { keep_days = nil },
     -- prompt buffer: `/` opens the command menu, `@` opens the file picker
     chat = { auto_slash = true, at_picker = true },
+    -- context: the size of a session's conversation (the input tokens of its last request; the
+    -- chat's winbar shows it as `~123k`). From `threshold` tokens on (false: never) the plugin
+    -- asks before a send that resumes a session without a process (Send / Compact first /
+    -- Cancel: the resume reads the whole conversation again) and, on park, offers to compact
+    -- first; confirm_resume and compact_before_park turn either question off
+    context = { threshold = 50000, confirm_resume = true, compact_before_park = true },
     -- a soft chime when a session needs you (waiting); chime: two, soft, bell, rising or pop
     -- (`:AgentsChime <name>` plays one); cmd: the player (nil: pw-play, paplay, aplay or afplay,
     -- whichever exists), the chime's WAV path is appended

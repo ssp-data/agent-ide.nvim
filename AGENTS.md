@@ -39,6 +39,7 @@ A Neovim plugin that manages Claude Code sessions from inside Neovim: a drawer w
 | `lua/agent-ide/scope.lua` | project scope or all: what the drawer, search, next waiting and the footer show |
 | `lua/agent-ide/session/commands.lua` | Claude's command list per project for the `/` menu, kept in `commands.json` |
 | `lua/agent-ide/claude/models.lua`, `models_fetch.lua` | the models Claude lists in its `initialize` answer, kept in `models.json`; the one-off fetch for the picker |
+| `lua/agent-ide/claude/usage.lua`, `session/context.lua`, `ui/context_ask.lua` | the size of a conversation from `usage` objects (pure) and from a transcript's tail; the questions before a resume and before parking, the `/compact` key |
 | `lua/agent-ide/util/jsonfile.lua` | private JSON files, read leniently and written atomically |
 | `lua/agent-ide/status.lua`, `live.lua`, `tmux.lua` | footer and status files, sessions running elsewhere, tmux |
 | `demo/`, `scripts/demo.sh`, `scripts/demo-screenshot.sh` | synthetic demo data and fake `claude` for `make demo`, and the README screenshots (no real data; the screenshot script needs Hyprland, foot and grim) |

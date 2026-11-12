@@ -147,6 +147,21 @@ function Decoder:system(obj, raw)
     return { { type = 'event', event = { kind = 'meta', label = 'hook', text = name .. ': ' .. detail } } }
   elseif st == 'task_started' or st == 'task_updated' or st == 'task_notification' then
     return self:task(obj, st)
+  elseif st == 'compact_boundary' then
+    -- the conversation was summarized (/compact, or Claude on its own near the limit): the
+    -- same meta fold the transcript parser makes of the record, and the sizes when given
+    local m = type(obj.compact_metadata) == 'table' and obj.compact_metadata or {}
+    local pre = type(m.pre_tokens) == 'number' and m.pre_tokens or nil
+    local post = type(m.post_tokens) == 'number' and m.post_tokens or nil
+    local text = type(obj.content) == 'string' and obj.content
+    if not text then
+      text = 'conversation compacted' .. (str(m.trigger) and (' (' .. m.trigger .. ')') or '')
+        .. (pre and (', ' .. require('agent-ide.claude.usage').fmt(pre) .. ' tokens before') or '')
+    end
+    return {
+      { type = 'event', event = { kind = 'meta', label = 'system: compact_boundary', text = text } },
+      { type = 'compact', trigger = str(m.trigger), pre_tokens = pre, post_tokens = post },
+    }
   elseif QUIET_SYSTEM[st] then
     return {}
   end
@@ -202,7 +217,14 @@ function Decoder:assistant(obj, raw)
   end
   local streamed = self.streamed and not sidechain
   if streamed then self.streamed = false end
-  return event_actions(kept, sidechain, streamed)
+  local acts = event_actions(kept, sidechain, streamed)
+  -- the input of this request (cached or not): the size of the conversation. Not from a
+  -- subagent (its own context) nor a synthetic message (a local command's output)
+  if not sidechain and obj.local_command_run == nil and obj.message.model ~= '<synthetic>' then
+    local n = require('agent-ide.claude.usage').context(obj.message.usage)
+    if n then acts[#acts + 1] = { type = 'context', tokens = n } end
+  end
+  return acts
 end
 
 local function replay_text(content)

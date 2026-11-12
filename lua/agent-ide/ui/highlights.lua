@@ -40,6 +40,7 @@ local GROUPS = {
     return { fg = n.fg, ctermfg = n.ctermfg, italic = true }
   end,
   AgentIdeMode = M.dim,
+  AgentIdeContext = M.dim, -- the context size (`~123k`) beside the model
   AgentIdeModeHot = { link = 'WarningMsg' },
 }
 

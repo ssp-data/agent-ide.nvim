@@ -163,6 +163,21 @@ function H.quota(s, a)
   s:_emit('quota')
 end
 
+-- The size of the conversation as of the last request (winbar, the questions before a resume
+-- and before parking). `context_key` names the transcript version a value was read from; the
+-- stream's value is fresher than any file.
+function H.context(s, a)
+  if s.context_tokens == a.tokens then return end
+  s.context_tokens, s.context_key = a.tokens, nil
+  s:_emit('meta')
+end
+
+-- After a compaction the size is what it left, else unknown until the next request.
+function H.compact(s, a)
+  s.context_tokens, s.context_key = a.post_tokens, nil
+  s:_emit('meta')
+end
+
 function H.result(s, a)
   s:_flush_streaming()
   -- a mode sent with a permission answer is reported within the turn; never pending for ever

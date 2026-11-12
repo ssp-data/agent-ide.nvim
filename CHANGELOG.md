@@ -6,6 +6,11 @@ All notable changes to Agent-IDE.nvim are listed here. The format follows [Keep 
 
 ### Added
 
+- The chat's winbar shows the size of the conversation beside the model (`~123k`: the input tokens of the session's last request, what the next prompt reads again), live while Claude runs and from the transcript for a parked session (`AgentIdeContext`).
+- A send that resumes a parked session with a large conversation asks first: Send, Compact first (`/compact` goes first, the prompt after it) or Cancel. From `context.threshold` tokens on (50 000); `context.confirm_resume = false` turns the question off.
+- `<leader>aC` in the chat sends `/compact` (`keys.chat.compact`); behind a running turn it is queued, a parked session is resumed for it.
+- Parking a session between turns with a large conversation offers to compact it first, so the next resume reads less (`context.compact_before_park`).
+- A compaction in the live stream shows as a `system: compact_boundary` fold, as the history does, instead of an `unknown` fold.
 - `]s` / `[s` in the drawer and the chat (transcript and prompt) open the next or previous session of the same project, in the drawer's order, and the drawer's cursor follows (`keys.drawer.next_session` and `keys.chat.next_session`, `prev_session`; focus stays in the pane you pressed it in).
 - Omarchy bar widget: clicking a session also switches to the workspace of, and focuses, the terminal window that shows tmux, and switches that tmux client to the session's exact session, window and pane.
 

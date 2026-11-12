@@ -359,6 +359,7 @@ function Session:load(cb, no_attach)
       self.events = vim.list_extend(history, extra)
       self.turn_start, self.loaded_key = ts, key
       self:_emit('events')
+      require('agent-ide.session.context').refresh(self) -- the winbar's `~123k`, in the background
       cb()
     end)
   end))
