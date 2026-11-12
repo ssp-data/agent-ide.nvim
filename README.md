@@ -3,7 +3,7 @@
 A Neovim plugin to run and review all your Claude Code sessions from one place: a drawer lists every session grouped by git repository, you chat in native buffers (a prompt buffer to write, a Markdown buffer to read), and you review what the agent changed with git diffs, without leaving Neovim.
 
 YT Video with demoing the features:
-[![YouTube Video](docs/images/main.png)](https://www.youtube.com/watch?v=0uQ2r7eiQjE)
+[![YouTube Video](docs/images/main.webp)](https://www.youtube.com/watch?v=0uQ2r7eiQjE)
 
 > [!NOTE]
 > **Agent-IDE is built for Claude Code.** Every feature here targets the Claude Code CLI on your subscription. Support for other agents (Gemini CLI, opencode, and Codex through Zed's [codex-acp](https://github.com/zed-industries/codex-acp)) exists on the [`acp`](../../tree/acp) branch, via the Agent Client Protocol. That branch is parked for now as I use Claude Code exclusively, but might change later. The architecture is ready for other agents if that changes.
@@ -16,7 +16,7 @@ Coding is changing, from writing to more navigating and viewing changes, etc. So
 
 I want to prompt in neovim (I use `ctrl-g`) for Claude Code anyway to type with my shortcuts [Vim Motions](https://www.ssp.sh/brain/vim-language-and-motions/) and also my snippets and superpowers, and the rendering of responses from Claude Code looks awful, unlike my rendering of Markdown within neovim. So why not use neovim to write and also show the responses in a buffer of Neovim that renders Markdown nicely? That was the premise, and the outcome looks like this:
 
-![Agent-IDE: the drawer with all sessions, a chat and the prompt buffer](docs/images/main.png)
+![Agent-IDE: the drawer with all sessions, a chat and the prompt buffer](docs/images/main2.webp)
 
 What you see, from right to left. **The drawer** shows the `Prompts` node (library, skills and commands) and every project with its sessions in all states: running elsewhere (`elsewhere`), waiting for a permission (`permission: Bash`), done and not read yet (`done, unread`), failed (`failed: API Error…`), idle and parked (dimmed). A project row sums its sessions up (`input (1)`, `review (1)`). Below the sessions are a branch's `Changes vs main` and `Commits on branch`, and a second worktree. **The chat** fills the main window: a rendered markdown transcript with tool calls (`Read`, `Edit`, `Bash`, `Write`) and thinking folded, and a winbar with project, title, model, permission mode and state. **The prompt buffer** below holds a draft with an `[attach]` line. **The footer** in lualine shows the overall state and the quota.
 
