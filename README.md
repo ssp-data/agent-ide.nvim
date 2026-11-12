@@ -377,7 +377,16 @@ Below the prompts the panel shows what the session weighs and what its turn does
 
 ```
 Session  ~412k  ▲ large
+  ⚠ cache written again ~398k
   turn 6m12s · 38 requests
+  thinking ~8k
+  read 14M · new 520k · out 61k
+
+Todos · 2/4 done
+✓ Find the fold callers
+✓ Write the failing test
+◐ Wiring the cursor state
+○ Update the docs
 
 Agents · 2 running · 1 done · 54 req
 ◐ Explore  find fold callers
@@ -386,9 +395,12 @@ Agents · 2 running · 1 done · 54 req
     ~97k · 31 tools · Bash
 ✓ Plan  design the cursor state
     ~41k · 9 tools · 2m03s
+
+Shells · 1 running
+◐ npm run dev  4m40s
 ```
 
-`Session` is the size of the conversation, the same `~412k` as the winbar, marked `▲ large` from `context.large` tokens on (200 000; `false` never marks). `turn` is how long the current turn runs and how many requests it made to the model: each request reads the whole conversation again, so many requests on a large conversation are what uses up a session limit. Under `Agents`, every subagent of the turn: its type and task, its own context, its tool uses and the tool it runs now (or how long it took), and in the header the requests the agents made together. `<CR>` on an agent puts the transcript cursor on the call that started it. A background agent stays listed until its task finishes, across turns. Everything comes from what Claude already sends (the `usage` of each message, the agent calls and their results); nothing asks the model. For a session not run in this Neovim (parked, or in a terminal), the agents of its last turn are listed from the transcript, without sizes or times.
+`Session` is the size of the conversation, the same `~412k` as the winbar, marked `▲ large` from `context.large` tokens on (200 000; `false` never marks). `⚠ cache written again` means a request had to write the conversation to Anthropic's prompt cache anew instead of reading it from there, the expensive moment after a pause or a resume. `turn` is how long the current turn runs and how many requests it made to the model: each request reads the whole conversation again, so many requests on a large conversation are what uses up a session limit. `thinking` is the model's running estimate while it thinks, `read · new · out` the tokens the turn's requests (the agents' included) read from the cache, sent anew and produced. When the turn ends, a line gives what it would have cost at API prices (on a subscription that is no bill, only a measure of weight) and one line per model its share. `Todos` is Claude's own todo list, the item it works on in its words; it stays across turns. `Shells` are the commands Claude runs in the background (a dev server, a watcher, a long test run) with how long they have run; they stop with the session's process. Under `Agents`, every subagent of the turn: its type and task, its own context, its tool uses and the tool it runs now (or how long it took), and in the header the requests the agents made together. `<CR>` on an agent puts the transcript cursor on the call that started it. A background agent stays listed until its task finishes, across turns. Everything comes from what Claude already sends (the `usage` of each message, the agent calls and their results); nothing asks the model. For a session not run in this Neovim (parked, or in a terminal), the agents of its last turn are listed from the transcript, without sizes or times.
 
 **Permissions, questions and plans.** When Claude asks to use a tool, the ask shows at the end of the transcript and in the drawer, and a picker opens with Allow, Deny and the suggestions Claude made (switch the mode for this session, or always allow a rule; offered only where Claude saves it in this project's local settings, and labelled so). The picker opens only when you are in that session's chat in normal mode. Nothing ever interrupts you: an ask from another session never opens a popup, moves the cursor or takes focus; it shows in the drawer and in the footer, and `<leader>an` takes you there. While you type in the same session's prompt, a one-line hint appears instead; `<leader>ay` opens the picker, also again after a picker was closed without an answer. Questions Claude asks (multiple choice) are answered the same way, one picker per question; a multi-select question takes one option per round until you pick Done choosing. A plan from plan mode can be approved, approved with edits accepted for the rest of the session, or sent back with Keep planning. A soft chime plays when a session of this Neovim starts waiting for you (at most once every two seconds), through `pw-play`, `paplay`, `aplay` or `afplay`, whichever is installed, or the player you set in `sound.cmd`; `sound = { waiting = false }` turns it off. Five chimes to choose from with `sound.chime`: `two` (two rising notes, the default), `soft` (one low note), `bell` (one ringing note), `rising` (three quick notes) and `pop` (a short blip); `:AgentsChime bell` plays one so you can pick. Each is a small WAV the plugin generates once, `stdpath('cache')/agent-ide/chime-<name>.wav`, nothing is downloaded.
 
