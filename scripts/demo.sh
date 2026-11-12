@@ -11,6 +11,9 @@ mkdir -p "$root/git" "$root/projects" "$root/xdg/state/nvim/agent-ide" "$root/xd
 chmod 700 "$root/xdg/run"
 cp -r demo/prompts "$root/prompts"
 cp demo/live.json "$root/live.json"
+# The model a session without one starts with: the prompt's winbar names it (`↑ title · opus 5.5`).
+printf '{"version": 1, "model": "claude-opus-5-5"}\n' > "$root/xdg/state/nvim/agent-ide/prefs.json"
+chmod 600 "$root/xdg/state/nvim/agent-ide/prefs.json"
 # Quota of the demo, stamped now: a quota file older than 30 minutes is not shown in the footer.
 python3 - "$root/quota.json" <<'PY'
 import json, sys, time

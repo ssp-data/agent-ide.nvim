@@ -30,7 +30,7 @@ open(sys.argv[2], 'w').write('\n'.join(kept + lines) + '\n')
 PY
 
 # The window: zsh runs `make demo`; floated, sized to 2100x1186 and centred on workspace 1.
-foot --config="$ini" --app-id=agent-ide-demo -- zsh -c "cd '$src' && make demo" >/dev/null 2>&1 &
+foot --config="$ini" --app-id=agent-ide-demo -- zsh -c "cd '$src' && AGENT_IDE_DEMO_SHOT=\${AGENT_IDE_DEMO_SHOT:-chat} make demo" >/dev/null 2>&1 &
 sleep 6
 hyprctl dispatch "hl.dsp.window.float({ action = 'enable', window = 'class:agent-ide-demo' })" >/dev/null
 hyprctl dispatch "hl.dsp.window.resize({ x = 2100, y = 1186, window = 'class:agent-ide-demo' })" >/dev/null

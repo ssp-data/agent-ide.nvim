@@ -1,9 +1,10 @@
 -- The demo Neovim (`make demo`, scripts/demo.sh): the plugin on synthetic sessions, repositories and
 -- prompts under /tmp/agent-ide-demo. Only the plugin is loaded; the user's own config is not.
--- AGENT_IDE_DEMO_SHOT: `chat` (default: drawer, Library, changes, a chat with a draft) or `graph`.
+-- AGENT_IDE_DEMO_SHOT: `live` (default: the drawer and the running sessions, then you drive), `chat`
+-- (the README screenshot: drawer, Library, changes, a chat with a draft) or `graph`.
 local repo = vim.fn.fnamemodify(debug.getinfo(1, 'S').source:sub(2), ':p:h:h')
 local root = '/tmp/agent-ide-demo' -- built by scripts/demo.sh
-local shot = os.getenv('AGENT_IDE_DEMO_SHOT') or 'chat'
+local shot = os.getenv('AGENT_IDE_DEMO_SHOT') or 'live'
 
 -- The plugin's options come from the demo only: the user's spec (its prompt library and quota file) is
 -- replaced by this one, so none of the user's prompts or usage numbers reach the screenshot.
@@ -100,17 +101,24 @@ local function press_on(text, keys, anchor)
   end
 end
 
--- Sessions that run the scenarios of demo/scenarios: permission, done (unread) and failed.
+-- Sessions that run the scenarios of demo/scenarios: permission, done (unread), failed, and one that
+-- keeps running with prompts queued behind its turn (the queue panel, `Q`).
 local function run_scenarios()
   local runs = {
-    { id = '2042fade-b41d-4f9a-b527-9a1f633fdd24', title = 'Backfill 2025 partitions', dir = repo_dir, prompt = 'Backfill the 2025 partitions into orders.' },
-    { id = '5392a4f0-0939-436f-9d18-fb627d96ceb0', title = 'Fix flaky dbt test on customers', dir = repo_dir, prompt = 'Fix the flaky freshness test on customers.' },
-    { id = 'afced7c9-3cf0-4a51-8d77-02865b03c0b0', title = 'Migrate config to TOML', dir = root .. '/git/neomd', prompt = 'Migrate config.yaml to TOML.' },
+    { id = '2042fade-b41d-4f9a-b527-9a1f633fdd24', title = 'Backfill 2025 partitions', dir = repo_dir, prompts = { 'Backfill the 2025 partitions into orders.' } },
+    { id = '5392a4f0-0939-436f-9d18-fb627d96ceb0', title = 'Fix flaky dbt test on customers', dir = repo_dir, prompts = { 'Fix the flaky freshness test on customers.' } },
+    { id = 'afced7c9-3cf0-4a51-8d77-02865b03c0b0', title = 'Migrate config to TOML', dir = root .. '/git/neomd', prompts = { 'Migrate config.yaml to TOML.' } },
+    { id = '4cc9c6cb-e2e5-4c3c-87e9-90a1d01fde20', title = 'Document lineage for the docs site', dir = root .. '/git/dataflow-docs', prompts = {
+      'Add the orders and customers models to docs/lineage.md as a mermaid diagram.',
+      'Link each model in the diagram to its SQL file.',
+      'Add a short section on how the incremental load of orders works.',
+      'Check the docs build and fix any broken links.',
+    } },
   }
   for _, r in ipairs(runs) do
     local path = root .. '/projects/' .. (r.dir:gsub('[/.]', '-')) .. '/' .. r.id .. '.jsonl'
     local s = require('agent-ide.session').open({ id = r.id, cwd = r.dir, path = path, title = r.title })
-    s:send(r.prompt)
+    for _, p in ipairs(r.prompts) do s:send(p) end
   end
 end
 
@@ -145,6 +153,10 @@ vim.schedule(function()
     return require('agent-ide.ui.graph').open({ root = repo_dir, project = project })
   end
   require('agent-ide').toggle()
+  if shot == 'live' then
+    -- the data and the running sessions only; every view is yours to open (see demo/README.md)
+    return vim.defer_fn(run_scenarios, 300)
+  end
   vim.defer_fn(function()
     if drawer_win() then vim.api.nvim_set_current_win(drawer_win()) end
     vim.api.nvim_feedkeys('z9', 'x', false)
