@@ -1,15 +1,15 @@
 -- The queue panel of a chat: a narrow window left of the transcript listing, as a timeline, the
 -- prompts of the session: the last few sent (dim), the one Claude works on, and the ones queued
 -- behind it, numbered. `Q` in the chat shows or hides it; it follows the chat to another
--- session and redraws as the session changes. In the panel: <CR> on a sent or running prompt
--- puts the transcript cursor on it, on a queued one focuses the prompt; `x` takes a queued
--- prompt out of the queue, back into the prompt buffer; `q` closes.
+-- session and redraws as the session changes. Every prompt sent is listed, the first one too. In
+-- the panel: <CR> on a sent or running prompt puts the transcript cursor on it, on a queued one
+-- focuses the prompt; `x` takes a queued prompt out of the queue, back into the prompt buffer;
+-- `e`, `dd`, `J` and `K` edit, delete and move queued prompts (ui/queue_edit.lua); `q` closes.
 local api = vim.api
 
 local M = {}
 
 M.WIDTH = 36
-M.SENT_SHOWN = 5
 
 local ns = api.nvim_create_namespace('agent-ide.queue')
 local Q = { win = nil, buf = nil, s = nil, rows = {} }
@@ -49,9 +49,7 @@ function M.layout(s, width, icons)
   end
   local n = #s.queue
   add(('Queue · %d waiting'):format(n), 'AgentIdeSection', nil, '', nil)
-  local from = math.max(1, #sent - M.SENT_SHOWN + 1)
-  if from > 1 then add(('… %d earlier'):format(from - 1), 'AgentIdeAge', nil, '', nil) end
-  for k = from, #sent do
+  for k = 1, #sent do
     add(s.events[sent[k]].text, 'AgentIdeAge', { kind = 'sent', event = sent[k] }, '✓ ', 'AgentIdeAge')
   end
   if running then
@@ -117,10 +115,39 @@ local function unqueue()
   s:_emit('meta')
 end
 
+-- e, dd, J, K on a queued row (ui/queue_edit.lua); the cursor stays on the prompt it moved.
+local function queued_row()
+  local row = row_at_cursor()
+  if row and row.kind == 'queued' then return row.n end
+end
+
+local function edit_row()
+  local n = queued_row()
+  if n then require('agent-ide.ui.queue_edit').edit(Q.s, n, chat()._windows().transcript) end
+end
+
+local function delete_row()
+  local n = queued_row()
+  if n then require('agent-ide.ui.queue_edit').delete(Q.s, n) end
+end
+
+local function move_row(by)
+  local n = queued_row()
+  local to = n and require('agent-ide.ui.queue_edit').move(Q.s, n, by)
+  if to and valid_win(Q.win) then
+    for line, row in pairs(Q.rows) do
+      if row.kind == 'queued' and row.n == to then pcall(api.nvim_win_set_cursor, Q.win, { line, 0 }) end
+    end
+  end
+end
+
 local function help()
   require('agent-ide.ui.help').open('Agent-IDE queue', {
     { key = '<CR>', desc = 'sent or running prompt: go to it in the transcript; queued: focus the prompt' },
     { key = 'x', desc = 'queued prompt: take it out of the queue, back into the prompt buffer' },
+    { key = 'e', desc = 'queued prompt: edit it in a buffer; :w puts it back in the queue' },
+    { key = 'dd', desc = 'queued prompt: delete it (the text goes to the unnamed register)' },
+    { key = 'J / K', desc = 'queued prompt: move it down / up in the queue' },
     { key = 'q', desc = 'close the panel' },
     { key = require('agent-ide.util.keys').label(require('agent-ide.ui.chat_keys').keys().queue) or 'Q', desc = 'close the panel (the same key shows it again from the chat or the drawer)' },
   }, { win = Q.win })
@@ -139,6 +166,10 @@ local function ensure_buf(s)
   local function map(lhs, fn, desc) vim.keymap.set('n', lhs, fn, { buffer = buf, nowait = true, silent = true, desc = 'Agent-IDE queue: ' .. desc }) end
   map('<CR>', open_row, 'go to the prompt')
   map('x', unqueue, 'take a queued prompt back')
+  map('e', edit_row, 'edit a queued prompt')
+  map('dd', delete_row, 'delete a queued prompt')
+  map('J', function() move_row(1) end, 'move a queued prompt down')
+  map('K', function() move_row(-1) end, 'move a queued prompt up')
   map('q', function() M.close() end, 'close')
   for _, lhs in ipairs(require('agent-ide.util.keys').list(require('agent-ide.ui.chat_keys').keys().queue)) do
     map(lhs, function() M.close() end, 'close')
@@ -155,12 +186,14 @@ function M.open(s)
   if not s then return vim.notify('Agent-IDE: no chat open', vim.log.levels.INFO) end
   local twin = chat()._windows().transcript
   if not valid_win(twin) then return end
-  if Q.s ~= s then
+  local switched = Q.s ~= s
+  if switched then
     Q.s = s
     local buf = ensure_buf(s)
     require('agent-ide.ui.bufname').track(buf, s, ' · queue', function() return chat().project_of(s) end)
   end
   local buf = ensure_buf(s)
+  local fresh = switched or not valid_win(Q.win) or api.nvim_win_get_buf(Q.win) ~= buf
   if not valid_win(Q.win) then
     Q.win = api.nvim_open_win(buf, false, { split = 'left', win = twin, width = M.WIDTH })
     for name, value in pairs({ winfixwidth = true, number = false, relativenumber = false, signcolumn = 'no',
@@ -180,6 +213,8 @@ function M.open(s)
     session.on_change(on_session)
   end
   render()
+  -- every prompt is listed: a panel just shown starts at the end, where the work is
+  if fresh and valid_win(Q.win) then pcall(api.nvim_win_set_cursor, Q.win, { api.nvim_buf_line_count(buf), 0 }) end
 end
 
 ---Close the panel (the session stays known, so `Q` reopens it there).

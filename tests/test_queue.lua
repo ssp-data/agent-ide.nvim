@@ -48,7 +48,7 @@ T['layout: header with the count, sent prompts dim, the running one, queued ones
   for _, w in ipairs(l.lines) do eq(vim.fn.strdisplaywidth(w) <= 30, true) end
   local groups = vim.tbl_map(function(h) return h.group end, l.hl)
   eq(groups, { 'AgentIdeSection', 'AgentIdeAge', 'AgentIdeAge', 'AgentIdeBusy', 'AgentIdeSection', 'AgentIdeSection' })
-  -- waiting: the waiting mark and colour; idle: no running row; more than five sent: a count
+  -- waiting: the waiting mark and colour; idle: no running row; every sent prompt is listed
   s.state = 'waiting'
   eq(queue.layout(s, 30, { busy = 'B', waiting = 'W' }).lines[3], 'W second prompt that is rath…')
   s.state, s.queue = 'idle', {}
@@ -56,8 +56,8 @@ T['layout: header with the count, sent prompts dim, the running one, queued ones
   local many = { state = 'idle', turn_start = 1, queue = {}, events = {} }
   for i = 1, 8 do many.events[i] = { kind = 'prompt', text = 'p' .. i } end
   local lines = queue.layout(many, 30, {}).lines
-  eq(lines[2], '… 3 earlier')
-  eq({ lines[3], lines[#lines] }, { '✓ p4', '✓ p8' })
+  eq(#lines, 9)
+  eq({ lines[2], lines[#lines] }, { '✓ p1', '✓ p8' })
   eq(queue.layout({ state = 'idle', turn_start = 1, queue = {}, events = {} }, 30, {}).lines, { 'Queue · 0 waiting', 'nothing sent yet' })
 end
 
@@ -195,7 +195,7 @@ T['Q opens the panel left of the transcript; it shows the running and queued pro
   child.lua('vim.api.nvim_set_current_win(...)', { panel().win })
   child.lua('_G.rows = nil; require("agent-ide.ui.help").open = function(_, rows) _G.rows = rows end')
   child.type_keys('g?')
-  eq(vim.tbl_map(function(r) return r.key end, child.lua_get('_G.rows')), { '<CR>', 'x', 'q', 'Q / <leader>aQ' })
+  eq(vim.tbl_map(function(r) return r.key end, child.lua_get('_G.rows')), { '<CR>', 'x', 'e', 'dd', 'J / K', 'q', 'Q / <leader>aQ' })
   child.type_keys('q')
   eq(panel().win, nil)
 end
@@ -228,6 +228,52 @@ T['Q in the drawer: opens the session under the cursor with its panel, then togg
     if r.key and r.key:find('Q', 1, true) and r.desc:find('queue panel', 1, true) then found = r end
   end
   eq(found ~= nil, true)
+end
+
+T['queued prompts: e edits one in a buffer and :w puts it back; dd deletes; J and K move'] = function()
+  start({ { expect = 'first' }, init(), { expect = 'interrupt' }, result('stopped') })
+  open_new()
+  child.type_keys('Q')
+  child.type_keys('i', 'first', '<Esc>', '\\<CR>')
+  wait_for(function() return current().state == 'busy' end, 'busy')
+  for _, t in ipairs({ 'two', 'three', 'four' }) do child.type_keys('i', t, '<Esc>', '\\<CR>') end
+  wait_for(function() return current().queue == 3 end, 'queued')
+  local function q() return child.lua_get('require("agent-ide.ui.chat").current().queue') end
+  local function to_panel(line)
+    child.lua('vim.api.nvim_set_current_win(...)', { panel().win })
+    child.lua('vim.api.nvim_win_set_cursor(0, { ..., 0 })', { line })
+  end
+  -- e on `1. two`: a buffer with its text; :w puts the edit back in place, byte for byte
+  wait_for(function() return has_line(panel_lines() or {}, '1. two') ~= nil end, 'panel rows')
+  to_panel(has_line(panel_lines(), '1. two'))
+  child.type_keys('e')
+  eq(child.lua_get('vim.b.agent_ide_kind'), 'queued')
+  eq(child.lua_get('vim.api.nvim_buf_get_lines(0, 0, -1, false)'), { 'two' })
+  child.lua('vim.api.nvim_buf_set_lines(0, 0, -1, false, { "two, edited", "  second line " })')
+  child.cmd('write')
+  eq(q(), { 'two, edited\n  second line ', 'three', 'four' })
+  eq(child.lua_get('vim.bo.modified'), false)
+  child.cmd('close')
+  -- K on `3. four`: moves up, the cursor stays on it
+  to_panel(has_line(panel_lines(), '3. four'))
+  child.type_keys('K')
+  eq(q(), { 'two, edited\n  second line ', 'four', 'three' })
+  eq(child.lua_get('vim.api.nvim_get_current_line()'), '2. four')
+  child.type_keys('J')
+  eq(q(), { 'two, edited\n  second line ', 'three', 'four' })
+  -- dd on `2. three`: gone, its text in the unnamed register
+  to_panel(has_line(panel_lines(), '2. three'))
+  child.type_keys('dd')
+  eq(q(), { 'two, edited\n  second line ', 'four' })
+  eq(child.lua_get('vim.fn.getreg(\'"\')'), 'three')
+  -- a prompt sent (or taken back) while its buffer is open: :w changes nothing and says so
+  to_panel(has_line(panel_lines(), '2. four'))
+  child.type_keys('e')
+  child.lua('table.remove(require("agent-ide.ui.chat").current().queue, 2)')
+  child.lua('vim.api.nvim_buf_set_lines(0, 0, -1, false, { "late" })')
+  child.cmd('write')
+  eq(q(), { 'two, edited\n  second line ' })
+  eq(child.lua_get('_G.notes[#_G.notes]'):find('no longer queued', 1, true) ~= nil, true)
 end
 
 return T

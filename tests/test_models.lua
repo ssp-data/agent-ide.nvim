@@ -358,7 +358,7 @@ end
 
 -- Display ------------------------------------------------------------------------------------
 
-T['winbar and footer show the model by name; a pending change keeps old→new'] = function()
+T['the winbar shows the model by name; a pending change keeps old→new'] = function()
   local s = new()
   s.models = vim.deepcopy(LIST)
   s.model = 'claude-alpha-2'
@@ -371,8 +371,6 @@ T['winbar and footer show the model by name; a pending change keeps old→new'] 
   s.model = 'claude-alpha-3'
   local bar = require('agent-ide.ui.chat')._winbar(s, { key = dir, name = 'proj', sessions = {} }, 100)
   eq(bar:find('alpha 3', 1, true) ~= nil, true)
-  status._src.current = function() return s end
-  eq(status.statusline():find('· alpha 3', 1, true) ~= nil, true)
 end
 
 return T

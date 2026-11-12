@@ -6,6 +6,7 @@ All notable changes to Agent-IDE.nvim are listed here. The format follows [Keep 
 
 ### Added
 
+- Queue panel: `e` on a queued prompt opens it in a buffer, and `:w` puts the edited text back in its place in the queue (an empty save takes it out); `dd` deletes a queued prompt (into the unnamed register), `J` / `K` move one down or up.
 - A **full diff** view: every change of a branch in one read-only buffer, file by file with a header, the hunks with three lines of context and a fold per file, the way lazygit shows a branch. Four scopes: the branch against your working tree (what `Changes vs <base>` lists), its commits only (`Commits on branch`), one commit, and the uncommitted changes. `gd` on any git row in the drawer opens the scope of that row (a file row puts the cursor on the file), two dimmed `full diff · gd` rows sit in the `Changes` and `Commits` sections, `gd` in the commit graph opens a commit's (and `q` returns to the graph), and `:AgentsDiff` opens the branch of the current context. `<CR>` on a line jumps into the side-by-side diff of that file on that line and `q` there comes back; `]f` / `[f` and `]c` / `[c` step files and hunks, `za`, `z0`, `z9` fold. It reloads with the project's git data, keeping the cursor and your folds (`keys.full_diff`, `keys.drawer.full_diff`, `keys.graph.full_diff`; highlight groups `AgentIdeDiffHunk`, `AgentIdeDiffNote`).
 - `Q` (`keys.chat.queue`) also works in the drawer, on any row, and in the queue panel itself: show or hide the panel of the chat; on a session row while no chat is open it opens that session with its panel. The drawer's `?` lists it.
 - `r` on a drawer session row names the session: the drawer, the chat's winbar, the buffer names, search results and the footer show your name instead of Claude's title. Kept in the plugin's own `names.json` (`keys.drawer.rename`); Claude's files are not touched. An empty answer brings the title back.
@@ -25,6 +26,8 @@ All notable changes to Agent-IDE.nvim are listed here. The format follows [Keep 
 
 ### Changed
 
+- The queue panel lists every prompt sent, the first one too, instead of the last five, and opens at the end.
+- The footer no longer shows the model: the chat's winbar and the prompt window's label name it.
 - Plan mode has its own key: `<leader>am` turns it on, and off again back to the mode you had before (`keys.chat.plan`). `<S-Tab>` now cycles manual, acceptEdits and auto (`claude.modes`; add `'plan'` to have it there again), and in plan mode it leaves plan.
 
 ### Fixed
