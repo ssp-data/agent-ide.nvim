@@ -34,9 +34,28 @@ function M.from_lines(lines)
   return nil
 end
 
----Read the context size from the end of `path`; `cb(tokens|nil)` on the main loop.
+---The model of the last assistant message of the main conversation in `lines` (the last ones of
+---a file): the model the session ran with last. nil when none of the lines names one.
+---@param lines string[]
+---@return string|nil
+function M.model_from_lines(lines)
+  for i = #lines, 1, -1 do
+    local l = lines[i]
+    if l:find('"assistant"', 1, true) then
+      local ok, rec = pcall(vim.json.decode, l, DECODE_OPTS)
+      if ok and type(rec) == 'table' and rec.isSidechain ~= true and rec.type == 'assistant' and type(rec.message) == 'table' then
+        local m = rec.message.model
+        if type(m) == 'string' and m ~= '' and m ~= '<synthetic>' then return m end
+      end
+    end
+  end
+  return nil
+end
+
+---Read the context size and the last model from the end of `path`; `cb(tokens|nil, model|nil)`
+---on the main loop.
 ---@param path string
----@param cb fun(tokens: integer|nil)
+---@param cb fun(tokens: integer|nil, model: string|nil)
 function M.read(path, cb)
   local uv = vim.uv
   local function done(v) vim.schedule(function() cb(v) end) end
@@ -53,15 +72,16 @@ function M.read(path, cb)
         vim.schedule(function()
           local lines = vim.split(data, '\n', { trimempty = true })
           if len < size then table.remove(lines, 1) end -- the first line of a cut tail is partial
-          cb(M.from_lines(lines))
+          cb(M.from_lines(lines), M.model_from_lines(lines))
         end)
       end)
     end)
   end)
 end
 
----Bring `s.context_tokens` up to date and hand it over: the live value while a process runs,
----else the transcript's tail, read once per version of the file (`s.context_key`).
+---Bring `s.context_tokens` (and `s.transcript_model`, the model of its last answer) up to date
+---and hand the size over: the live value while a process runs, else the transcript's tail, read
+---once per version of the file (`s.context_key`).
 ---`cb(tokens|nil)` on the main loop.
 ---@param s table Session
 ---@param cb? fun(tokens: integer|nil)
@@ -72,10 +92,13 @@ function M.refresh(s, cb)
     if not st then return cb(s.context_tokens) end
     local key = st.mtime.sec .. '.' .. st.mtime.nsec .. ':' .. st.size
     if key == s.context_key then return cb(s.context_tokens) end
-    M.read(s.path, function(tokens)
+    M.read(s.path, function(tokens, model)
       if s:_alive() then return cb(s.context_tokens) end -- started meanwhile: the stream knows better
-      if s.context_tokens ~= tokens then
-        s.context_tokens, s.context_key = tokens, key
+      -- the model it ran with last: what it resumes with (prefs.start_model), not the one last
+      -- used in another session
+      model = model or s.transcript_model
+      if s.context_tokens ~= tokens or s.transcript_model ~= model then
+        s.context_tokens, s.transcript_model, s.context_key = tokens, model, key
         s:_emit('meta')
       else
         s.context_key = key

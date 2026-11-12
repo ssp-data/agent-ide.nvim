@@ -88,8 +88,9 @@ defaults = function()
     -- deleted sessions (`D` in the drawer) stay in stdpath('data')/agent-ide/trash until
     -- `:AgentsTrash empty`; keep_days (nil: keep) purges older ones at setup
     trash = { keep_days = nil },
-    -- prompt buffer: `/` opens the command menu, `@` opens the file picker
-    chat = { auto_slash = true, at_picker = true },
+    -- prompt buffer: `/` opens the command menu, `@` opens the file picker; prompt_label: a dim
+    -- `↑ title · model` on the prompt window's winbar naming the session it sends to
+    chat = { auto_slash = true, at_picker = true, prompt_label = true },
     -- context: the size of a session's conversation (the input tokens of its last request; the
     -- chat's winbar shows it as `~123k`). From `threshold` tokens on (false: never) the plugin
     -- asks before a send that resumes a session without a process (Send / Compact first /

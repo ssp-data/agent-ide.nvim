@@ -20,6 +20,7 @@ All notable changes to Agent-IDE.nvim are listed here. The format follows [Keep 
 - The command in a `Bash` fold has its own colour (`AgentIdeCommand`, linked to `Special`), so it stands apart from its output.
 - Colour codes in tool output (`make test`, `git`, `cargo`) are shown as colours and bold, as a terminal shows them, instead of `^[[1m` noise. The colours follow the colorscheme's terminal palette; the raw view (`gr`) keeps the exact bytes.
 - Background tasks (an async subagent, a shell run in the background) show as `task started: <description>` and `task completed: <description>` folds with the summary, tokens, tool uses and duration, instead of `unknown: system/task_started` folds of raw JSON. Foreground tasks no longer add a fold: their tool call already shows them.
+- The prompt window names the session it sends to: a dim `↑ <title> · <model>` on its winbar (`AgentIdePromptLabel`; `chat.prompt_label = false` turns it off). When another session's transcript is put into the window above (`:b`, a jump), the prompt below follows it; while you type it stays and the label warns in `AgentIdePromptOther`.
 
 ### Changed
 
@@ -27,6 +28,8 @@ All notable changes to Agent-IDE.nvim are listed here. The format follows [Keep 
 
 ### Fixed
 
+- Picking a model in one session no longer changes another one: a session that has answered before shows, and resumes with, the model of its own last answer (read from its transcript) instead of the model last used anywhere. The last used model is now only what new sessions start with.
+- `<leader>ay` opens a permission, question or plan again after its picker went away without an answer (closed by a focus change, say). Before, the ask stayed blocked until you left the chat and came back.
 - `<S-Tab>` no longer gets stuck on a mode Claude refuses, for example leaving plan mode while a turn runs. The cycle skips the refused mode and asks for the next one; it stops when it is back at the mode in effect.
 - Opening a session whose Claude another Neovim drives shows the "another Neovim drives this session" warning once and then the transcript from disk. Before, it kept trying to attach, so the warnings piled up and covered the screen.
 - Hand-off to native Claude (`gT`): a bare `claude` in the configured command is resolved through Neovim's own `$PATH` before the tmux pane runs it. The pane used to inherit the tmux server's environment, where `claude` can resolve to a different binary (a version manager's wrapper, say) that never starts.

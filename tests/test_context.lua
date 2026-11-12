@@ -75,6 +75,41 @@ T['from_lines: a compaction after the last message gives its size, or nothing'] 
   eq(context.from_lines({}), nil)
 end
 
+T['model_from_lines: the model of the last main-conversation answer'] = function()
+  local function with_model(m, extra)
+    return assistant({ input_tokens = 1 }, vim.tbl_extend('force', { message = { role = 'assistant', model = m,
+      content = { { type = 'text', text = 'hi' } }, usage = { input_tokens = 1 } } }, extra or {}))
+  end
+  eq(context.model_from_lines({
+    with_model('claude-opus-5-5'),
+    with_model('claude-sonnet-5-5'),
+    with_model('claude-haiku-5-5', { isSidechain = true }),
+    with_model('<synthetic>'),
+    rec({ type = 'user', message = { role = 'user', content = 'next' } }),
+  }), 'claude-sonnet-5-5')
+  eq(context.model_from_lines({ rec({ type = 'user', message = { role = 'user', content = 'x' } }) }), nil)
+end
+
+T['refresh: the transcript\'s model is what the session starts with, not the one last used elsewhere'] = function()
+  require('agent-ide.config').setup({})
+  local prefs = require('agent-ide.prefs')
+  local session = require('agent-ide.session')
+  local path = vim.fn.tempname()
+  vim.fn.writefile({ assistant({ input_tokens = 5 }) }, path) -- model claude-haiku-5-5
+  local s = session.open({ id = 'ctx-model', cwd = vim.fn.tempname(), path = path, title = 't' })
+  local fresh = session.open({ id = 'ctx-fresh', cwd = vim.fn.tempname(), title = 'new' })
+  prefs.set('model', 'opus') -- picked in another session
+  local done = false
+  context.refresh(s, function() done = true end)
+  assert(vim.wait(2000, function() return done end, 10))
+  eq({ s.transcript_model, prefs.start_model(s), prefs.start_model(fresh) }, { 'claude-haiku-5-5', 'claude-haiku-5-5', 'opus' })
+  -- picked for this session: that one
+  s.model_chosen = 'sonnet'
+  eq(prefs.start_model(s), 'sonnet')
+  prefs.set('model', nil)
+  vim.fn.delete(path)
+end
+
 T['read: the tail of a file, also when the tail starts inside a line'] = function()
   local path = vim.fn.tempname()
   local lines = { assistant({ input_tokens = 1 }) }

@@ -42,6 +42,10 @@ local GROUPS = {
   AgentIdeMode = M.dim,
   AgentIdeContext = M.dim, -- the context size (`~123k`) beside the model
   AgentIdeModeHot = { link = 'WarningMsg' },
+  -- the prompt window's label (`↑ title · model`, ui/prompt_label.lua); a prompt that is not the
+  -- transcript's in a warning colour
+  AgentIdePromptLabel = M.dim,
+  AgentIdePromptOther = { link = 'WarningMsg' },
 }
 
 -- the terminal's 16 colours when the colorscheme sets none (`g:terminal_color_<n>`)

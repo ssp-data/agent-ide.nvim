@@ -155,6 +155,22 @@ local function update_winbar(c)
     api.nvim_set_option_value('winbar', winbar_text(c.s, c.project, api.nvim_win_get_width(wins[i])),
       { scope = 'local', win = wins[i] })
   end
+  require('agent-ide.ui.prompt_label').refresh()
+end
+
+-- A prompt window follows the one transcript of its tab (another session's buffer put into the
+-- transcript window: `:b`, a jump), never while the user types in it; then every label is set.
+local function sync_prompts()
+  local label = require('agent-ide.ui.prompt_label')
+  for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+    if api.nvim_win_is_valid(w) and vim.b[api.nvim_win_get_buf(w)].agent_ide_kind == 'prompt'
+      and api.nvim_win_get_config(w).relative == '' then
+      local id = label.target(w)
+      local c = id and chats[id]
+      if c and valid_buf(c.pbuf) then api.nvim_win_set_buf(w, c.pbuf) end
+    end
+  end
+  label.refresh()
 end
 
 -- Visibility -------------------------------------------------------------------------------
@@ -177,7 +193,10 @@ local function update_visible(gone_win, gone_buf)
 end
 
 local function setup_autocmds()
-  local function later() vim.schedule(function() update_visible() end) end
+  local function later() vim.schedule(function()
+    update_visible()
+    sync_prompts()
+  end) end
   api.nvim_create_autocmd({ 'BufWinEnter', 'TabEnter' }, { group = augroup, callback = function()
     update_visible()
     later()
@@ -201,6 +220,7 @@ local function setup_autocmds()
         update_winbar(c)
       end
     end
+    require('agent-ide.ui.prompt_label').refresh() -- a resized prompt window: its label fits again
   end })
 end
 
@@ -514,6 +534,7 @@ function M.open(s, project)
   update_winbar(c)
   history.apply_win(twin, c.tbuf)
   local pwin = windows.show_prompt(c.pbuf, twin)
+  require('agent-ide.ui.prompt_label').refresh()
   api.nvim_set_current_win(pwin)
   windows.tcd(twin, c.project)
   load(c, fresh)
