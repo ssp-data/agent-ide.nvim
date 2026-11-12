@@ -261,6 +261,9 @@ T['visible session: the select opens; Allow sends allow, the result renders, the
   local sel = selects()[1]
   eq(sel.labels, { 'Allow', 'Deny' })
   eq(sel.mode, 'n')
+  -- the question is the prompt, and the message line repeats it for pickers that cut titles
+  eq(sel.prompt, 'Allow Write: /x/a.txt? a.txt')
+  eq(child.cmd_capture('messages'):find('Allow Write: /x/a.txt? a.txt', 1, true) ~= nil, true)
   local parts = view_parts()
   eq(parts.above, parts.rendered)
   eq(parts.block, parts.tail)

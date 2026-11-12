@@ -78,14 +78,16 @@ local function first_line(s)
   return split(s)[1]
 end
 
-local function summary(input)
-  if type(input) ~= 'table' then return '' end
+local function summary_field(input)
+  if type(input) ~= 'table' then return nil end
   for _, field in ipairs(SUMMARY_FIELDS) do
-    if input[field] ~= nil then
-      return vim.fn.strcharpart(first_line(input[field]), 0, 80)
-    end
+    if input[field] ~= nil then return field end
   end
-  return ''
+end
+
+local function summary(input)
+  local field = summary_field(input)
+  return field and vim.fn.strcharpart(first_line(input[field]), 0, 80) or ''
 end
 
 local EDIT_CONTEXT = 3 -- unchanged lines shown around a change of an Edit
@@ -325,6 +327,9 @@ end
 
 ---First line of `s` (`\n`, `\r\n` or `\r` end a line).
 M.first_line = first_line
+
+---The input field a tool call's summary is taken from (`command`, `file_path`, ...), or nil.
+M.summary_field = summary_field
 
 ---True when `ev` starts a turn: a main-thread prompt. Events before the first one form turn 0.
 ---@param ev table

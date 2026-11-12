@@ -21,6 +21,32 @@ function M.summary(p)
   return (render.tool_parts(p.tool_name or '?', p.input))
 end
 
+---A tool permission as one line, the subject first: `Allow Bash: npm test? Run the tests`. A
+---summary cut from a longer value says how much is left (`(+2 lines)`, `…`); Claude's own
+---description of the call and the ask's reason follow when they say something new.
+---@param p table pending ask { tool_name, input, description }
+---@return string
+function M.question(p)
+  local input = type(p.input) == 'table' and p.input or {}
+  local field = render.summary_field(input)
+  local subject = M.summary(p)
+  if field then
+    local value = split(input[field])
+    if vim.fn.strchars(value[1]) > vim.fn.strchars(subject) then subject = subject .. '…' end
+    if #value > 1 then subject = ('%s (+%d lines)'):format(subject, #value - 1) end
+  end
+  local out = ('Allow %s%s?'):format(render.first_line(p.tool_name or '?'), subject ~= '' and (': ' .. subject) or '')
+  local said = { [subject] = true }
+  for _, extra in ipairs({ field ~= 'description' and str(input.description) or '', str(p.description) }) do
+    extra = render.first_line(extra)
+    if extra ~= '' and not said[extra] then
+      said[extra] = true
+      out = out .. ' ' .. extra
+    end
+  end
+  return out
+end
+
 local function question_lines(p, out)
   out[#out + 1] = '▸ Question from Claude'
   for _, q in ipairs(list(type(p.input) == 'table' and p.input.questions)) do
