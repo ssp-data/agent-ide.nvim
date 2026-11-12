@@ -31,6 +31,9 @@ local GROUPS = {
   -- the removed and added lines of an Edit fold in a transcript (red, green)
   AgentIdeDiffAdd = { fg = '#9ece6a', ctermfg = 114 },
   AgentIdeDiffDel = { fg = '#f7768e', ctermfg = 204 },
+  -- the full diff view: the `@@` hunk lines and the one-line notes (binary, submodule), dimmed
+  AgentIdeDiffHunk = M.dim,
+  AgentIdeDiffNote = M.dim,
   -- the command of a Bash fold, apart from its output
   AgentIdeCommand = { link = 'Special' },
   -- chat winbar: the model in italic (Normal's foreground), the permission mode as a badge; a

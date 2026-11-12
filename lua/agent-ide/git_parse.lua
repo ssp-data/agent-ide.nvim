@@ -147,17 +147,17 @@ end
 ---@return { path: string, old_path: string|nil, lines: string[], binary: boolean, mode_only: boolean }[]
 function M.patch(text)
   local blocks, b, in_hunk = {}, nil, false
-  for line in (text or ''):gmatch('[^\n]*\n?') do
-    if line == '' then break end
-    line = line:gsub('\n$', '')
-    if line:sub(1, 11) == 'diff --git ' then
+  text = text or ''
+  if text ~= '' and text:sub(-1) ~= '\n' then text = text .. '\n' end
+  for line in text:gmatch('([^\n]*)\n') do
+    if in_hunk and line:sub(1, 11) ~= 'diff --git ' then
+      b.lines[#b.lines + 1] = line
+    elseif line:sub(1, 11) == 'diff --git ' then
       b = { path = header_paths(line:sub(12)), lines = {}, binary = false, mode_only = false, modes = false }
       blocks[#blocks + 1] = b
       in_hunk = false
     elseif b then
-      if in_hunk then
-        b.lines[#b.lines + 1] = line
-      elseif line:sub(1, 2) == '@@' then
+      if line:sub(1, 2) == '@@' then
         in_hunk = true
         b.lines[#b.lines + 1] = line
       elseif line:sub(1, 12) == 'rename from ' then
