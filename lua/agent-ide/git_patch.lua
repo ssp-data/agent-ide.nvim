@@ -35,7 +35,7 @@ end
 ---@param cb fun(rev: string|nil)
 function M.start(root, base, cb)
   if not base or not base.head then return cb(nil) end
-  if base.mode == 'branch' then return cb(base.merge_base) end
+  if git.branch_commits(base) then return cb(base.merge_base) end
   cache().when(root, 'commits', function(commits)
     if not commits or #commits == 0 then return cb(nil) end
     local oldest = commits[#commits].hash
@@ -201,7 +201,7 @@ end
 
 function loaders.commits(root, _, cb)
   cache().when(root, 'base', function(b)
-    local label = (b and b.mode == 'branch') and 'commits on branch' or 'recent commits'
+    local label = git.branch_commits(b) and 'commits on branch' or 'recent commits'
     M.start(root, b, function(from)
       if not from then return cb({ files = {}, blocks = {}, label = label }) end
       cache().when(root, 'committed', function(files) patch(root, diff_args(from, 'HEAD'), files or {}, label, cb) end)

@@ -122,8 +122,8 @@ end
 
 local function age(date, now) return require('agent-ide.ui.tree').ago(date, now) end
 
--- The first rows of an open Commits section: the commit graph of the work tree (ui/graph.lua),
--- dimmed, named with the drawer's graph key, <CR> opens it; then `uncommitted (n)`, what is not
+-- The first rows of an open Commits section: the full diff row, then the commit graph of the work
+-- tree (ui/graph.lua), dimmed, named with the drawer's graph key, <CR> opens it; then `uncommitted (n)`, what is not
 -- committed yet (the working tree and the index against HEAD, untracked files too), which
 -- expands to its files, each a diff of the working file against HEAD.
 local function graph_row(out, w, ctx, parent)
@@ -135,8 +135,8 @@ local function graph_row(out, w, ctx, parent)
 end
 
 -- A dimmed `full diff · gd` row (named with the drawer's key): the whole diff of the section in
--- one buffer (ui/fulldiff.lua), the branch against the working tree under Changes, the commits
--- only under Commits.
+-- one buffer (ui/fulldiff.lua), the branch against the working tree under Changes; under Commits
+-- the uncommitted changes when there are any, else the commits (fulldiff_open.from_node).
 local function fulldiff_row(out, w, parent, kind)
   local key = require('agent-ide.util.keys').get('drawer', 'full_diff')[1]
   local node = { type = 'git_fulldiff', kind = kind, project = w.project, root = w.root, id = w.root .. '#fulldiff:' .. kind,
@@ -244,11 +244,11 @@ local function tree_rows(out, w, ctx)
       files_rows(out, w, changes, w.indent .. '    ', node, 'branch')
     end
   end
-  label = base and (base.mode == 'branch' and 'Commits on branch' or 'Recent commits') or 'Commits'
+  label = base and (require('agent-ide.git').branch_commits(base) and 'Commits on branch' or 'Recent commits') or 'Commits'
   open, node = section(out, w, ctx, 'commits', label, commits and #commits)
   if open then
-    graph_row(out, w, ctx, node)
     fulldiff_row(out, w, node, 'commits')
+    graph_row(out, w, ctx, node)
     uncommitted_rows(out, w, ctx)
     if not commits then
       out[#out + 1] = hint(w.indent .. '    ', 'loading…', w.project)

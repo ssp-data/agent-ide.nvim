@@ -107,6 +107,8 @@ end
 ---(on the default branch, no default branch, no merge-base, no commits): uncommitted changes
 ---against HEAD and the last 20 commits. `rev` is what the working tree is compared with
 ---(the empty tree in a repository without commits); `label` names it for the drawer.
+---`none_ahead`: a branch with no commit of its own yet (HEAD is the merge-base); its commits are
+---listed as the recent ones (`M.branch_commits`), its changes still against the base.
 ---@param root string
 ---@param cb fun(base: table|nil)
 function M.base(root, cb)
@@ -118,6 +120,7 @@ function M.base(root, cb)
       b.merge_base = mb
       if mb and not b.on_default then
         b.mode, b.rev, b.label = 'branch', mb, b.ref
+        b.none_ahead = mb == h.head
       else
         b.mode, b.rev, b.label = 'recent', h.head, 'HEAD'
       end
@@ -134,6 +137,12 @@ function M.base(root, cb)
     end)
   end)
 end
+
+---Whether the commits of `b` are the branch's own (`merge_base..HEAD`); false lists the recent
+---ones: the default branch, no merge-base, or a branch with no commit of its own yet.
+---@param b table|nil
+---@return boolean
+function M.branch_commits(b) return b ~= nil and b.mode == 'branch' and not b.none_ahead end
 
 local function with_base(root, base, cb)
   if base then return cb(base) end
@@ -225,11 +234,11 @@ end
 local LOG_FORMAT = '--format=%x1e%H%x1f%h%x1f%at%x1f%s'
 
 local function log_range(b)
-  if b.mode == 'branch' then return { '--max-count=' .. MAX_COMMITS, b.merge_base .. '..HEAD' } end
+  if M.branch_commits(b) then return { '--max-count=' .. MAX_COMMITS, b.merge_base .. '..HEAD' } end
   return { '--max-count=' .. RECENT, 'HEAD' }
 end
 
----Commits on the branch since the merge-base (newest first); the last 20 in 'recent' mode.
+---Commits on the branch since the merge-base (newest first); else the last 20 (M.branch_commits).
 ---@param root string
 ---@param cb fun(commits: table[], base: table|nil)
 ---@param base? table
@@ -252,7 +261,7 @@ end
 function M.file_commits(root, path, cb, base, old_path)
   with_base(root, base, function(b)
     if not b or not b.head then return cb({}) end
-    local range = b.mode == 'branch' and { b.merge_base .. '..HEAD' } or { '--max-count=' .. RECENT, 'HEAD' }
+    local range = M.branch_commits(b) and { b.merge_base .. '..HEAD' } or { '--max-count=' .. RECENT, 'HEAD' }
     local args = vim.list_extend({ 'log', '--no-color', '--no-show-signature', LOG_FORMAT }, range)
     vim.list_extend(args, { '--', path, old_path })
     M.run(root, args, function(code, out) cb(code == 0 and parse.log(out) or {}) end)

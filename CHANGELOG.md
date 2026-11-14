@@ -4,6 +4,11 @@ All notable changes to Agent-IDE.nvim are listed here. The format follows [Keep 
 
 ## [Unreleased]
 
+### Changed
+
+- Full diff from the `Commits` section (its header, the `full diff · gd` row or the `commit graph` row) opens the uncommitted changes first when there are any, else the commits; `gd` on a commit row still opens that commit. The `full diff · gd` row now sits above `commit graph · G`.
+- A branch with no commit of its own yet (HEAD still at its fork point) lists `Recent commits` (the last 20) instead of an empty `Commits on branch (0)`; `Changes vs <base>` stays against the base. The full diff's commits scope and the side-by-side view follow the same list.
+
 ## [0.2.0] - 2026-11-12
 
 ### Added
