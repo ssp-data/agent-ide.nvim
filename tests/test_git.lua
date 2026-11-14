@@ -159,6 +159,26 @@ T['commits: branch commits newest first with files count; recent on default'] = 
   eq({ #cs, cs[1].subject }, { 20, 'n22' })
 end
 
+T['commits: a branch with no commit of its own lists the recent ones; changes stay against the base'] = function()
+  local d = R.init(tmp .. '/r')
+  R.write(d, 'a.txt', { 'a' })
+  R.commit(d, 'one')
+  R.write(d, 'a.txt', { 'b' })
+  R.commit(d, 'two')
+  R.git(d, { 'checkout', '-q', '-b', 'fresh' })
+  R.write(d, 'a.txt', { 'c' })
+  local b = R.await(function(cb) git.base(d, cb) end)
+  eq({ b.mode, b.label, b.none_ahead, git.branch_commits(b) }, { 'branch', 'main', true, false })
+  local cs = R.await(function(cb) git.commits(d, cb) end)
+  eq(vim.tbl_map(function(c) return c.subject end, cs), { 'two', 'one' })
+  eq(#R.await(function(cb) git.changes(d, cb) end), 1)
+  R.commit(d, 'three') -- one commit of its own: only that one
+  b = R.await(function(cb) git.base(d, cb) end)
+  eq({ b.none_ahead, git.branch_commits(b) }, { false, true })
+  cs = R.await(function(cb) git.commits(d, cb) end)
+  eq(vim.tbl_map(function(c) return c.subject end, cs), { 'three' })
+end
+
 T['commits: a merge commit counts files against its first parent'] = function()
   local d = feature_repo()
   R.git(d, { 'checkout', '-q', 'main' })

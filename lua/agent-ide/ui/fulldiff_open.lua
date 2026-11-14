@@ -7,7 +7,9 @@ local M = {}
 
 ---Open the full diff a drawer row stands for: the row's project, section, commit or file. The
 ---scope follows the row (its work tree as `G` picks it); a file row puts the cursor on that
----file. false when the row is not in a git project.
+---file. The Commits section as a whole (its header, its `full diff` and `commit graph` rows)
+---opens the uncommitted changes when there are any, else the commits; a commit row opens that
+---commit. false when the row is not in a git project.
 ---@param node table|nil
 ---@return boolean
 function M.from_node(node)
@@ -15,6 +17,9 @@ function M.from_node(node)
   if not root then return false end
   local scope, focus = { kind = 'branch' }, nil
   local t = node.type
+  local function open(s)
+    require('agent-ide.ui.fulldiff').open({ root = root, project = project, scope = s, focus_path = focus })
+  end
   if t == 'git_file' then
     scope = { kind = node.mode == 'commit' and 'commit' or node.mode == 'head' and 'head' or 'branch', commit = node.commit }
     focus = node.file.path
@@ -22,12 +27,16 @@ function M.from_node(node)
     scope = { kind = 'commit', commit = node.commit }
   elseif t == 'git_uncommitted' then
     scope = { kind = 'head' }
+  elseif (t == 'git_fulldiff' and node.kind == 'commits') or t == 'git_graph'
+      or (t == 'git_section' and node.name == 'commits') then
+    cache.when(root, 'uncommitted', function(files)
+      open({ kind = (files and #files > 0) and 'head' or 'commits' })
+    end)
+    return true
   elseif t == 'git_fulldiff' then
     scope = { kind = node.kind }
-  elseif t == 'git_graph' or (t == 'git_section' and node.name == 'commits') then
-    scope = { kind = 'commits' }
   end
-  require('agent-ide.ui.fulldiff').open({ root = root, project = project, scope = scope, focus_path = focus })
+  open(scope)
   return true
 end
 
@@ -68,7 +77,7 @@ function M.side_by_side(v, path, line)
     return side_by_side(v, path, line, 'head', 'uncommitted')
   end
   local base = cache.base(v.root)
-  if kind == 'branch' or (base and base.mode == 'branch') then
+  if kind == 'branch' or git.branch_commits(base) then
     return side_by_side(v, path, line, 'branch', 'changes')
   end
   git.file_commits(v.root, path, function(commits)

@@ -909,7 +909,7 @@ local function wait_fd(kind)
   return fd()
 end
 
-T['drawer: full diff rows in Changes and Commits; <CR> opens the branch / commits scope'] = function()
+T['drawer: full diff rows in Changes and Commits; <CR> opens the branch / uncommitted-else-commits scope'] = function()
   start()
   child.lua('require("agent-ide").toggle()')
   press_on(' r  ')
@@ -925,14 +925,27 @@ T['drawer: full diff rows in Changes and Commits; <CR> opens the branch / commit
   eq(has_line(l, 'Changes vs main') < has_line(l, 'full diff · gd'), true)
   eq(has_line(l, 'full diff · gd') < has_line(l, 'M a.lua'), true)
   local graph_row = has_line(l, 'commit graph · G')
-  eq(l[graph_row + 1]:find('full diff · gd', 1, true) ~= nil, true)
-  eq(l[graph_row + 2]:find('uncommitted', 1, true) ~= nil, true)
+  eq(l[graph_row - 1]:find('full diff · gd', 1, true) ~= nil, true) -- the full diff row comes first
+  eq(l[graph_row + 1]:find('uncommitted', 1, true) ~= nil, true)
   press_on('full diff · gd')
   local v = wait_fd('branch')
   eq({ v.root, v.lines[1]:sub(1, 9) }, { repo, 'v M a.lua' })
-  child.lua('local s = require("agent-ide.ui.drawer").state(); vim.api.nvim_set_current_win(s.win)')
-  child.lua('vim.api.nvim_win_set_cursor(require("agent-ide.ui.drawer").state().win, { ..., 0 })', { graph_row + 1 })
-  child.type_keys('<CR>')
+  local function open_commits_row()
+    local row = has_line(drawer_lines(), 'commit graph · G') - 1
+    child.lua('local s = require("agent-ide.ui.drawer").state(); vim.api.nvim_set_current_win(s.win)')
+    child.lua('vim.api.nvim_win_set_cursor(require("agent-ide.ui.drawer").state().win, { ..., 0 })', { row })
+    child.type_keys('<CR>')
+  end
+  open_commits_row() -- uncommitted changes exist: they come first
+  v = wait_fd('head')
+  eq(has_line(v.lines, 'v ? u.txt') ~= nil, true)
+  R.git(repo, { 'stash', '-u' }) -- a clean tree: the commits
+  child.lua('require("agent-ide.git_cache").invalidate(...)', { repo })
+  wait_for(function() -- both reloads in (Changes loses a row), so the rows no longer move
+    local l = drawer_lines()
+    return has_line(l, 'uncommitted (0)') ~= nil and has_line(l, 'Changes vs main (4)') ~= nil
+  end, 'changes and uncommitted reloaded')
+  open_commits_row()
   v = wait_fd('commits')
   eq(has_line(v.lines, 'v ? u.txt'), nil) -- committed only
 end
