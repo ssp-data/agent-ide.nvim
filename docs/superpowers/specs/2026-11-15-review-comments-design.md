@@ -206,3 +206,13 @@ review = {
 - The order of the `another session…` picker and its row format (reuse the drawer's row text where it can).
 - The wording of notices and of `docs/review.md`, within the README's tone. The comparison table states only what is verified from each tool's README at the time of writing, dated, and lists what Agent-IDE does not do (no forge push, no jj or hg, not a single binary). The tools: [tuicr](https://tuicr.dev/), [hunk](https://github.com/modem-dev/hunk), [lumen](https://github.com/jnsahaj/lumen), `gh pr review`, `git diff`.
 - Cross-showing a comment between the `branch` and `head` scopes only for new-side and file-level anchors (old-side numbers differ between the merge-base and `HEAD`); the commit's full hash stored beside the short one; a notice for `:AgentsReview` and `gs` with nothing pending.
+
+## Round 2 (2026-11-15, after the owner's first use)
+
+Three changes the owner asked for after reviewing with the feature itself.
+
+1. **Comments stay until their prompt is sent.** Putting the review into the prompt (`gs`) no longer clears the comments: they stay in the view, marked `↑ in prompt` (dim), editable, and `gs` again rebuilds the whole text from every pending comment (`Replace the draft` is listed first then). The comments leave when the prompt that holds them is sent to Claude (`<C-CR>` in the chat; the sent text still contains the review's first line), with a direct send, with `dd`, or when copied to the clipboard (an explicit hand-over, as before). Clearing the prompt by hand leaves them pending. Why: after `gs` the owner wanted to add one more comment and update the prompt, and found the diff empty.
+2. **The `full diff` row of the Commits section expands to its files.** `gd` on that section opens the committed changes of the whole branch (or the uncommitted ones), a scope whose files the drawer did not list. The row gets a fold arrow like a commit; open, it lists the files of the commits scope (status, path, stats) and `<CR>` or `gd` on one opens the full diff of that scope with the cursor on the file. The `Changes` section's row stays plain (its files are listed below it already).
+3. **The winbar names the file under the cursor**, first and bold (`AgentIdeFullDiffFile`), before the scope summary: `lua/agent-ide/ui/review_send.lua · full diff · commits on branch · 30 files +3068 −174 · 2 comments`, updated as the cursor moves. A sticky header window was considered and dropped (it would hide a line of the generated buffer); the drawer following the cursor was dropped in favour of 2.
+
+Ideas from tuicr's source (checked out for reference) are weighed in the plan; none of the three changes depends on them.

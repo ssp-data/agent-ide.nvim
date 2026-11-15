@@ -64,9 +64,18 @@ local function deliver(c, given)
     if not valid_buf(c.pbuf) then return end
     text = prompt.text_to_send(api.nvim_buf_get_lines(c.pbuf, 0, -1, false))
   end
+  local mark = not given and vim.b[c.pbuf].agent_ide_review or nil
   local ok, reason = c.s:send(text)
   if ok then
-    if not given then prompt.clear(c.pbuf) end
+    if not given then
+      prompt.clear(c.pbuf)
+      vim.b[c.pbuf].agent_ide_review = nil
+      -- the review put into this prompt went with it: its comments leave the review (a prompt
+      -- rewritten by hand, without the review's first line, keeps them)
+      if mark and type(mark.intro) == 'string' and text:find(mark.intro, 1, true) then
+        require('agent-ide.ui.review_send').sent_from_prompt(mark)
+      end
+    end
   elseif reason == 'running elsewhere' then
     notify(elsewhere_msg(), vim.log.levels.WARN)
   elseif reason ~= 'empty' then

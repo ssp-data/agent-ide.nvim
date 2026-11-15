@@ -107,10 +107,15 @@ local function winbar()
     if a > 0 then s = s .. ' +' .. a end
     if d > 0 then s = s .. ' −' .. d end
     parts[#parts + 1] = s
-    local n = V.comments and #V.comments or 0
+    local n, k = 0, 0
+    for _, c in ipairs(V.comments or {}) do
+      n = n + 1
+      if c.in_prompt then k = k + 1 end
+    end
     if n > 0 then
       local target = require('agent-ide.ui.review_send').target_name(V.root, V.project)
-      parts[#parts + 1] = n .. (n == 1 and ' comment' or ' comments') .. (target and (' → ' .. target) or '')
+      parts[#parts + 1] = n .. (n == 1 and ' comment' or ' comments') .. (k > 0 and (', ' .. k .. ' in the prompt') or '')
+        .. (target and (' → ' .. target) or '')
     end
   elseif V.loading then
     parts[#parts + 1] = 'loading…'

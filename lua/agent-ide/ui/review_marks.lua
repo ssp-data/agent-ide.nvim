@@ -1,8 +1,9 @@
 -- Review comments in the full diff: where a line of the render anchors a comment, and the
 -- comments as virtual lines under their line. Placing walks the lines of the commented files
 -- only (their fold ranges), never the whole patch. A comment whose line is no longer in the
--- diff sits under its file's header with a note; a comment on a file the render does not
--- show is not placed (it stays in the review).
+-- diff sits under its file's header with a note; one already put into a prompt (not sent yet)
+-- carries `↑ in prompt`; a comment on a file the render does not show is not placed (it stays
+-- in the review).
 local api = vim.api
 
 local M = {}
@@ -94,6 +95,7 @@ local function virt_lines(entry)
   local c = entry.comment
   local text = vim.split(c.text or '', '\n', { plain = true })
   local first = { { BAR, 'AgentIdeReviewBar' }, { c.kind .. '  ', M.group_of(c.kind) } }
+  if c.in_prompt then first[#first + 1] = { '↑ in prompt  ', 'AgentIdeDiffNote' } end
   if entry.lost then first[#first + 1] = { ('(line %d not in this diff)  '):format(c.line), 'AgentIdeDiffNote' } end
   first[#first + 1] = { text[1] or '', 'AgentIdeReviewText' }
   local out = { first }

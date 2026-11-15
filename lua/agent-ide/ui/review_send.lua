@@ -1,7 +1,9 @@
 -- Where a review goes and how: which session (asked once per review, at its first comment),
 -- the done step (`gs`, the drawer's `review (n)` row, `:AgentsReview`: the comments as one text
 -- into the session's prompt above the draft or replacing it, or to the clipboard), and the
--- direct send of one comment (`<C-CR>` in the editor) through the chat's send path. The full
+-- direct send of one comment (`<C-CR>` in the editor) through the chat's send path. Comments
+-- put into a prompt stay in the review, marked, until that prompt is sent (or they are copied,
+-- sent at once, or deleted); `gs` again rebuilds the whole text. The full
 -- diff keeps its window throughout: the prompt opens below it, the chat is never opened here.
 local api = vim.api
 local config = require('agent-ide.config')
@@ -170,12 +172,24 @@ local function ids_of(comments)
   return ids
 end
 
--- The comments left the review: the full diff and the drawer show it.
-local function cleared(root, comments)
-  review.clear(root, ids_of(comments))
+-- The review changed: the full diff and the drawer show it.
+local function changed()
   local fd = fulldiff()
   if fd then fd.redraw_marks() end
   if drawer() then drawer().refresh() end
+end
+
+-- The comments left the review.
+local function cleared(root, comments)
+  review.clear(root, ids_of(comments))
+  changed()
+end
+
+---The prompt that held a review was sent (ui/chat_send.lua): its comments leave the review.
+---@param mark { root: string, ids: integer[] } what `put` left on the prompt buffer
+function M.sent_from_prompt(mark)
+  review.clear(mark.root, mark.ids)
+  changed()
 end
 
 local function has_text(lines)
@@ -185,11 +199,16 @@ local function has_text(lines)
   return false
 end
 
--- Put `lines` into the prompt of `s` and show that prompt below the main window.
-local function put(s, project, lines, how)
+-- Put `lines` into the prompt of `s` and show that prompt below the main window. The comments
+-- are marked as in the prompt and the buffer remembers them (`agent_ide_review`), so a send
+-- of that prompt clears them (chat_send.deliver → `M.sent_from_prompt`).
+local function put(s, project, root, comments, lines, how)
   local chat = require('agent-ide.ui.chat')
   local _, pbuf = chat.ensure(s, project)
   require('agent-ide.ui.prompt').put(pbuf, lines, how)
+  local ids = ids_of(comments)
+  review.mark(root, ids, { in_prompt = true })
+  vim.b[pbuf].agent_ide_review = { root = root, ids = ids, intro = lines[1] }
   local windows = require('agent-ide.ui.chat_win')
   local win = windows.show_prompt(pbuf, windows.transcript())
   api.nvim_set_current_win(win)
@@ -212,8 +231,15 @@ function M.done(root, project)
     -- the prompt buffer first: a draft kept on disk comes back into it (ui/drafts.lua)
     local _, pbuf = require('agent-ide.ui.chat').ensure(s, project)
     local draft = pbuf ~= nil and has_text(api.nvim_buf_get_lines(pbuf, 0, -1, false))
+    local in_prompt = 0
+    for _, c in ipairs(comments) do
+      if c.in_prompt then in_prompt = in_prompt + 1 end
+    end
     local items = {}
-    if draft then
+    if draft and in_prompt > 0 then -- the draft holds an earlier text of this review: replace it
+      items[#items + 1] = { label = 'Replace the draft', how = 'replace' }
+      items[#items + 1] = { label = 'Insert above the draft', how = 'above' }
+    elseif draft then
       items[#items + 1] = { label = 'Insert above the draft', how = 'above' }
       items[#items + 1] = { label = 'Replace the draft', how = 'replace' }
     else
@@ -224,7 +250,8 @@ function M.done(root, project)
     items[#items + 1] = { label = 'Cancel' }
     local n = #comments
     local what = n .. (n == 1 and ' comment' or ' comments')
-    select(items, ('Review of %s: %s, to "%s"'):format(name, what, target), function(choice)
+    local state = what .. (in_prompt > 0 and (', ' .. in_prompt .. ' in the prompt') or '')
+    select(items, ('Review of %s: %s, to "%s"'):format(name, state, target), function(choice)
       if not choice then return end
       if choice.other then
         return M.ask_session(root, project, function(ok2) if ok2 then M.done(root, project) end end)
@@ -238,9 +265,9 @@ function M.done(root, project)
         cleared(root, comments)
         return notify(('review of %s: %s copied'):format(name, what))
       end
-      put(s, project, lines, choice.how)
-      cleared(root, comments)
-      notify(('review of %s: %s in the prompt of "%s"'):format(name, what, target))
+      put(s, project, root, comments, lines, choice.how)
+      changed()
+      notify(('review of %s: %s in the prompt of "%s"; they leave the review when it is sent'):format(name, what, target))
     end)
   end)
 end

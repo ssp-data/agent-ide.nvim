@@ -58,6 +58,16 @@ T['add, list, update, remove, clear, count; ids grow; the file round-trips'] = f
   eq(review.add(root, { kind = 'NOTE', text = 'n', scope = { kind = 'head' }, path = 'a' }).id, 3)
 end
 
+T['mark: in_prompt is kept on the comments named and round-trips'] = function()
+  review.add(root, { kind = 'NOTE', text = 'a', scope = { kind = 'head' }, path = 'a' })
+  review.add(root, { kind = 'NOTE', text = 'b', scope = { kind = 'head' }, path = 'b' })
+  review.mark(root, { 1 }, { in_prompt = true })
+  review._reset()
+  eq({ review.list(root)[1].in_prompt, review.list(root)[2].in_prompt }, { true, nil })
+  review.mark(root, { 1, 2 }, { in_prompt = false })
+  eq({ review.list(root)[1].in_prompt, review.list(root)[2].in_prompt }, { nil, nil })
+end
+
 T['matches: kind and hash; head and branch see each other except old-side anchors'] = function()
   eq(review.matches({ scope = { kind = 'head' }, side = 'new' }, { kind = 'branch' }), true)
   eq(review.matches({ scope = { kind = 'head' }, side = 'old' }, { kind = 'branch' }), false)

@@ -321,6 +321,18 @@ local function set_draft(lines)
     vim.api.nvim_buf_set_lines(pbuf, 0, -1, false, lines)]], { ID, repo, lines })
 end
 
+-- Every comment of the review is marked as in the prompt.
+local function wait_in_prompt(n)
+  wait_for(function()
+    local list = child.lua_get('require("agent-ide.review").list(...)', { repo })
+    if #list ~= n then return false end
+    for _, c in ipairs(list) do
+      if not c.in_prompt then return false end
+    end
+    return true
+  end, 'the comments marked in the prompt')
+end
+
 local function wait_drawer_sessions()
   wait_for(function()
     for _, p in ipairs(child.lua_get('require("agent-ide.ui.drawer").state().projects or {}')) do
@@ -397,7 +409,7 @@ T['gs: the text lands above the draft, the prompt opens below the diff, the revi
   local a = asks()[2]
   eq(a.prompt, 'Review of r: 1 comment, to "Work on it"')
   eq(a.items, { 'Insert above the draft', 'Replace the draft', 'Copy to clipboard', 'Another session…', 'Cancel' })
-  wait_for(function() return count() == 0 end, 'the review cleared')
+  wait_in_prompt(1)
   local lines = prompt_lines()
   eq(lines[1], 'I reviewed your changes and have the following comments. Please address them.')
   eq(has_line(lines, '## uncommitted changes (working tree against HEAD ') ~= nil, true)
@@ -406,9 +418,10 @@ T['gs: the text lands above the draft, the prompt opens below the diff, the revi
   eq(lines[#lines], 'my draft')
   eq(view() ~= vim.NIL and view().shown, true)
   eq(child.lua_get('vim.b[vim.api.nvim_get_current_buf()].agent_ide_kind'), 'prompt')
-  eq(virt_at('+aaa'), nil)
-  eq(view().winbar:find('comment', 1, true), nil)
-  eq(child.lua_get('_G.notes[#_G.notes]'), 'Agent-IDE: review of r: 1 comment in the prompt of "Work on it"')
+  eq(virt_at('+aaa'), '  ┃ BUG  ↑ in prompt  swallows it') -- still there, marked, until that prompt is sent
+  eq(view().winbar:find('1 comment, 1 in the prompt', 1, true) ~= nil, true)
+  eq(child.lua_get('_G.notes[#_G.notes]'),
+    'Agent-IDE: review of r: 1 comment in the prompt of "Work on it"; they leave the review when it is sent')
 end
 
 T['gs with an empty prompt offers one put choice; Copy to clipboard fills the register and clears'] = function()
@@ -486,8 +499,8 @@ T['the drawer shows review (n) · gs in Commits while comments are pending; <CR>
   press('review (1) · gs')
   wait_for(function() return #asks() == 2 end, 'the done dialog')
   eq(asks()[2].prompt, 'Review of r: 1 comment, to "Work on it"')
-  wait_for(function() return count() == 0 end, 'cleared')
-  wait_for(function() return has_line(drawer_lines(), 'review (') == nil end, 'the row gone')
+  wait_in_prompt(1)
+  eq(has_line(drawer_lines(), 'review (1) · gs') ~= nil, true) -- pending until the prompt is sent
 end
 
 T[':AgentsReview from the chat of the repository runs the done step'] = function()
@@ -503,7 +516,7 @@ T[':AgentsReview from the chat of the repository runs the done step'] = function
   child.cmd('AgentsReview')
   wait_for(function() return #asks() == 2 end, 'the done dialog')
   eq(asks()[2].prompt, 'Review of r: 1 comment, to "Work on it"')
-  wait_for(function() return count() == 0 end, 'cleared')
+  wait_in_prompt(1)
   eq(prompt_lines()[1], 'I reviewed your changes and have the following comments. Please address them.')
 end
 
@@ -609,7 +622,7 @@ T['gs with a draft kept on disk by an earlier Neovim offers Insert above / Repla
   child.type_keys('gs')
   wait_for(function() return #asks() == 2 end, 'the done dialog')
   eq(asks()[2].items[1], 'Insert above the draft')
-  wait_for(function() return count() == 0 end, 'cleared')
+  wait_in_prompt(1)
   local lines = prompt_lines()
   eq(lines[#lines], 'my old draft')
 end
@@ -649,6 +662,80 @@ T['before the drawer has scanned, a stored session is kept: the winbar lookup ne
   wait_drawer_sessions()
   eq(child.lua_get('require("agent-ide.ui.review_send").target_name(..., select(2, ...))', { repo, project }), 'Work on it')
   eq(session_of_review(), ID)
+end
+
+-- Round 2: comments stay until their prompt is sent -------------------------------------------------
+
+T['gs keeps the comments, marked in prompt; a second gs offers Replace first and rebuilds one text'] = function()
+  start()
+  open({ kind = 'head' })
+  wait_drawer_sessions()
+  comment_on('+aaa', 'one')
+  wait_for(function() return virt_at('+aaa') ~= nil end, 'placed')
+  child.type_keys('gs')
+  wait_for(function() return #asks() == 2 end, 'the done dialog')
+  wait_for(function() return virt_at('+aaa') == '  ┃ NOTE  ↑ in prompt  one' end, 'the in-prompt mark')
+  eq(count(), 1)
+  eq(view().winbar:find('1 comment, 1 in the prompt', 1, true) ~= nil, true)
+  eq(prompt_lines()[1], 'I reviewed your changes and have the following comments. Please address them.')
+  child.lua('vim.api.nvim_set_current_win(vim.fn.win_findbuf(require("agent-ide.ui.fulldiff").state().buf)[1])')
+  comment_on('+n2', 'BUG: two')
+  wait_for(function() return virt_at('+n2') ~= nil end, 'placed')
+  child.type_keys('gs')
+  wait_for(function() return #asks() == 3 end, 'the done dialog again')
+  eq(asks()[3].prompt, 'Review of r: 2 comments, 1 in the prompt, to "Work on it"')
+  eq(asks()[3].items[1], 'Replace the draft')
+  wait_for(function() return has_line(prompt_lines(), '2. **[BUG]** `new.txt:2` — `n2`') ~= nil end, 'both in the prompt')
+  local lines = prompt_lines()
+  local intros = 0
+  for _, l in ipairs(lines) do
+    if l == 'I reviewed your changes and have the following comments. Please address them.' then intros = intros + 1 end
+  end
+  eq(intros, 1)
+  eq(has_line(lines, '1. **[NOTE]** `a.txt:3` — `aaa`') ~= nil, true)
+  eq(count(), 2)
+end
+
+-- Open the chat of the fixture session and send what its prompt holds with <C-CR>.
+local function send_prompt()
+  child.lua([[local id, repo = ...
+    local s = require('agent-ide.session').open({ id = id, cwd = repo })
+    require('agent-ide.ui.chat').open(s, { key = repo, root = repo, name = 'r', is_git = true, sessions = {} })
+    vim.api.nvim_set_current_win(require('agent-ide.ui.chat')._windows().prompt)
+    vim.cmd('stopinsert')]], { ID, repo })
+  child.type_keys('<C-CR>')
+end
+
+T['sending the prompt that holds the review clears its comments'] = function()
+  start({ fake = { { expect = 'I reviewed your changes' }, init_step(), result_step('ok') } })
+  open({ kind = 'head' })
+  wait_drawer_sessions()
+  comment_on('+aaa', 'one')
+  wait_for(function() return virt_at('+aaa') ~= nil end, 'placed')
+  child.type_keys('gs')
+  wait_for(function() return prompt_lines() ~= vim.NIL and prompt_lines()[1]:sub(1, 10) == 'I reviewed' end, 'in the prompt')
+  eq(count(), 1)
+  send_prompt()
+  wait_for(function() return #fake_prompts() == 1 end, 'the fake to receive the prompt', 10000)
+  wait_for(function() return count() == 0 end, 'the comments cleared')
+end
+
+T['other text sent from that prompt keeps the comments pending'] = function()
+  start({ fake = { { expect = 'hello' }, init_step(), result_step('ok') } })
+  open({ kind = 'head' })
+  wait_drawer_sessions()
+  comment_on('+aaa', 'one')
+  wait_for(function() return virt_at('+aaa') ~= nil end, 'placed')
+  child.type_keys('gs')
+  wait_for(function() return prompt_lines() ~= vim.NIL and prompt_lines()[1]:sub(1, 10) == 'I reviewed' end, 'in the prompt')
+  child.lua([[local id, repo = ...
+    local s = require('agent-ide.session').open({ id = id, cwd = repo })
+    local _, pbuf = require('agent-ide.ui.chat').buffers(s)
+    vim.api.nvim_buf_set_lines(pbuf, 0, -1, false, { 'hello' })]], { ID, repo })
+  send_prompt()
+  wait_for(function() return #fake_prompts() == 1 end, 'the fake to receive the prompt', 10000)
+  vim.wait(300)
+  eq(count(), 1)
 end
 
 return T

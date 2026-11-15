@@ -3,7 +3,7 @@
 -- file is stdpath('state')/agent-ide/reviews/<folder>-<hash of the root>.json, 0600 in a 0700
 -- folder, written atomically. Several Neovims share it (read again by stamp, as names.lua).
 --   { "version": 1, "root": "/abs/path", "session": "<id>" | null, "next_id": 4,
---     "comments": [ { "id": 1, "kind": "BUG", "text": "…", "at": "2026-11-15T08:10:05Z",
+--     "comments": [ { "id": 1, "kind": "BUG", "text": "…", "at": "2026-11-15T08:10:05Z", "in_prompt": true,
 --       "scope": { "kind": "head", "hash": "7f0f916" },        -- or commit: hash, short, subject;
 --       "path": "lua/x.lua", "side": "new", "line": 42, "code": "…" } ] }  -- branch, commits: base
 -- `side` is `new` for `+` and context lines, `old` for `-` lines, absent with `line` for a
@@ -45,6 +45,7 @@ local function take(root, data)
       and type(c.id) == 'number' then
       c.kind = type(c.kind) == 'string' and c.kind or 'NOTE'
       c.text = type(c.text) == 'string' and c.text or ''
+      if c.in_prompt ~= true then c.in_prompt = nil end
       out.comments[#out.comments + 1] = c
       if c.id > max then max = c.id end
     end
@@ -163,6 +164,24 @@ function M.update(root, id, fields)
     end
   end
   return false
+end
+
+---Set `fields` (`in_prompt`: the comment is in a prompt buffer, not sent yet) on the comments
+---with these ids; a false value clears the field.
+---@param root string
+---@param ids integer[]
+---@param fields { in_prompt?: boolean }
+function M.mark(root, ids, fields)
+  local set = {}
+  for _, id in ipairs(ids) do set[id] = true end
+  local hit = false
+  for _, c in ipairs(data(root).comments) do
+    if set[c.id] then
+      hit = true
+      for k, v in pairs(fields) do c[k] = v or nil end
+    end
+  end
+  if hit then save(root) end
 end
 
 ---Take comment `id` out; the comment, or nil when there is none.
