@@ -289,4 +289,211 @@ T['a comment on an uncommitted line shows in the branch scope too'] = function()
   eq(view().winbar:find('· 1 comment', 1, true) ~= nil, true)
 end
 
+-- Which session, the done step --------------------------------------------------------------------
+
+local function asks() return child.lua_get('_G.asks') end
+local function session_of_review() return child.lua_get('require("agent-ide.review").session(...)', { repo }) end
+
+-- The prompt buffer of the fixture session (created without a window) and its lines.
+local function prompt_lines()
+  return child.lua_get([[(function(id, repo)
+    local s = require('agent-ide.session').open({ id = id, cwd = repo })
+    local _, pbuf = require('agent-ide.ui.chat').buffers(s)
+    return pbuf and vim.api.nvim_buf_get_lines(pbuf, 0, -1, false) or vim.NIL
+  end)(...)]], { ID, repo })
+end
+
+local function set_draft(lines)
+  child.lua([[local id, repo, lines = ...
+    local s = require('agent-ide.session').open({ id = id, cwd = repo })
+    local _, pbuf = require('agent-ide.ui.chat').ensure(s, { key = repo, root = repo, name = 'r', is_git = true, sessions = {} })
+    vim.api.nvim_buf_set_lines(pbuf, 0, -1, false, lines)]], { ID, repo, lines })
+end
+
+local function wait_drawer_sessions()
+  wait_for(function()
+    for _, p in ipairs(child.lua_get('require("agent-ide.ui.drawer").state().projects or {}')) do
+      if #(p.sessions or {}) > 0 then return true end
+    end
+    return false
+  end, 'the drawer to list the session')
+end
+
+T['the first save asks for the session: the project\'s most recent is the default; the answer sticks'] = function()
+  start()
+  open({ kind = 'head' })
+  wait_drawer_sessions()
+  comment_on('+aaa', 'BUG: one')
+  wait_for(function() return virt_at('+aaa') ~= nil end, 'placed')
+  local a = asks()
+  eq(#a, 1)
+  eq(a[1].prompt, 'Review of r: send the comments to which session?')
+  eq(a[1].items[1]:sub(1, 10), 'Work on it')
+  eq({ a[1].items[2], a[1].items[3] }, { '+ new session', 'another session…' })
+  eq(session_of_review(), ID)
+  comment_on('+n2', 'two')
+  wait_for(function() return virt_at('+n2') ~= nil end, 'placed')
+  eq(#asks(), 1)
+end
+
+T['+ new session creates one without opening it; the full diff stays; another session… lists them'] = function()
+  start()
+  open({ kind = 'head' })
+  wait_drawer_sessions()
+  child.lua('_G.pick = 2')
+  comment_on('+aaa', 'one')
+  wait_for(function() return virt_at('+aaa') ~= nil end, 'placed')
+  local id = session_of_review()
+  eq(id ~= nil and id ~= ID, true)
+  eq(child.lua_get('require("agent-ide.session").get(...).cwd', { id }), repo)
+  eq(view().shown, true)
+  eq(view().focused, true)
+  -- the second choice path: another session… then the list of the project's sessions
+  child.lua('require("agent-ide.review").set_session(..., nil)', { repo })
+  child.lua('_G.pick = 3')
+  cursor_on('+n2')
+  child.type_keys('c')
+  wait_for(editor_open, 'the editor')
+  child.lua('_G.asks = {}')
+  child.type_keys('two', '<Esc>')
+  child.lua('_G.pick = 1') -- the list's first entry
+  -- the first ask (which session) answers 3 through the stub's pick at call time: set it per ask
+  child.lua([[local n = 0
+    local orig = vim.ui.select
+    vim.ui.select = function(items, o, cb)
+      n = n + 1
+      _G.pick = n == 1 and 3 or 1
+      return orig(items, o, cb)
+    end]])
+  child.type_keys('<CR>')
+  wait_for(function() return virt_at('+n2') ~= nil end, 'placed')
+  local a = asks()
+  eq(#a, 2)
+  eq(a[2].prompt, 'Review of r: which session?')
+  eq(a[2].items[1]:sub(1, 10), 'Work on it')
+  eq(session_of_review(), ID)
+end
+
+T['gs: the text lands above the draft, the prompt opens below the diff, the review is cleared'] = function()
+  start()
+  open({ kind = 'head' })
+  wait_drawer_sessions()
+  comment_on('+aaa', 'BUG: swallows it')
+  wait_for(function() return virt_at('+aaa') ~= nil end, 'placed')
+  set_draft({ 'my draft' })
+  child.type_keys('gs')
+  wait_for(function() return #asks() == 2 end, 'the done dialog')
+  local a = asks()[2]
+  eq(a.prompt, 'Review of r: 1 comment, to "Work on it"')
+  eq(a.items, { 'Insert above the draft', 'Replace the draft', 'Copy to clipboard', 'Another session…', 'Cancel' })
+  wait_for(function() return count() == 0 end, 'the review cleared')
+  local lines = prompt_lines()
+  eq(lines[1], 'I reviewed your changes and have the following comments. Please address them.')
+  eq(has_line(lines, '## uncommitted changes (working tree against HEAD ') ~= nil, true)
+  eq(has_line(lines, '1. **[BUG]** `a.txt:3` — `aaa`') ~= nil, true)
+  eq(lines[#lines - 1], '')
+  eq(lines[#lines], 'my draft')
+  eq(view() ~= vim.NIL and view().shown, true)
+  eq(child.lua_get('vim.b[vim.api.nvim_get_current_buf()].agent_ide_kind'), 'prompt')
+  eq(virt_at('+aaa'), nil)
+  eq(view().winbar:find('comment', 1, true), nil)
+  eq(child.lua_get('_G.notes[#_G.notes]'), 'Agent-IDE: review of r: 1 comment in the prompt of "Work on it"')
+end
+
+T['gs with an empty prompt offers one put choice; Copy to clipboard fills the register and clears'] = function()
+  start()
+  open({ kind = 'head' })
+  wait_drawer_sessions()
+  comment_on('+aaa', 'one')
+  wait_for(function() return virt_at('+aaa') ~= nil end, 'placed')
+  child.lua('_G.pick = 2')
+  child.type_keys('gs')
+  wait_for(function() return #asks() == 2 end, 'the done dialog')
+  eq(asks()[2].items, { 'Put in the prompt', 'Copy to clipboard', 'Another session…', 'Cancel' })
+  wait_for(function() return count() == 0 end, 'cleared')
+  eq(child.fn.getreg('"'):sub(1, 10), 'I reviewed')
+  eq(view().focused, true)
+end
+
+T['gs then Cancel: the prompt and the comments stay; nothing pending notifies'] = function()
+  start()
+  open({ kind = 'head' })
+  wait_drawer_sessions()
+  comment_on('+aaa', 'one')
+  wait_for(function() return virt_at('+aaa') ~= nil end, 'placed')
+  set_draft({ 'my draft' })
+  child.lua('_G.pick = 5')
+  child.type_keys('gs')
+  wait_for(function() return #asks() == 2 end, 'the done dialog')
+  vim.wait(100)
+  eq(count(), 1)
+  eq(prompt_lines(), { 'my draft' })
+  eq(view().focused, true)
+  child.lua('require("agent-ide.review").clear(..., { 1 })', { repo })
+  child.type_keys('gs')
+  wait_for(function() return child.lua_get('_G.notes[#_G.notes]') == 'Agent-IDE: no review comments for r' end, 'the notice')
+  eq(#asks(), 2)
+end
+
+T['a stored session that is gone is dropped and asked again'] = function()
+  start()
+  open({ kind = 'head' })
+  wait_drawer_sessions()
+  child.lua('require("agent-ide.review").set_session(..., "dead-id")', { repo })
+  comment_on('+aaa', 'one')
+  wait_for(function() return virt_at('+aaa') ~= nil end, 'placed')
+  eq(asks()[1].prompt, 'Review of r: send the comments to which session?')
+  eq(session_of_review(), ID)
+  child.lua('require("agent-ide.review").set_session(..., "dead-id")', { repo })
+  child.type_keys('gs')
+  wait_for(function() return #asks() == 3 end, 'both dialogs')
+  eq(asks()[2].prompt, 'Review of r: send the comments to which session?')
+  eq(asks()[3].prompt:sub(1, 13), 'Review of r: ')
+end
+
+T['the drawer shows review (n) · gs in Commits while comments are pending; <CR> on it is the done step'] = function()
+  start()
+  open({ kind = 'head' })
+  wait_drawer_sessions()
+  comment_on('+aaa', 'one')
+  wait_for(function() return virt_at('+aaa') ~= nil end, 'placed')
+  local function drawer_lines()
+    return child.lua_get('vim.api.nvim_buf_get_lines(require("agent-ide.ui.drawer").state().buf, 0, -1, false)')
+  end
+  local function press(text)
+    wait_for(function() return has_line(drawer_lines(), text) ~= nil end, 'drawer row ' .. text)
+    child.lua([[local d = require('agent-ide.ui.drawer').state()
+      vim.api.nvim_set_current_win(d.win)
+      vim.api.nvim_win_set_cursor(d.win, { ..., 0 })]], { has_line(drawer_lines(), text) })
+    child.type_keys('<CR>')
+  end
+  press('> r ')
+  press('Commits')
+  wait_for(function() return has_line(drawer_lines(), 'review (1) · gs') ~= nil end, 'the review row')
+  local l = drawer_lines()
+  eq(has_line(l, 'review (1) · gs') + 1, has_line(l, 'full diff · gd'))
+  press('review (1) · gs')
+  wait_for(function() return #asks() == 2 end, 'the done dialog')
+  eq(asks()[2].prompt, 'Review of r: 1 comment, to "Work on it"')
+  wait_for(function() return count() == 0 end, 'cleared')
+  wait_for(function() return has_line(drawer_lines(), 'review (') == nil end, 'the row gone')
+end
+
+T[':AgentsReview from the chat of the repository runs the done step'] = function()
+  start()
+  open({ kind = 'head' })
+  wait_drawer_sessions()
+  comment_on('+aaa', 'one')
+  wait_for(function() return virt_at('+aaa') ~= nil end, 'placed')
+  child.type_keys('q')
+  child.lua([[local id, repo = ...
+    local s = require('agent-ide.session').open({ id = id, cwd = repo })
+    require('agent-ide.ui.chat').open(s, { key = repo, root = repo, name = 'r', is_git = true, sessions = {} })]], { ID, repo })
+  child.cmd('AgentsReview')
+  wait_for(function() return #asks() == 2 end, 'the done dialog')
+  eq(asks()[2].prompt, 'Review of r: 1 comment, to "Work on it"')
+  wait_for(function() return count() == 0 end, 'cleared')
+  eq(prompt_lines()[1], 'I reviewed your changes and have the following comments. Please address them.')
+end
+
 return T

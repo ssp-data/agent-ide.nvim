@@ -50,7 +50,7 @@ function M.map(buf, actions)
   end
 end
 
-local function winbar()
+local function winbar(opts)
   local names = {}
   for _, k in ipairs(cfg_kinds()) do names[#names + 1] = k[1] end
   local k = editor_keys()
@@ -60,6 +60,8 @@ local function winbar()
     if label then hints[#hints + 1] = label .. ' ' .. ({ save = 'save', send = 'send now', cancel = 'cancel' })[h[1]] end
   end
   local text = table.concat(names, ' · ') .. ' — ' .. table.concat(hints, ' · ')
+  local target = require('agent-ide.ui.review_send').target_name(opts.root, opts.project)
+  if target then text = text .. ' → ' .. target end
   return '%#AgentIdeAskMore#' .. text:gsub('%%', '%%%%') .. '%*'
 end
 
@@ -80,11 +82,7 @@ local function close()
 end
 
 -- Which session the review of `root` goes to, asked when none is chosen yet; `cb(ok)`.
-local function ensure_session(root, project, cb)
-  local ok, send = pcall(require, 'agent-ide.ui.review_send')
-  if ok and send.ensure_session then return send.ensure_session(root, project, cb) end
-  cb(true)
-end
+local function ensure_session(root, project, cb) require('agent-ide.ui.review_send').ensure_session(root, project, cb) end
 
 -- Save what the editor holds; `cb(comment|nil)` once stored (nil: nothing to save, or cancelled).
 local function save(cb)
@@ -175,7 +173,7 @@ function M.open(opts)
   })
   vim.wo[win].wrap = true
   vim.wo[win].linebreak = true
-  api.nvim_set_option_value('winbar', winbar(), { scope = 'local', win = win })
+  api.nvim_set_option_value('winbar', winbar(opts), { scope = 'local', win = win })
   E = { win = win, buf = buf, opts = opts, origin = origin, opened = opened }
   local e = E
   M.map(buf, { save = function() save(function() end) end, send = send_now, cancel = cancel })

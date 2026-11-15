@@ -157,6 +157,28 @@ T['a branch with no commit of its own: Changes vs its base, Recent commits'] = f
   eq(vim.list_slice(lines(p, { ['/x/r'] = true }), 4), { '  > Changes vs origin/main (0)', '  > Recent commits (0)' })
 end
 
+T['a pending review adds a review (n) · gs row above the full diff row of Commits'] = function()
+  local review = require('agent-ide.review')
+  vim.fn.delete(vim.fn.stdpath('state') .. '/agent-ide/reviews', 'rf')
+  review._reset()
+  local p = project('/x/r')
+  cache._set('/x/r', 'head', BRANCH)
+  cache._set('/x/r', 'base', BRANCH)
+  cache._set('/x/r', 'commits', {})
+  local exp = { ['/x/r'] = true, ['/x/r/git/commits'] = true }
+  eq(lines(p, exp)[6], '      full diff · gd')
+  review.add('/x/r', { kind = 'NOTE', text = 'a', scope = { kind = 'head' }, path = 'f.lua' })
+  review.add('/x/r', { kind = 'BUG', text = 'b', scope = { kind = 'head' }, path = 'f.lua' })
+  local t = tree.build({ p }, parked, exp, 0, icons, nil, nil, gs.rows)
+  eq(t.lines[6], '      review (2) · gs')
+  eq(t.lines[7], '      full diff · gd')
+  local node = t.nodes[6]
+  eq({ node.type, node.root, type(node.open), node.fold.key }, { 'git_review', '/x/r', 'function', '/x/r/git/commits' })
+  review.clear('/x/r', { 1, 2 })
+  eq(lines(p, exp)[6], '      full diff · gd')
+  review._reset()
+end
+
 T['commit expands to its files; nodes carry ids, folds and open handlers'] = function()
   local p = project('/x/r')
   cache._set('/x/r', 'head', BRANCH)

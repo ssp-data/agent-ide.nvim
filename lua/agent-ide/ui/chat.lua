@@ -543,6 +543,17 @@ function M.open(s, project)
   if queue then queue.follow(s) end -- an open queue panel shows this session now
 end
 
+---The chat buffers of `s` without a window: created when it has none (a review put into its
+---prompt before the chat was ever opened). Returns them as `M.buffers` does.
+---@param s table Session
+---@param project? table Project
+---@return integer|nil tbuf, integer|nil pbuf
+function M.ensure(s, project)
+  subscribe()
+  get_chat(s, project)
+  return M.buffers(s)
+end
+
 ---Focus the prompt of the chat of `s` (its window reopened when hidden), optionally in insert
 ---mode. Does nothing when `s` has no chat yet.
 ---@param s table Session

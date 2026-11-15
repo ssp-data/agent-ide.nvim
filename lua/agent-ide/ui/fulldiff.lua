@@ -108,7 +108,10 @@ local function winbar()
     if d > 0 then s = s .. ' −' .. d end
     parts[#parts + 1] = s
     local n = V.comments and #V.comments or 0
-    if n > 0 then parts[#parts + 1] = n .. (n == 1 and ' comment' or ' comments') end
+    if n > 0 then
+      local target = require('agent-ide.ui.review_send').target_name(V.root, V.project)
+      parts[#parts + 1] = n .. (n == 1 and ' comment' or ' comments') .. (target and (' → ' .. target) or '')
+    end
   elseif V.loading then
     parts[#parts + 1] = 'loading…'
   end
@@ -328,6 +331,7 @@ function M.redraw_marks()
   V.comments = review.list(V.root, M.scope_of(V))
   V.marks = marks.place(V.buf, V.t, V.comments)
   for _, w in ipairs(wins()) do api.nvim_set_option_value('winbar', winbar(), { scope = 'local', win = w }) end
+  drawer().refresh() -- the `review (n)` row
 end
 
 function A.comment()
@@ -384,7 +388,7 @@ end
 function A.next_comment() jump_comment(1) end
 function A.prev_comment() jump_comment(-1) end
 
-function A.review() notify('the review step comes with the next task') end
+function A.review() require('agent-ide.ui.review_send').done(V.root, V.project) end
 
 -- Buffer -----------------------------------------------------------------------------------------
 

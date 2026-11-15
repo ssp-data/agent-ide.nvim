@@ -145,6 +145,19 @@ local function fulldiff_row(out, w, parent, kind)
   out[#out + 1] = { pieces = { { w.indent .. '    full diff' .. (key and (' · ' .. key) or ''), 'AgentIdeAge' } }, node = node }
 end
 
+-- A dimmed `review (n) · gs` row while review comments are pending for the work tree
+-- (lua/agent-ide/review.lua): <CR> finishes the review (ui/review_send.lua).
+local function review_row(out, w, parent)
+  local n = require('agent-ide.review').count(w.root)
+  if n == 0 then return end
+  local key = require('agent-ide.util.keys').get('drawer', 'review')[1]
+  local node = { type = 'git_review', project = w.project, root = w.root, id = w.root .. '#review',
+    fold = { key = parent.fold.key, default = false, focus = parent.id },
+    open = function(nd) require('agent-ide.ui.review_send').done(nd.root, nd.project) end }
+  out[#out + 1] = { pieces = { { w.indent .. '    ' }, { 'review', 'AgentIdeSection' },
+    { ' (' .. n .. ')' .. (key and (' · ' .. key) or ''), 'AgentIdeAge' } }, node = node }
+end
+
 local function uncommitted_rows(out, w, ctx)
   local ind = w.indent .. '    '
   local files = cache.uncommitted(w.root)
@@ -247,6 +260,7 @@ local function tree_rows(out, w, ctx)
   label = base and (require('agent-ide.git').branch_commits(base) and 'Commits on branch' or 'Recent commits') or 'Commits'
   open, node = section(out, w, ctx, 'commits', label, commits and #commits)
   if open then
+    review_row(out, w, node)
     fulldiff_row(out, w, node, 'commits')
     graph_row(out, w, ctx, node)
     uncommitted_rows(out, w, ctx)

@@ -99,6 +99,22 @@ function M.full_diff(opts)
   fulldiff.open_context()
 end
 
+---`:AgentsReview`: finish the review of the current context's repository (the one `:AgentsDiff`
+---would open): its pending comments into the prompt of a session, asked how.
+function M.review()
+  local graph = package.loaded['agent-ide.ui.graph']
+  local target = require('agent-ide.ui.graph_context').target(graph and graph.state() or nil)
+  local dir = target.root or target.dir
+  local function notify(msg) vim.notify('Agent-IDE: ' .. msg, vim.log.levels.INFO) end
+  if not dir or vim.fn.isdirectory(dir) ~= 1 then return notify('not a git repository: ' .. tostring(dir)) end
+  require('agent-ide.git').toplevel(dir, function(top)
+    if not top then return notify('not a git repository: ' .. vim.fn.fnamemodify(dir, ':~')) end
+    local root = target.root or top
+    local project = target.project or { key = root, root = root, name = vim.fs.basename(root), is_git = true, sessions = {} }
+    require('agent-ide.ui.review_send').done(root, project)
+  end)
+end
+
 ---@return string text for a statusline (percent signs doubled)
 function M.statusline() return require('agent-ide.status').statusline() end
 
