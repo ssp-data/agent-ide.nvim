@@ -10,7 +10,8 @@ All notable changes to Agent-IDE.nvim are listed here. The format follows [Keep 
 
 ### Changed
 
-- The full diff's winbar names the file under the cursor first, in bold (`AgentIdeFullDiffFile`), and follows the cursor.
+- The full diff's winbar names the file under the cursor first, in bold (`AgentIdeFullDiffFile`), and follows the cursor; a winbar wider than the window is cut after the file name, and the review's session name in it is shortened.
+- `<CR>` on the drawer's `review (n)` row goes back to the review (the full diff of the newest comment's scope, the cursor on it), as does `<leader>ar` (`keys.resume_review`) from anywhere in the project; `gs` on the row finishes it. A review that went out (the prompt sent, or copied) forgets its session, so the next comment asks which session again.
 - The `full diff · gd` row of the `Commits` section is a fold: `<CR>` lists the files of the branch's committed changes (the commits scope, which no other row listed), `<CR>` on a file opens the full diff of that scope with the cursor on the file; `gd` on the row opens the full diff as before.
 - Full diff from the `Commits` section (its header, the `full diff · gd` row or the `commit graph` row) opens the uncommitted changes first when there are any, else the commits; `gd` on a commit row still opens that commit. The `full diff · gd` row now sits above `commit graph · G`.
 - A branch with no commit of its own yet (HEAD still at its fork point) lists `Recent commits` (the last 20) instead of an empty `Commits on branch (0)`; `Changes vs <base>` stays against the base. The full diff's commits scope and the side-by-side view follow the same list.

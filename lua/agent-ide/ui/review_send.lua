@@ -185,11 +185,34 @@ local function cleared(root, comments)
   changed()
 end
 
+-- A review that went out as a whole (the prompt sent, or the text copied) is over: an emptied
+-- review forgets its session, so the next comment asks again. A comment sent at once keeps it.
+local function ended(root, comments)
+  review.clear(root, ids_of(comments))
+  if review.count(root) == 0 then review.set_session(root, nil) end
+  changed()
+end
+
 ---The prompt that held a review was sent (ui/chat_send.lua): its comments leave the review.
 ---@param mark { root: string, ids: integer[] } what `put` left on the prompt buffer
 function M.sent_from_prompt(mark)
-  review.clear(mark.root, mark.ids)
-  changed()
+  local list = {}
+  for i, id in ipairs(mark.ids) do list[i] = { id = id } end
+  ended(mark.root, list)
+end
+
+---Resume the review of `root`: the full diff of the scope of its newest comment, the cursor on
+---that comment (`<CR>` on the drawer's `review (n)` row, the global resume key).
+---@param root string
+---@param project table
+function M.resume(root, project)
+  local comments = review.list(root)
+  local c = comments[#comments]
+  if not c then return notify('no review comments for ' .. (project.name or vim.fs.basename(root))) end
+  local sc = c.scope
+  local scope = { kind = sc.kind }
+  if sc.kind == 'commit' then scope.commit = { hash = sc.hash, short = sc.short, subject = sc.subject } end
+  require('agent-ide.ui.fulldiff').open({ root = root, project = project, scope = scope, focus_comment = c.id })
 end
 
 local function has_text(lines)
@@ -262,7 +285,7 @@ function M.done(root, project)
         local text = table.concat(lines, '\n')
         vim.fn.setreg('"', text)
         pcall(vim.fn.setreg, '+', text)
-        cleared(root, comments)
+        ended(root, comments)
         return notify(('review of %s: %s copied'):format(name, what))
       end
       put(s, project, root, comments, lines, choice.how)

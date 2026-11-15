@@ -31,6 +31,7 @@ function M.setup(opts)
     next_waiting = { M.next_waiting, 'next session that needs you' },
     search = { function() M.search() end, 'search all sessions' },
     prompt_history = { function() M.prompt_history() end, 'prompt history' },
+    resume_review = { function() M.resume_review() end, 'resume the review of the project' },
   }
   for name, g in pairs(globals) do
     local list = require('agent-ide.util.keys').list(keys[name])
@@ -99,9 +100,8 @@ function M.full_diff(opts)
   fulldiff.open_context()
 end
 
----`:AgentsReview`: finish the review of the current context's repository (the one `:AgentsDiff`
----would open): its pending comments into the prompt of a session, asked how.
-function M.review()
+-- The repository of the current context (the one `:AgentsDiff` would open); `cb(root, project)`.
+local function review_context(cb)
   local graph = package.loaded['agent-ide.ui.graph']
   local target = require('agent-ide.ui.graph_context').target(graph and graph.state() or nil)
   local dir = target.root or target.dir
@@ -110,9 +110,20 @@ function M.review()
   require('agent-ide.git').toplevel(dir, function(top)
     if not top then return notify('not a git repository: ' .. vim.fn.fnamemodify(dir, ':~')) end
     local root = target.root or top
-    local project = target.project or { key = root, root = root, name = vim.fs.basename(root), is_git = true, sessions = {} }
-    require('agent-ide.ui.review_send').done(root, project)
+    cb(root, target.project or { key = root, root = root, name = vim.fs.basename(root), is_git = true, sessions = {} })
   end)
+end
+
+---`:AgentsReview`: finish the review of the current context's repository: its pending comments
+---into the prompt of a session, asked how.
+function M.review()
+  review_context(function(root, project) require('agent-ide.ui.review_send').done(root, project) end)
+end
+
+---`<leader>ar`: resume the review of the current context's repository: the full diff of the
+---scope of its newest comment, the cursor on it.
+function M.resume_review()
+  review_context(function(root, project) require('agent-ide.ui.review_send').resume(root, project) end)
 end
 
 ---@return string text for a statusline (percent signs doubled)

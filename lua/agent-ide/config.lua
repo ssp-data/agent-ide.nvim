@@ -31,6 +31,7 @@ defaults = function()
       next_waiting = '<leader>an', -- global: the next session that needs you
       search = '<leader>as', -- global: search all sessions (titles, prompts, answers)
       prompt_history = '<leader>aP', -- global: every prompt, newest first
+      resume_review = '<leader>ar', -- global: back to the review of the project (the full diff on its newest comment)
       -- the search picker's query line; each a key, a list of keys, or false (close: normal mode)
       search_picker = { next = { '<C-n>', '<Down>' }, prev = { '<C-p>', '<Up>' }, open = '<CR>', copy = '<C-y>',
         reuse = '<C-e>', scope = '<Tab>', kinds = '<C-f>', close = { '<Esc>', 'q' },

@@ -165,15 +165,16 @@ local function fulldiff_row(out, w, ctx, parent, kind)
   end
 end
 
--- A dimmed `review (n) · gs` row while review comments are pending for the work tree
--- (lua/agent-ide/review.lua): <CR> finishes the review (ui/review_send.lua).
+-- A `review (n) · gs` row while review comments are pending for the work tree
+-- (lua/agent-ide/review.lua): <CR> resumes the review (the full diff on its newest comment),
+-- the drawer's review key (`gs`) finishes it (ui/review_send.lua).
 local function review_row(out, w, parent)
   local n = require('agent-ide.review').count(w.root)
   if n == 0 then return end
   local key = require('agent-ide.util.keys').get('drawer', 'review')[1]
   local node = { type = 'git_review', project = w.project, root = w.root, id = w.root .. '#review',
     fold = { key = parent.fold.key, default = false, focus = parent.id },
-    open = function(nd) require('agent-ide.ui.review_send').done(nd.root, nd.project) end }
+    open = function(nd) require('agent-ide.ui.review_send').resume(nd.root, nd.project) end }
   out[#out + 1] = { pieces = { { w.indent .. '    ' }, { 'review', 'AgentIdeSection' },
     { ' (' .. n .. ')' .. (key and (' · ' .. key) or ''), 'AgentIdeAge' } }, node = node }
 end
