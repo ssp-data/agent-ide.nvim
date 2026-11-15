@@ -89,6 +89,10 @@ local function exercise(keys)
       _G.fbuf = vim.api.nvim_create_buf(false, true)
       require('agent-ide.ui.fulldiff_keys').map(_G.fbuf, {})
     end)
+    try('review keys', function()
+      _G.ebuf = vim.api.nvim_create_buf(false, true)
+      require('agent-ide.ui.review_edit').map(_G.ebuf, {})
+    end)
     try('search', function()
       require('agent-ide').search()
       _G.qbuf = vim.api.nvim_get_current_buf()
@@ -118,6 +122,7 @@ local function places(path)
   if group == 'diff' then return { { '_G.lbuf', 'n' }, { '_G.rbuf', 'n' } } end
   if group == 'graph' then return { { '_G.gbuf', 'n' } } end
   if group == 'full_diff' then return { { '_G.fbuf', 'n' } } end
+  if group == 'review' then return { { '_G.ebuf', 'n' } } end
   if group == 'drawer' then return { { '_G.dbuf', 'n' } } end
   if group == 'prompts' then return {} end -- drawer row keys: checked through prompt_sections.keys()
   local t, p = { '_G.tbuf', 'n' }, { '_G.pbuf', 'n' }
@@ -137,8 +142,8 @@ T['every default key option as a two-key list: no error, both keys mapped and wo
     set_path(keys, l.path, l.keys)
   end
   eq(exercise(keys), {})
-  local bufs = child.lua_get('{ _G.tbuf, _G.pbuf, _G.rawbuf, _G.lbuf, _G.rbuf, _G.qbuf, _G.dbuf }')
-  eq(#bufs, 7)
+  local bufs = child.lua_get('{ _G.tbuf, _G.pbuf, _G.rawbuf, _G.lbuf, _G.rbuf, _G.qbuf, _G.dbuf, _G.ebuf }')
+  eq(#bufs, 8)
   local row_keys = {}
   for _, k in ipairs(child.lua_get('require("agent-ide.ui.prompt_sections").keys()')) do row_keys[k.lhs] = true end
   for _, l in ipairs(leaves) do

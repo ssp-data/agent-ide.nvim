@@ -11,7 +11,9 @@ local cursor = require('agent-ide.ui.fulldiff_cursor')
 local git = require('agent-ide.git')
 local git_patch = require('agent-ide.git_patch')
 local keys_mod = require('agent-ide.ui.fulldiff_keys')
+local marks = require('agent-ide.ui.review_marks')
 local render = require('agent-ide.ui.fulldiff_render')
+local review = require('agent-ide.review')
 
 local M = {}
 
@@ -72,6 +74,8 @@ api.nvim_set_decoration_provider(ns, {
 ---@field restore { path?: string, hunk?: string, offset?: integer, row?: integer }|nil where the cursor goes on the next draw
 ---@field closed table<string, boolean>|nil the user's fold state by path
 ---@field by_line table<integer, table[]>|nil the highlight ranges by line, for the decoration provider
+---@field comments table[]|nil the review comments of the scope (review.list) as last placed
+---@field marks table<integer, { comment: table, lost: boolean }[]>|nil the placed comments by buffer line
 
 local function notify(msg) vim.notify('Agent-IDE: ' .. msg, vim.log.levels.INFO) end
 local function valid_win(w) return w ~= nil and api.nvim_win_is_valid(w) end
@@ -103,6 +107,8 @@ local function winbar()
     if a > 0 then s = s .. ' +' .. a end
     if d > 0 then s = s .. ' −' .. d end
     parts[#parts + 1] = s
+    local n = V.comments and #V.comments or 0
+    if n > 0 then parts[#parts + 1] = n .. (n == 1 and ' comment' or ' comments') end
   elseif V.loading then
     parts[#parts + 1] = 'loading…'
   end
@@ -172,6 +178,8 @@ local function draw(fresh_win)
   V.by_line = t and render.index(t.hl) or {}
   V.raw = t and t.raw or {}
   V.t = t
+  V.comments = t and review.list(V.root, M.scope_of(V)) or {}
+  V.marks = t and marks.place(V.buf, t, V.comments) or {}
   for _, w in ipairs(ws) do
     api.nvim_set_option_value('winbar', winbar(), { scope = 'local', win = w })
     cursor.apply_folds(w, t or { folds = {} })
@@ -290,6 +298,93 @@ end
 function A.lazygit() require('agent-ide.ui.lazygit').open(V.root) end
 
 function A.close() M.close() end
+
+-- Review comments ---------------------------------------------------------------------------------
+
+---The scope of view `v` as a comment records it: the kind, the commit's hashes and subject, HEAD's
+---short hash for the uncommitted changes, the base's label for the branch and its commits.
+---@param v table
+---@return { kind: string, hash?: string, short?: string, subject?: string, base?: string }
+function M.scope_of(v)
+  local k = v.scope.kind
+  if k == 'commit' then
+    local c = v.scope.commit
+    return { kind = k, hash = c.hash, short = c.short, subject = c.subject }
+  end
+  local out = { kind = k }
+  if k == 'head' then
+    local h = cache.head(v.root)
+    out.hash = h and h.head and h.head:sub(1, 7) or nil
+  else
+    local b = cache.base(v.root)
+    out.base = b and b.label or nil
+  end
+  return out
+end
+
+---Place the comments again (one was added, changed or removed) and refresh the winbar.
+function M.redraw_marks()
+  if not (V and V.t and api.nvim_buf_is_valid(V.buf)) then return end
+  V.comments = review.list(V.root, M.scope_of(V))
+  V.marks = marks.place(V.buf, V.t, V.comments)
+  for _, w in ipairs(wins()) do api.nvim_set_option_value('winbar', winbar(), { scope = 'local', win = w }) end
+end
+
+function A.comment()
+  local node, _, row = current()
+  if not node then return end
+  local anchor = marks.anchor(V.t, row)
+  if not anchor then return end
+  local existing
+  for _, e in ipairs(V.marks[row] or {}) do
+    if not e.lost then
+      existing = e.comment
+      break
+    end
+  end
+  require('agent-ide.ui.review_edit').open({ root = V.root, scope = M.scope_of(V), anchor = anchor, existing = existing,
+    project = V.project, on_change = M.redraw_marks })
+end
+
+function A.delete_comment()
+  local node, _, row = current()
+  if not node then return end
+  local e = (V.marks[row] or {})[1]
+  if not e then return end
+  local c = review.remove(V.root, e.comment.id)
+  if c then vim.fn.setreg('"', c.text) end
+  M.redraw_marks()
+end
+
+-- The next (previous) commented line not inside a closed fold.
+local function jump_comment(delta)
+  local _, w, row = current()
+  if not w then return end
+  local rows = vim.tbl_keys(V.marks or {})
+  table.sort(rows)
+  api.nvim_win_call(w, function()
+    for _ = 1, vim.v.count1 do
+      local target
+      if delta > 0 then
+        for _, r in ipairs(rows) do
+          if r > row and vim.fn.foldclosed(r) == -1 then target = r break end
+        end
+      else
+        for i = #rows, 1, -1 do
+          if rows[i] < row and vim.fn.foldclosed(rows[i]) == -1 then target = rows[i] break end
+        end
+      end
+      if not target then break end
+      row = target
+    end
+  end)
+  api.nvim_win_set_cursor(w, { row, 0 })
+end
+
+function A.next_comment() jump_comment(1) end
+function A.prev_comment() jump_comment(-1) end
+
+function A.review() notify('the review step comes with the next task') end
 
 -- Buffer -----------------------------------------------------------------------------------------
 
