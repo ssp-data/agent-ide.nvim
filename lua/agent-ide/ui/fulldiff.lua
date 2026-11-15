@@ -76,6 +76,7 @@ api.nvim_set_decoration_provider(ns, {
 ---@field by_line table<integer, table[]>|nil the highlight ranges by line, for the decoration provider
 ---@field comments table[]|nil the review comments of the scope (review.list) as last placed
 ---@field marks table<integer, { comment: table, lost: boolean }[]>|nil the placed comments by buffer line
+---@field cur_file integer|nil the file under the cursor (index into `t.files`), named in the winbar
 
 local function notify(msg) vim.notify('Agent-IDE: ' .. msg, vim.log.levels.INFO) end
 local function valid_win(w) return w ~= nil and api.nvim_win_is_valid(w) end
@@ -97,8 +98,14 @@ local function totals(files)
   return a, d
 end
 
+local function esc(text) return (text:gsub('%%', '%%%%')) end
+
+-- The file under the cursor first, bold (`AgentIdeFullDiffFile`), then the project, the scope
+-- and its sums, and the review comments.
 local function winbar()
   local parts = { V.project.name or vim.fs.basename(V.root), 'full diff' }
+  local f = V.t and V.cur_file and V.t.files[V.cur_file]
+  local file = f and ('%#AgentIdeFullDiffFile#' .. esc(f.path) .. '%* · ') or ''
   if V.res then
     parts[#parts + 1] = V.res.label
     local n = #V.res.files
@@ -120,7 +127,23 @@ local function winbar()
   elseif V.loading then
     parts[#parts + 1] = 'loading…'
   end
-  return (table.concat(parts, ' · '):gsub('%%', '%%%%'))
+  return file .. esc(table.concat(parts, ' · '))
+end
+
+-- The file under the cursor of `w` (nil without a node there).
+local function file_at(w)
+  if not V.t then return nil end
+  local node = V.t.nodes[api.nvim_win_get_cursor(w)[1]]
+  return node and node.file or nil
+end
+
+---Set the winbar of `w` after a cursor move: only when the file under the cursor changed.
+local function follow_cursor(w)
+  if not (V and V.t) then return end
+  local f = file_at(w)
+  if f == V.cur_file then return end
+  V.cur_file = f
+  api.nvim_set_option_value('winbar', winbar(), { scope = 'local', win = w })
 end
 
 local WIN_OPTS = { wrap = false, cursorline = true, list = false, number = false, relativenumber = false, spell = false,
@@ -189,12 +212,13 @@ local function draw(fresh_win)
   V.comments = t and review.list(V.root, M.scope_of(V)) or {}
   V.marks = t and marks.place(V.buf, t, V.comments) or {}
   for _, w in ipairs(ws) do
-    api.nvim_set_option_value('winbar', winbar(), { scope = 'local', win = w })
     cursor.apply_folds(w, t or { folds = {} })
     local key = keep[w]
     local target = t and cursor.find(t, key) or nil
     target = math.min(target or key.row or 1, #lines)
     pcall(api.nvim_win_set_cursor, w, { math.max(target, 1), 0 })
+    V.cur_file = file_at(w)
+    api.nvim_set_option_value('winbar', winbar(), { scope = 'local', win = w })
   end
 end
 
@@ -414,6 +438,11 @@ local function make_buf(root)
     local w = api.nvim_get_current_win()
     if api.nvim_win_get_buf(w) == buf then apply_win(w) end
     draw(true)
+  end })
+  api.nvim_create_autocmd('CursorMoved', { group = augroup, buffer = buf, callback = function()
+    if not V or V.buf ~= buf then return end
+    local w = api.nvim_get_current_win()
+    if api.nvim_win_get_buf(w) == buf then follow_cursor(w) end
   end })
   api.nvim_create_autocmd('BufWipeout', { group = augroup, buffer = buf, callback = function()
     if V and V.buf == buf then
