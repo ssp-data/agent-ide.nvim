@@ -514,6 +514,8 @@ Four scopes, one view: **branch** (the merge-base against your working tree, unc
 
 **Review comments.** `c` on any line opens a small window under it for a comment to Claude: `BUG: swallows the error, notify instead`. The first word up to the colon is the kind (`NOTE`, `ISSUE`, `BUG`, `DESIGN`, `SUGGESTION`, `QUESTION`, any case; your own list under `review.kinds`), without one it is a `NOTE`; several lines are fine. `<CR>` in normal mode (or `:w`) saves it, `q` cancels (asks when the text changed). The comment shows under its line as `┃ BUG  swallows the error…`, coloured by kind (`AgentIdeReviewNote`, `AgentIdeReviewIssue`, `AgentIdeReviewBug`, `AgentIdeReviewDesign`, `AgentIdeReviewSuggestion`, `AgentIdeReviewQuestion`, a kind of your own `AgentIdeReviewKind`; the bar `AgentIdeReviewBar`, the text `AgentIdeReviewText`). A `-` line anchors the old side; a file header, a `@@` line or a note the file as a whole. `c` on a commented line edits it, `dd` deletes it (into the unnamed register), `]r` / `[r` step through commented lines; the winbar counts them. Comments are kept per work tree in the plugin's state folder (never in your repository, see [Privacy](#privacy)), across scopes, reloads and restarts; a comment on an uncommitted line shows in the branch and the uncommitted scopes alike, and one whose line left the diff sits under its file header with a note until you delete it. The first comment of a review asks which session it is for: the chat the diff was opened over (else the project's most recent session), a new session, or one from a list; the winbar names it (`· 3 comments → fix the git runner`). While comments are pending the drawer shows `review (n) · gs` at the top of the project's `Commits` section. `gs` here, `<CR>` on that row, `gs` on any row of the project in the drawer, or `:AgentsReview` from anywhere in the project finishes the review: every pending comment, grouped by where it was made (`commit 60523ec (update images)`, `uncommitted changes (working tree against HEAD 7f0f916)`), each with its path, line and the line's text, goes into the session's prompt above the draft or replacing it (the prompt opens below the diff, add remarks, send with `<C-CR>`), or to the clipboard. `<C-CR>` inside the comment window sends that one comment at once: queued behind a running turn, else the session starts as any first send does. The exact text, the workflow and how it compares with tuicr and others: [docs/review.md](docs/review.md).
 
+![The review placed in the prompt buffer below the full diff](docs/images/review-summary.png)
+
 | Key (full diff) | Action |
 |---|---|
 | `gd` (drawer, graph) | Open the full diff of the row: its project, section, commit or file |
@@ -525,11 +527,11 @@ Four scopes, one view: **branch** (the merge-base against your working tree, unc
 | `R` | Refresh (the drawer's lists reload too) |
 | `y` | Yank the file's path (unnamed and `+` registers) |
 | `glg` | lazygit for this repository |
-| `c` | Review comment on this line (on a commented line: edit it) |
+| `c` | Review comment on this line; on a commented line the same window opens with the comment, to edit it |
 | `dd` | Delete the comment on this line (unnamed register) |
 | `]r` / `[r` | Next / previous commented line |
 | `gs` (also in the drawer) | Finish the review: the comments into the prompt of its session, or to the clipboard (asks how) |
-| `<CR>`, `<C-CR>`, `q` (comment window) | Save the comment; save and send it now; cancel |
+| `<CR>`, `<C-CR>`, `q` (comment window) | Save the comment (also after editing it); save and send it now; cancel |
 | `q` | Close, back to what was shown before |
 | `g?` | Help |
 
