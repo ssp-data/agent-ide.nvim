@@ -52,6 +52,7 @@ You might ask why not a terminal-based TUI, now that Herdr, Rex, and others are 
 - **Chat in native buffers**: write prompts with your own Vim setup, read answers as rendered markdown, tool calls folded
 - **Never interrupts typing**: permission requests and finished sessions wait; one key jumps to the next one
 - **Git review built in**: changes and commits per project, side-by-side diffs, jump from an edit to its diff
+- **Review comments**: typed notes on lines of the full diff (`BUG:`, `ISSUE:`, …), sent to a session with file, line and commit filled in, or one at a time with `<C-CR>` (see [docs/review.md](docs/review.md))
 - **Fuzzy search** across all sessions and every prompt you ever sent
 - **Reusable prompts**: a prompt library, skills and commands, saved prompts per project
 - **Status in your statusline** (and an Omarchy bar widget): state, model, quota
@@ -175,7 +176,8 @@ require('agent-ide').setup({
       refresh = { 'R', '<leader>gR' }, lazygit = 'glg' },
     -- the drawer's own keys (see Drawer); on a row that has its own handler for a key (the
     -- prompt row keys below) that handler runs instead
-    drawer = { open = { '<CR>', 'o' }, fold = 'za', collapse_all = 'z0', expand_all = 'z9', refresh = 'R',
+    drawer = { review = 'gs', -- finish the review of the row's repository (the comments into the prompt)
+      open = { '<CR>', 'o' }, fold = 'za', collapse_all = 'z0', expand_all = 'z9', refresh = 'R',
       tmux = { 'gT', '<leader>aT' }, search = { 'S', '<leader>ff', '<leader>S' }, park = 'sP', hide = 'H',
       delete = 'D', yank = 'y', lazygit = 'glg', close = 'q', help = { '?', 'g?' }, graph = 'G', full_diff = 'gd', scope = '<S-Tab>', legend = { 'gL', '<leader>aL' }, close_tmux = 'X', rename = 'r',
       next_session = ']s', prev_session = '[s' }, -- open the next / previous session of the project
@@ -186,7 +188,19 @@ require('agent-ide').setup({
       yank = 'y', lazygit = 'glg', close = 'q', help = 'g?' },
     -- full diff view (every change of a branch in one buffer), buffer-local
     full_diff = { open = '<CR>', next_file = ']f', prev_file = '[f', next_hunk = ']c', prev_hunk = '[c', fold = 'za',
-      collapse_all = 'z0', expand_all = 'z9', refresh = 'R', yank = 'y', lazygit = 'glg', close = 'q', help = 'g?' },
+      collapse_all = 'z0', expand_all = 'z9', refresh = 'R', yank = 'y', lazygit = 'glg', close = 'q', help = 'g?',
+      -- review comments: one on this line (on a commented line: edit it), delete it, step
+      -- commented lines, finish the review (the comments into the prompt, asks how)
+      comment = 'c', delete_comment = 'dd', next_comment = ']r', prev_comment = '[r', review = 'gs' },
+    -- the comment window over the full diff; save and cancel in normal mode, send in both
+    review = { save = '<CR>', send = '<C-CR>', cancel = { 'q', '<Esc><Esc>' } },
+  },
+  -- review comments: the kinds a comment can start with (`BUG: …`), each with the description
+  -- Claude is given (a comment without one is a NOTE), and the first line of the text sent
+  review = {
+    kinds = { { 'NOTE', 'an observation' }, { 'ISSUE', 'a problem to fix' }, { 'BUG', 'wrong behaviour' },
+      { 'DESIGN', 'structure or approach' }, { 'SUGGESTION', 'an improvement' }, { 'QUESTION', 'something to explain' } },
+    intro = 'I reviewed your changes and have the following comments. Please address them.',
   },
   prompts = {
     library_dir = nil,  -- your templates (nil: stdpath('data') .. '/agent-ide/library')
@@ -312,6 +326,7 @@ In the drawer (`keys.drawer`; the prompt row keys are `keys.prompts`, the sessio
 | `]s`, `[s` | Open the next or previous session of the project (from the session row, else the chat shown); the drawer keeps the focus and its cursor follows |
 | `G` | Commit graph of the row's repository (a worktree session: that worktree; see [Commit graph](#commit-graph)) |
 | `gd` | Full diff of the row: its project or section (the branch, or the commits), a commit, or a file with the cursor on it (see [Full diff](#full-diff)) |
+| `gs` | Finish the review of the row's repository: its pending comments into the prompt of a session, or to the clipboard (see [Full diff](#full-diff)); `<CR>` on the `review (n)` row does the same |
 | `glg` | Open lazygit for the row's repository (a worktree row or session: that worktree) |
 | `<S-Tab>` | Scope: only the row's project (else the working directory's), or back to all projects (see [Project scope](#project-scope)) |
 | `?`, `g?` | Help: a list of every key you can filter by typing; `<CR>` on a row presses that key (see [Help](#help)) |
@@ -497,6 +512,8 @@ Four scopes, one view: **branch** (the merge-base against your working tree, unc
 
 `<CR>` on any line jumps into the side-by-side diff view of that file, the right side's cursor on the line under yours; `q` there comes back to the full diff where you were. (In the commits scope the side-by-side view shows the branch, with your working file on the right; on the default branch it shows the newest listed commit touching the file.) The view reloads when the project's git data does (a session's turn ends, `R` in the drawer or here), keeping the cursor on its file and hunk and your folds as you left them; a commit's full diff never reloads.
 
+**Review comments.** `c` on any line opens a small window under it for a comment to Claude: `BUG: swallows the error, notify instead`. The first word up to the colon is the kind (`NOTE`, `ISSUE`, `BUG`, `DESIGN`, `SUGGESTION`, `QUESTION`, any case; your own list under `review.kinds`), without one it is a `NOTE`; several lines are fine. `<CR>` in normal mode (or `:w`) saves it, `q` cancels (asks when the text changed). The comment shows under its line as `┃ BUG  swallows the error…`, coloured by kind (`AgentIdeReviewNote`, `AgentIdeReviewIssue`, `AgentIdeReviewBug`, `AgentIdeReviewDesign`, `AgentIdeReviewSuggestion`, `AgentIdeReviewQuestion`, a kind of your own `AgentIdeReviewKind`; the bar `AgentIdeReviewBar`, the text `AgentIdeReviewText`). A `-` line anchors the old side; a file header, a `@@` line or a note the file as a whole. `c` on a commented line edits it, `dd` deletes it (into the unnamed register), `]r` / `[r` step through commented lines; the winbar counts them. Comments are kept per work tree in the plugin's state folder (never in your repository, see [Privacy](#privacy)), across scopes, reloads and restarts; a comment on an uncommitted line shows in the branch and the uncommitted scopes alike, and one whose line left the diff sits under its file header with a note until you delete it. The first comment of a review asks which session it is for: the chat the diff was opened over (else the project's most recent session), a new session, or one from a list; the winbar names it (`· 3 comments → fix the git runner`). While comments are pending the drawer shows `review (n) · gs` at the top of the project's `Commits` section. `gs` here, `<CR>` on that row, `gs` on any row of the project in the drawer, or `:AgentsReview` from anywhere in the project finishes the review: every pending comment, grouped by where it was made (`commit 60523ec (update images)`, `uncommitted changes (working tree against HEAD 7f0f916)`), each with its path, line and the line's text, goes into the session's prompt above the draft or replacing it (the prompt opens below the diff, add remarks, send with `<C-CR>`), or to the clipboard. `<C-CR>` inside the comment window sends that one comment at once: queued behind a running turn, else the session starts as any first send does. The exact text, the workflow and how it compares with tuicr and others: [docs/review.md](docs/review.md).
+
 | Key (full diff) | Action |
 |---|---|
 | `gd` (drawer, graph) | Open the full diff of the row: its project, section, commit or file |
@@ -508,10 +525,15 @@ Four scopes, one view: **branch** (the merge-base against your working tree, unc
 | `R` | Refresh (the drawer's lists reload too) |
 | `y` | Yank the file's path (unnamed and `+` registers) |
 | `glg` | lazygit for this repository |
+| `c` | Review comment on this line (on a commented line: edit it) |
+| `dd` | Delete the comment on this line (unnamed register) |
+| `]r` / `[r` | Next / previous commented line |
+| `gs` (also in the drawer) | Finish the review: the comments into the prompt of its session, or to the clipboard (asks how) |
+| `<CR>`, `<C-CR>`, `q` (comment window) | Save the comment; save and send it now; cancel |
 | `q` | Close, back to what was shown before |
 | `g?` | Help |
 
-The keys are under `keys.full_diff` (`open`, `next_file`, `prev_file`, `next_hunk`, `prev_hunk`, `fold`, `collapse_all`, `expand_all`, `refresh`, `yank`, `lazygit`, `close`, `help`), the drawer's and the graph's key under `keys.drawer.full_diff` and `keys.graph.full_diff`; each a key, a list of keys, or `false`. The buffer is `agents://<project>/full diff`, filetype `agent-ide-fulldiff`.
+The keys are under `keys.full_diff` (`open`, `next_file`, `prev_file`, `next_hunk`, `prev_hunk`, `fold`, `collapse_all`, `expand_all`, `refresh`, `yank`, `lazygit`, `comment`, `delete_comment`, `next_comment`, `prev_comment`, `review`, `close`, `help`), the comment window's under `keys.review` (`save`, `send`, `cancel`), the drawer's and the graph's key under `keys.drawer.full_diff`, `keys.drawer.review` and `keys.graph.full_diff`; each a key, a list of keys, or `false`. The buffer is `agents://<project>/full diff`, filetype `agent-ide-fulldiff`; the comment window's buffer is a markdown buffer named `agents://review comment`.
 
 #### Commit graph
 
@@ -738,6 +760,7 @@ What it writes, all of it private (new files `0600`, folders it creates `0700`, 
 | `models.json` | `stdpath('state')/agent-ide/` | the models Claude Code last listed (value, name, description, full id), its version and when; nothing about your account |
 | `prefs.json` | `stdpath('state')/agent-ide/` | the model last used (new sessions start with it) and whether the legend is shown |
 | Drafts (`<session id>.md` per prompt buffer) | `stdpath('state')/agent-ide/drafts/` | the text of a prompt buffer as you type it, until it is sent or discarded (see Drafts under [Chat](#chat)) |
+| Reviews (`<folder>-<hash>.json` per work tree) | `stdpath('state')/agent-ide/reviews/` | the review comments you put on lines of the full diff (kind, text, path, line, the line's text, the scope's commit hash) and the session they go to, until they are sent, copied or deleted (see [Full diff](#full-diff)) |
 | Saved prompts (per project) | `stdpath('data')/agent-ide/prompts/<project folder>-<short hash>/`, or `prompts.saved_dir` | the prompts you save with `:w` |
 | Library prompts (templates) | `stdpath('data')/agent-ide/library`, or wherever you point `prompts.library_dir` | the prompts you save with `<leader>W`, rename or move |
 
