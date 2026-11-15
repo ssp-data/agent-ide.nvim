@@ -201,8 +201,23 @@ function M.sent_from_prompt(mark)
   ended(mark.root, list)
 end
 
+---Jump between the review of `root` and its session (the global key): from the full diff of
+---`root` to the chat of the review's session (else the chat the diff was opened over), the
+---prompt focused; from anywhere else back to the review (`M.resume`).
+---@param root string
+---@param project table
+function M.toggle(root, project)
+  local fd = fulldiff()
+  local v = fd and fd.state()
+  if not (v and v.root == root and v.buf == api.nvim_get_current_buf()) then return M.resume(root, project) end
+  local s = target_session(root, project) or (v.prev and v.prev.chat) or nil
+  if not s then return notify('no session for this review yet: comment first, or open a chat') end
+  local chat = require('agent-ide.ui.chat')
+  chat.open(s, chat.project_of(s))
+end
+
 ---Resume the review of `root`: the full diff of the scope of its newest comment, the cursor on
----that comment (`<CR>` on the drawer's `review (n)` row, the global resume key).
+---that comment (`<CR>` on the drawer's `review (n)` row, the global key from outside the diff).
 ---@param root string
 ---@param project table
 function M.resume(root, project)
@@ -270,6 +285,7 @@ function M.done(root, project)
     end
     items[#items + 1] = { label = 'Copy to clipboard', copy = true }
     items[#items + 1] = { label = 'Another session…', other = true }
+    items[#items + 1] = { label = 'Discard all comments', discard = true }
     items[#items + 1] = { label = 'Cancel' }
     local n = #comments
     local what = n .. (n == 1 and ' comment' or ' comments')
@@ -278,6 +294,11 @@ function M.done(root, project)
       if not choice then return end
       if choice.other then
         return M.ask_session(root, project, function(ok2) if ok2 then M.done(root, project) end end)
+      end
+      if choice.discard then -- the review is over without going anywhere; asks first
+        if vim.fn.confirm(('Discard the %s of this review?'):format(what), '&Discard\n&Keep', 2) ~= 1 then return end
+        ended(root, comments)
+        return notify(('review of %s discarded: %s'):format(name, what))
       end
       if not (choice.how or choice.copy) then return end
       local lines = M.text(root, project, comments)

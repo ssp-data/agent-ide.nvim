@@ -408,7 +408,7 @@ T['gs: the text lands above the draft, the prompt opens below the diff, the revi
   wait_for(function() return #asks() == 2 end, 'the done dialog')
   local a = asks()[2]
   eq(a.prompt, 'Review of r: 1 comment, to "Work on it"')
-  eq(a.items, { 'Insert above the draft', 'Replace the draft', 'Copy to clipboard', 'Another session…', 'Cancel' })
+  eq(a.items, { 'Insert above the draft', 'Replace the draft', 'Copy to clipboard', 'Another session…', 'Discard all comments', 'Cancel' })
   wait_in_prompt(1)
   local lines = prompt_lines()
   eq(lines[1], 'I reviewed your changes and have the following comments. Please address them.')
@@ -433,7 +433,7 @@ T['gs with an empty prompt offers one put choice; Copy to clipboard fills the re
   child.lua('_G.pick = 2')
   child.type_keys('gs')
   wait_for(function() return #asks() == 2 end, 'the done dialog')
-  eq(asks()[2].items, { 'Put in the prompt', 'Copy to clipboard', 'Another session…', 'Cancel' })
+  eq(asks()[2].items, { 'Put in the prompt', 'Copy to clipboard', 'Another session…', 'Discard all comments', 'Cancel' })
   wait_for(function() return count() == 0 end, 'cleared')
   eq(child.fn.getreg('"'):sub(1, 10), 'I reviewed')
   eq(view().focused, true)
@@ -446,7 +446,7 @@ T['gs then Cancel: the prompt and the comments stay; nothing pending notifies'] 
   comment_on('+aaa', 'one')
   wait_for(function() return virt_at('+aaa') ~= nil end, 'placed')
   set_draft({ 'my draft' })
-  child.lua('_G.pick = 5')
+  child.lua('_G.pick = 6')
   child.type_keys('gs')
   wait_for(function() return #asks() == 2 end, 'the done dialog')
   vim.wait(100)
@@ -793,7 +793,7 @@ T['copying the review forgets its session too'] = function()
   eq(session_of_review(), vim.NIL)
 end
 
-T['resume_review from the chat opens the full diff of the newest comment with the cursor on it'] = function()
+T['toggle_review jumps between the review (the newest comment) and its session'] = function()
   start()
   open({ kind = 'head' })
   wait_drawer_sessions()
@@ -805,14 +805,44 @@ T['resume_review from the chat opens the full diff of the newest comment with th
     local s = require('agent-ide.session').open({ id = id, cwd = repo })
     require('agent-ide.ui.chat').open(s, { key = repo, root = repo, name = 'r', is_git = true, sessions = {} })]], { ID, repo })
   wait_for(function() return view() == vim.NIL end, 'the chat shown')
-  child.lua('require("agent-ide").resume_review()')
+  child.lua('require("agent-ide").toggle_review()')
   wait_for(function() local v = view(); return v ~= vim.NIL and v.kind == 'head' and v.loading == false end, 'the diff again')
   wait_for(function() return view().lines[view().cursor] == '+n2' end, 'the cursor on the newest comment')
-  eq(child.lua_get('vim.fn.maparg("<leader>ar", "n", false, true).desc'), 'Agent-IDE: resume the review of the project')
+  eq(child.lua_get('vim.fn.maparg("<leader>ar", "n", false, true).desc'), 'Agent-IDE: jump between the review and its session')
+  -- from the review: to the session's chat, the prompt focused
+  child.lua('require("agent-ide").toggle_review()')
+  wait_for(function()
+    local s = child.lua_get('(function() local s = require("agent-ide.ui.chat").current(); return s and s.id or vim.NIL end)()')
+    return s == ID and child.lua_get('vim.b[vim.api.nvim_get_current_buf()].agent_ide_kind') == 'prompt'
+  end, 'the chat of the session')
+  eq(view(), vim.NIL)
+  -- and back
+  child.lua('require("agent-ide").toggle_review()')
+  wait_for(function() local v = view(); return v ~= vim.NIL and v.lines[v.cursor] == '+n2' end, 'the review again')
   child.type_keys('q')
   child.lua('require("agent-ide.review").clear(..., { 1, 2 })', { repo })
-  child.lua('require("agent-ide").resume_review()')
+  child.lua('require("agent-ide").toggle_review()')
   wait_for(function() return child.lua_get('_G.notes[#_G.notes]') == 'Agent-IDE: no review comments for r' end, 'the notice')
+end
+
+T['Discard all comments in the finish dialog asks, then ends the review'] = function()
+  start()
+  open({ kind = 'head' })
+  wait_drawer_sessions()
+  comment_on('+aaa', 'one')
+  comment_on('+n2', 'two')
+  wait_for(function() return virt_at('+n2') ~= nil end, 'placed')
+  child.lua('_G.pick = 4; _G.confirm = 2') -- Discard all comments, then Keep
+  child.type_keys('gs')
+  wait_for(function() return #asks() == 2 end, 'the dialog')
+  vim.wait(200)
+  eq(count(), 2)
+  child.lua('_G.confirm = 1') -- Discard
+  child.type_keys('gs')
+  wait_for(function() return count() == 0 end, 'discarded')
+  eq(session_of_review(), vim.NIL)
+  eq(virt_at('+aaa'), nil)
+  eq(child.lua_get('_G.notes[#_G.notes]'), 'Agent-IDE: review of r discarded: 2 comments')
 end
 
 return T

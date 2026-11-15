@@ -29,7 +29,7 @@ local GROUPS = {
   AgentIdeFullDiffAdd = { link = 'DiffAdd' },
   AgentIdeFullDiffDel = { link = 'DiffDelete' },
   AgentIdeFullDiffText = { link = 'DiffText' },
-  AgentIdeFullDiffFile = { bold = true }, -- the file under the cursor, first in the winbar
+  AgentIdeFullDiffFile = { fg = '#9ece6a', ctermfg = 114, bold = true }, -- the file under the cursor, first in the winbar (green)
   -- review comments under a line of the full diff: the bar, the text, the kind in its colour
   -- (a kind of your own: bold)
   AgentIdeReviewBar = require('agent-ide.ui.highlights').dim,

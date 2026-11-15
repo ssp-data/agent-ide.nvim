@@ -31,7 +31,7 @@ function M.setup(opts)
     next_waiting = { M.next_waiting, 'next session that needs you' },
     search = { function() M.search() end, 'search all sessions' },
     prompt_history = { function() M.prompt_history() end, 'prompt history' },
-    resume_review = { function() M.resume_review() end, 'resume the review of the project' },
+    toggle_review = { function() M.toggle_review() end, 'jump between the review and its session' },
   }
   for name, g in pairs(globals) do
     local list = require('agent-ide.util.keys').list(keys[name])
@@ -120,10 +120,11 @@ function M.review()
   review_context(function(root, project) require('agent-ide.ui.review_send').done(root, project) end)
 end
 
----`<leader>ar`: resume the review of the current context's repository: the full diff of the
----scope of its newest comment, the cursor on it.
-function M.resume_review()
-  review_context(function(root, project) require('agent-ide.ui.review_send').resume(root, project) end)
+---`<leader>ar`: from the full diff, to the chat of the review's session (the prompt focused);
+---from anywhere else, back to the review of the current context's repository: the full diff of
+---the scope of its newest comment, the cursor on it.
+function M.toggle_review()
+  review_context(function(root, project) require('agent-ide.ui.review_send').toggle(root, project) end)
 end
 
 ---@return string text for a statusline (percent signs doubled)

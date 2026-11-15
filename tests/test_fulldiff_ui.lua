@@ -169,7 +169,8 @@ T['the winbar names the file under the cursor, bold and first, and follows the c
   eq(view().winbar:sub(1, 32), '%#AgentIdeFullDiffFile#new.txt%*')
   child.type_keys('[f')
   eq(view().winbar:sub(1, 32), '%#AgentIdeFullDiffFile#img.png%*')
-  eq(child.lua_get('vim.api.nvim_get_hl(0, { name = "AgentIdeFullDiffFile" }).bold'), true)
+  local hl = child.lua_get('vim.api.nvim_get_hl(0, { name = "AgentIdeFullDiffFile" })')
+  eq({ hl.bold, hl.fg }, { true, 0x9ece6a }) -- bold, green
 end
 
 T[']f / [f step files, ]c / [c step hunks, za / z0 / z9 fold, y yanks the path'] = function()
