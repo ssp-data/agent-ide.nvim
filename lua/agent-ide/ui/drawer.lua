@@ -134,6 +134,7 @@ local function rescan()
     hidden.refresh() -- another Neovim may have hidden or shown sessions
     names.refresh() -- or named one
     S.projects = project.group(sessions)
+    S.scanned = true
     render()
   end)
 end
@@ -825,7 +826,7 @@ function M.live_policy() live_policy() end
 ---@return { tab: integer|nil, win: integer|nil, buf: integer|nil, projects: table[], nodes: table[] }
 function M.state()
   sync()
-  return { tab = S.tab, win = S.win, buf = S.buf, projects = S.projects, nodes = S.nodes }
+  return { tab = S.tab, win = S.win, buf = S.buf, projects = S.projects, nodes = S.nodes, scanned = S.scanned == true }
 end
 
 return M

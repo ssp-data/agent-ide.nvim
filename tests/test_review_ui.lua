@@ -592,4 +592,63 @@ T['<C-CR> on a session running elsewhere is refused; the comment stays'] = funct
   eq(virt_at('+aaa'), '  ┃ NOTE  never')
 end
 
+-- The final review's findings ---------------------------------------------------------------------
+
+T['gs with a draft kept on disk by an earlier Neovim offers Insert above / Replace and keeps it'] = function()
+  start()
+  open({ kind = 'head' })
+  wait_drawer_sessions()
+  comment_on('+aaa', 'one')
+  wait_for(function() return virt_at('+aaa') ~= nil end, 'placed')
+  -- the draft file of the session, as drafts.lua writes it; no prompt buffer exists here yet
+  local path = child.lua_get('require("agent-ide.ui.drafts").path(...)', { ID })
+  vim.fn.mkdir(vim.fs.dirname(path), 'p')
+  vim.fn.writefile({ '---', 'agent-ide: draft', 'session: ' .. ID, 'cwd: ' .. repo, 'saved: 2026-01-01T00:00:00', '---',
+    'my old draft' }, path)
+  eq(prompt_lines(), vim.NIL)
+  child.type_keys('gs')
+  wait_for(function() return #asks() == 2 end, 'the done dialog')
+  eq(asks()[2].items[1], 'Insert above the draft')
+  wait_for(function() return count() == 0 end, 'cleared')
+  local lines = prompt_lines()
+  eq(lines[#lines], 'my old draft')
+end
+
+T['<C-CR> to a session never opened here loads its history first: its chat shows the earlier conversation'] = function()
+  start({ fake = { { expect = 'I reviewed your changes' }, init_step(), result_step('ok') } })
+  open({ kind = 'head' })
+  wait_drawer_sessions()
+  cursor_on('+aaa')
+  child.type_keys('c')
+  wait_for(editor_open, 'the editor')
+  child.type_keys('BUG: swallows it', '<C-CR>')
+  wait_for(function() return #fake_prompts() == 1 end, 'the fake to receive the prompt', 10000)
+  wait_for(function() local st = session_state().state; return st == 'idle' or st == 'done' end, 'the turn to end')
+  child.lua([[local id, repo = ...
+    local s = require('agent-ide.session').open({ id = id, cwd = repo })
+    require('agent-ide.ui.chat').open(s, { key = repo, root = repo, name = 'r', is_git = true, sessions = {} })]], { ID, repo })
+  local function transcript()
+    return child.lua_get([[(function(id)
+      local s = require('agent-ide.session').get(id)
+      local tbuf = require('agent-ide.ui.chat').buffers(s)
+      return vim.api.nvim_buf_get_lines(tbuf, 0, -1, false)
+    end)(...)]], { ID })
+  end
+  wait_for(function() return has_line(transcript(), 'I reviewed your changes') ~= nil end, 'the review in the transcript')
+  eq(has_line(transcript(), 'Work on it') ~= nil, true) -- the earlier prompt of the session, from its transcript
+  eq(has_line(transcript(), 'Work on it') < has_line(transcript(), 'I reviewed your changes'), true)
+end
+
+T['before the drawer has scanned, a stored session is kept: the winbar lookup never drops it'] = function()
+  start()
+  local project = { key = repo, root = repo, name = 'r', is_git = true, sessions = {} }
+  child.lua('require("agent-ide.review").set_session(..., select(2, ...))', { repo, ID })
+  eq(child.lua_get('require("agent-ide.ui.review_send").target_name(..., select(2, ...))', { repo, project }), vim.NIL)
+  eq(session_of_review(), ID)
+  open({ kind = 'head' }) -- opens the Agents tab: the scan runs
+  wait_drawer_sessions()
+  eq(child.lua_get('require("agent-ide.ui.review_send").target_name(..., select(2, ...))', { repo, project }), 'Work on it')
+  eq(session_of_review(), ID)
+end
+
 return T

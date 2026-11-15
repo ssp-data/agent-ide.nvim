@@ -45,18 +45,22 @@ local function label(m)
 end
 
 ---The stored session of the review of `root` when it still exists (listed for the project, or
----loaded here); a stored id that is gone is forgotten. `{ id, title, cwd?, path? }` or nil.
+---loaded here): `{ id, title, cwd?, path? }`, else nil. With `opts.drop`, a stored id that is
+---gone is forgotten, but only once the drawer has scanned (before that the list is empty and
+---says nothing); a read from a winbar never drops anything.
 ---@param root string
 ---@param project table
+---@param opts? { drop?: boolean }
 ---@return table|nil
-function M.valid_session(root, project)
+function M.valid_session(root, project, opts)
   local id = review.session(root)
   if not id then return nil end
   local m = meta_of(sessions_of(project), id)
   if m then return { id = id, title = m.title, cwd = m.cwd, path = m.path } end
   local s = session_mod().get(id)
   if s then return { id = id, title = s.title, cwd = s.cwd, path = s.path } end
-  review.set_session(root, nil)
+  local d = drawer()
+  if opts and opts.drop and d and d.state().scanned then review.set_session(root, nil) end
   return nil
 end
 
@@ -130,7 +134,7 @@ end
 ---@param project table
 ---@param cb fun(ok: boolean)
 function M.ensure_session(root, project, cb)
-  if M.valid_session(root, project) then return cb(true) end
+  if M.valid_session(root, project, { drop = true }) then return cb(true) end
   M.ask_session(root, project, cb)
 end
 
@@ -205,7 +209,8 @@ function M.done(root, project)
     if not ok then return end
     local s, target = target_session(root, project)
     if not s then return end
-    local _, pbuf = require('agent-ide.ui.chat').buffers(s)
+    -- the prompt buffer first: a draft kept on disk comes back into it (ui/drafts.lua)
+    local _, pbuf = require('agent-ide.ui.chat').ensure(s, project)
     local draft = pbuf ~= nil and has_text(api.nvim_buf_get_lines(pbuf, 0, -1, false))
     local items = {}
     if draft then

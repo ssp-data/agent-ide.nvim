@@ -435,7 +435,8 @@ end
 ---@return integer|nil tbuf, integer|nil pbuf
 function M.ensure(s, project)
   subscribe()
-  get_chat(s, project)
+  local c, fresh = get_chat(s, project)
+  if fresh then load(c, fresh) end -- a send must not start a turn before the history is in
   return M.buffers(s)
 end
 
@@ -448,7 +449,8 @@ end
 ---@param done? fun(ok: boolean)
 function M.send_text(s, project, text, done)
   subscribe()
-  local c = get_chat(s, project)
+  local c, fresh = get_chat(s, project)
+  if fresh then load(c, fresh) end -- the text waits for the history (chat_send holds it)
   chat_send.send(c, { text = text, done = done })
 end
 
