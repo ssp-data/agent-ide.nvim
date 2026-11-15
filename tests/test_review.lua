@@ -4,6 +4,7 @@
 local eq = MiniTest.expect.equality
 local review = require('agent-ide.review')
 local text = require('agent-ide.review_text')
+local marks = require('agent-ide.ui.review_marks')
 
 local tmp, root, notes
 
@@ -165,6 +166,80 @@ T['reference'] = function()
   eq(text.reference({ path = 'a b.lua', side = 'new', line = 3 }), '`a b.lua:3`')
   eq(text.reference({ path = 'a.lua', side = 'old', line = 3 }), '`a.lua:3 (old line)`')
   eq(text.reference({ path = 'a.lua' }), '`a.lua` (file)')
+end
+
+-- Anchors on a render ------------------------------------------------------------------------------
+
+local function render_fixture()
+  local render = require('agent-ide.ui.fulldiff_render')
+  local files = {
+    { status = 'M', path = 'lua/x.lua', added = 2, removed = 1, binary = false, submodule = false },
+    { status = 'M', path = 'img.png', binary = true, submodule = false },
+  }
+  local blocks = { ['lua/x.lua'] = { lines = { '@@ -1,3 +1,4 @@', ' a', '-b', '+bb', '+c', ' d' } } }
+  return render.build(files, blocks, { icons = { open = 'v', closed = '>' }, width = 60, fold_over = 500 })
+end
+
+T['anchor: header, @@, note and blank are file-level; +, -, context carry side, line and code'] = function()
+  local t = render_fixture()
+  eq(marks.anchor(t, 1), { path = 'lua/x.lua' })
+  eq(marks.anchor(t, 2), { path = 'lua/x.lua' })
+  eq(marks.anchor(t, 3), { path = 'lua/x.lua', side = 'new', line = 1, code = 'a' })
+  eq(marks.anchor(t, 4), { path = 'lua/x.lua', side = 'old', line = 2, code = 'b' })
+  eq(marks.anchor(t, 5), { path = 'lua/x.lua', side = 'new', line = 2, code = 'bb' })
+  eq(marks.anchor(t, 8), { path = 'lua/x.lua' }) -- the blank line after the file
+  eq(marks.anchor(t, 10), { path = 'img.png' }) -- the note
+  eq(marks.anchor(t, 99), nil)
+end
+
+T['lines: anchors found, a lost line under the header with lost = true, a path not shown left out'] = function()
+  local t = render_fixture()
+  local m = marks.lines(t, {
+    { id = 1, path = 'lua/x.lua', side = 'new', line = 2 },
+    { id = 2, path = 'lua/x.lua', side = 'old', line = 2 },
+    { id = 3, path = 'lua/x.lua' },
+    { id = 4, path = 'lua/x.lua', side = 'new', line = 99 },
+    { id = 5, path = 'gone.lua', side = 'new', line = 1 },
+    { id = 6, path = 'img.png' },
+  })
+  eq(vim.tbl_map(function(e) return e.comment.id end, m[5]), { 1 })
+  eq({ m[4][1].comment.id, m[4][1].lost }, { 2, false })
+  eq(vim.tbl_map(function(e) return { e.comment.id, e.lost } end, m[1]), { { 3, false }, { 4, true } })
+  eq(m[99], nil)
+  eq(m[9][1].comment.id, 6)
+  eq(vim.tbl_count(m), 4)
+end
+
+T['place: one virt_lines extmark per commented line, the kind in its group, a lost note'] = function()
+  local t = render_fixture()
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, t.lines)
+  local map = marks.place(buf, t, {
+    { id = 1, kind = 'BUG', text = 'one\ntwo', path = 'lua/x.lua', side = 'new', line = 2 },
+    { id = 4, kind = 'NIT', text = 'gone', path = 'lua/x.lua', side = 'new', line = 99 },
+  })
+  eq(vim.tbl_count(map), 2)
+  local ns = vim.api.nvim_create_namespace('agent-ide.review')
+  local ext = vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, { details = true })
+  eq(#ext, 2)
+  eq(ext[1][2], 0) -- the header: the lost one
+  eq(ext[1][4].virt_lines[1][2], { 'NIT  ', 'AgentIdeReviewKind' })
+  eq(ext[1][4].virt_lines[1][3], { '(line 99 not in this diff)  ', 'AgentIdeDiffNote' })
+  eq(ext[2][2], 4)
+  local v = ext[2][4].virt_lines
+  eq(#v, 2)
+  eq(v[1], { { '  ┃ ', 'AgentIdeReviewBar' }, { 'BUG  ', 'AgentIdeReviewBug' }, { 'one', 'AgentIdeReviewText' } })
+  eq(v[2], { { '  ┃      ', 'AgentIdeReviewBar' }, { 'two', 'AgentIdeReviewText' } })
+  eq(ext[2][4].virt_lines_above, false)
+  marks.place(buf, t, {})
+  eq(#vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, {}), 0)
+  vim.api.nvim_buf_delete(buf, { force = true })
+end
+
+T['group_of'] = function()
+  eq(marks.group_of('BUG'), 'AgentIdeReviewBug')
+  eq(marks.group_of('SUGGESTION'), 'AgentIdeReviewSuggestion')
+  eq(marks.group_of('NIT'), 'AgentIdeReviewKind')
 end
 
 return T

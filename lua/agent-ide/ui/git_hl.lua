@@ -29,6 +29,17 @@ local GROUPS = {
   AgentIdeFullDiffAdd = { link = 'DiffAdd' },
   AgentIdeFullDiffDel = { link = 'DiffDelete' },
   AgentIdeFullDiffText = { link = 'DiffText' },
+  -- review comments under a line of the full diff: the bar, the text, the kind in its colour
+  -- (a kind of your own: bold)
+  AgentIdeReviewBar = require('agent-ide.ui.highlights').dim,
+  AgentIdeReviewText = {},
+  AgentIdeReviewKind = { bold = true },
+  AgentIdeReviewNote = { fg = '#7aa2f7', ctermfg = 111, bold = true }, -- blue
+  AgentIdeReviewIssue = { fg = '#e0af68', ctermfg = 179, bold = true }, -- yellow
+  AgentIdeReviewBug = { fg = '#f7768e', ctermfg = 204, bold = true }, -- red
+  AgentIdeReviewDesign = { fg = '#bb9af7', ctermfg = 141, bold = true }, -- violet
+  AgentIdeReviewSuggestion = { fg = '#9ece6a', ctermfg = 114, bold = true }, -- green
+  AgentIdeReviewQuestion = { fg = '#7dcfff', ctermfg = 117, bold = true }, -- cyan
 }
 
 local function apply()

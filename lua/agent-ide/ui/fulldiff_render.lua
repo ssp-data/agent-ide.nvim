@@ -12,10 +12,10 @@ local M = {}
 local INDENT = '  '
 local TEXT_PRIORITY = 110 -- above the line colour (extmarks default to 100)
 
--- The new-side line a hunk starts at (`@@ -a,b +c,d @@`, the count defaults to 1).
+-- The old-side and new-side lines a hunk starts at (`@@ -a,b +c,d @@`, the count defaults to 1).
 local function hunk_start(line)
-  local c = line:match('^@@ %-[%d,]+ %+(%d+)')
-  return tonumber(c)
+  local a, c = line:match('^@@ %-(%d+)[%d,]* %+(%d+)')
+  return tonumber(c), tonumber(a)
 end
 
 local function note_of(f, block)
@@ -64,7 +64,7 @@ local changed = require('agent-ide.util.textdiff').changed
 ---@field hl { line: integer, col_start: integer, col_end: integer, group: string, hl_eol: boolean|nil, priority: integer|nil, line_hl: boolean|nil }[] `hl_eol`: the colour runs to the end of the screen line; `line_hl`: a whole-line (background) highlight
 ---@field folds { first: integer, last: integer, closed: boolean, path: string }[]
 ---@field files { path: string, line: integer }[]
----@field nodes table[] per line: `{ file = k, header = true }` or `{ file = k, new_line = n|nil }`
+---@field nodes table[] per line: `{ file = k, header = true }` or `{ file = k, new_line = n|nil, old_line = m|nil }` (a `+` line has the new side, a `-` line the old, a context line both)
 ---@field raw table<integer, string> the coloured lines (delta) as they came, by line, for `decode`
 ---@field line_group table<integer, string> the group of a whole line (a `+` line, a `@@` line, a note), by line
 ---@field line_eol table<integer, true> the lines whose colour runs to the end of the screen line
@@ -111,15 +111,15 @@ function M.build(files, blocks, opts)
 
   local function hunks(block, k)
     local colored = block.colored
-    local new_line
-    local plain = { file = k } -- the node of every line of this file without a new-side number
+    local new_line, old_line
+    local plain = { file = k } -- the node of every line of this file without a line number
     local dels, adds = {}, 0 -- the `-` lines of the current run, how many `+` lines followed
     for _, raw in ipairs(block.lines) do
       local text, keep = raw, false
       if colored then text, keep = strip(raw) end
       local c = text:byte(1)
       if c == 64 then -- @
-        new_line = hunk_start(text)
+        new_line, old_line = hunk_start(text)
         add(text, plain, 'AgentIdeDiffHunk')
       elseif c == 43 then -- +
         add(text, { file = k, new_line = new_line }, not colored and 'AgentIdeFullDiffAdd' or nil, true)
@@ -129,14 +129,16 @@ function M.build(files, blocks, opts)
           if dels[adds] then mark_pair(dels[adds], #lines) end
         end
       elseif c == 45 then -- -
-        add(text, plain, not colored and 'AgentIdeFullDiffDel' or nil, true)
+        add(text, { file = k, old_line = old_line }, not colored and 'AgentIdeFullDiffDel' or nil, true)
+        if old_line then old_line = old_line + 1 end
         if adds > 0 then dels, adds = {}, 0 end
         dels[#dels + 1] = #lines
       elseif c == 92 then -- \
         add(text, plain, 'AgentIdeDiffHunk')
       else
-        add(text, { file = k, new_line = new_line })
+        add(text, { file = k, new_line = new_line, old_line = old_line })
         if new_line then new_line = new_line + 1 end
+        if old_line then old_line = old_line + 1 end
       end
       if c ~= 43 and c ~= 45 and #dels > 0 then dels, adds = {}, 0 end
       if keep then t.raw[#lines] = raw end
