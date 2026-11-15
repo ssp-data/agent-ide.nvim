@@ -52,6 +52,7 @@ You might ask why not a terminal-based TUI, now that Herdr, Rex, and others are 
 - **Chat in native buffers**: write prompts with your own Vim setup, read answers as rendered markdown, tool calls folded
 - **Never interrupts typing**: permission requests and finished sessions wait; one key jumps to the next one
 - **Git review built in**: changes and commits per project, side-by-side diffs, jump from an edit to its diff
+- **Review comments**: typed notes on lines of the full diff (`BUG:`, `ISSUE:`, …), sent to a session with file, line and commit filled in, or one at a time with `<C-CR>` (see [docs/review.md](docs/review.md))
 - **Fuzzy search** across all sessions and every prompt you ever sent
 - **Reusable prompts**: a prompt library, skills and commands, saved prompts per project
 - **Status in your statusline** (and an Omarchy bar widget): state, model, quota
@@ -112,7 +113,7 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
 
 Without `cargo` leave out `build`; the plugin uses its Lua backend. If Neovim says that the helper is out of date, the helper binary was built from older sources than the plugin (both must read transcripts by the same rules); see [Settings you may need](#settings-you-may-need).
 
-Lazy-loaded on `cmd = 'Agents'` (or the key above), the plugin starts with the first `:Agents`: until then the other global keys (`<leader>an`, `<leader>as`, `<leader>aP`), `:AgentsSearch`, the footer and the status file for a desktop bar do not exist yet. To have them from the start, load it after startup instead:
+Lazy-loaded on `cmd = 'Agents'` (or the key above), the plugin starts with the first `:Agents`: until then the other global keys (`<leader>an`, `<leader>as`, `<leader>aP`, `<leader>ar`), `:AgentsSearch`, the footer and the status file for a desktop bar do not exist yet. To have them from the start, load it after startup instead:
 
 ```lua
 {
@@ -152,6 +153,7 @@ require('agent-ide').setup({
   keys = {
     toggle = '<leader>aa',
     next_waiting = '<leader>an',
+    toggle_review = '<leader>ar', -- global: between the review of the project (the full diff on its newest comment) and its session
     search = '<leader>as', -- search all sessions
     prompt_history = '<leader>aP', -- every prompt, newest first
     -- the search picker's query line; close works in normal mode (insert-mode <Esc> leaves insert mode)
@@ -175,7 +177,8 @@ require('agent-ide').setup({
       refresh = { 'R', '<leader>gR' }, lazygit = 'glg' },
     -- the drawer's own keys (see Drawer); on a row that has its own handler for a key (the
     -- prompt row keys below) that handler runs instead
-    drawer = { open = { '<CR>', 'o' }, fold = 'za', collapse_all = 'z0', expand_all = 'z9', refresh = 'R',
+    drawer = { review = 'gs', -- finish the review of the row's repository (the comments into the prompt)
+      open = { '<CR>', 'o' }, fold = 'za', collapse_all = 'z0', expand_all = 'z9', refresh = 'R',
       tmux = { 'gT', '<leader>aT' }, search = { 'S', '<leader>ff', '<leader>S' }, park = 'sP', hide = 'H',
       delete = 'D', yank = 'y', lazygit = 'glg', close = 'q', help = { '?', 'g?' }, graph = 'G', full_diff = 'gd', scope = '<S-Tab>', legend = { 'gL', '<leader>aL' }, close_tmux = 'X', rename = 'r',
       next_session = ']s', prev_session = '[s' }, -- open the next / previous session of the project
@@ -186,7 +189,19 @@ require('agent-ide').setup({
       yank = 'y', lazygit = 'glg', close = 'q', help = 'g?' },
     -- full diff view (every change of a branch in one buffer), buffer-local
     full_diff = { open = '<CR>', next_file = ']f', prev_file = '[f', next_hunk = ']c', prev_hunk = '[c', fold = 'za',
-      collapse_all = 'z0', expand_all = 'z9', refresh = 'R', yank = 'y', lazygit = 'glg', close = 'q', help = 'g?' },
+      collapse_all = 'z0', expand_all = 'z9', refresh = 'R', yank = 'y', lazygit = 'glg', close = 'q', help = 'g?',
+      -- review comments: one on this line (on a commented line: edit it), delete it, step
+      -- commented lines, finish the review (the comments into the prompt, asks how)
+      comment = 'c', delete_comment = 'dd', next_comment = ']r', prev_comment = '[r', review = 'gs' },
+    -- the comment window over the full diff; save and cancel in normal mode, send in both
+    review = { save = '<CR>', send = '<C-CR>', cancel = { 'q', '<Esc><Esc>' } },
+  },
+  -- review comments: the kinds a comment can start with (`BUG: …`), each with the description
+  -- Claude is given (a comment without one is a NOTE), and the first line of the text sent
+  review = {
+    kinds = { { 'NOTE', 'an observation' }, { 'ISSUE', 'a problem to fix' }, { 'BUG', 'wrong behaviour' },
+      { 'DESIGN', 'structure or approach' }, { 'SUGGESTION', 'an improvement' }, { 'QUESTION', 'something to explain' } },
+    intro = 'I reviewed your changes and have the following comments. Please address them.',
   },
   prompts = {
     library_dir = nil,  -- your templates (nil: stdpath('data') .. '/agent-ide/library')
@@ -312,6 +327,7 @@ In the drawer (`keys.drawer`; the prompt row keys are `keys.prompts`, the sessio
 | `]s`, `[s` | Open the next or previous session of the project (from the session row, else the chat shown); the drawer keeps the focus and its cursor follows |
 | `G` | Commit graph of the row's repository (a worktree session: that worktree; see [Commit graph](#commit-graph)) |
 | `gd` | Full diff of the row: its project or section (the branch, or the commits), a commit, or a file with the cursor on it (see [Full diff](#full-diff)) |
+| `gs` | Finish the review of the row's repository: its pending comments into the prompt of a session, or to the clipboard (see [Full diff](#full-diff)); `<CR>` on the `review (n)` row goes back to the review instead (the full diff on its newest comment) |
 | `glg` | Open lazygit for the row's repository (a worktree row or session: that worktree) |
 | `<S-Tab>` | Scope: only the row's project (else the working directory's), or back to all projects (see [Project scope](#project-scope)) |
 | `?`, `g?` | Help: a list of every key you can filter by typing; `<CR>` on a row presses that key (see [Help](#help)) |
@@ -470,7 +486,7 @@ With a lazy-loaded plugin, a component that does not load it:
 
 ### Git: what an agent changed
 
-Each git project in the drawer has two more sections below its sessions: `Changes vs <base>` (everything on the branch since it left the default branch, uncommitted and untracked files included; on the default branch, uncommitted changes against `HEAD`) and `Commits on branch` (`Recent commits`, the last 20, on the default branch or on a branch with no commit of its own yet), each commit expanding to its files. The commits section starts with the `full diff` and `commit graph` rows and `uncommitted (n)`: what is not committed yet, the working tree and the index against `HEAD` with untracked files, expanding to its files like a commit; `<CR>` on one of them diffs your working file against `HEAD`. The project row shows the branch when it is not the default branch. The lists refresh when a session of the project run in this Neovim finishes a turn, on `R`, and when you come back to the drawer after more than 5 s.
+Each git project in the drawer has two more sections below its sessions: `Changes vs <base>` (everything on the branch since it left the default branch, uncommitted and untracked files included; on the default branch, uncommitted changes against `HEAD`) and `Commits on branch` (`Recent commits`, the last 20, on the default branch or on a branch with no commit of its own yet), each commit expanding to its files. The commits section starts with the `full diff` row (a fold: `<CR>` lists the files of the branch's committed changes, which no other row lists, and `<CR>` on one opens the full diff of the commits on that file; `gd` on the row opens the full diff as before), the `commit graph` row and `uncommitted (n)`: what is not committed yet, the working tree and the index against `HEAD` with untracked files, expanding to its files like a commit; `<CR>` on one of them diffs your working file against `HEAD`. The project row shows the branch when it is not the default branch. The lists refresh when a session of the project run in this Neovim finishes a turn, on `R`, and when you come back to the drawer after more than 5 s.
 
 `<CR>` on a file opens a side-by-side diff in the main window, built on Neovim's own diff mode. For branch changes the right side is your real, editable file. In the chat, `gd` (or `<leader>gd`) on an `Edit` or `Write` fold opens the diff of that file. Opening a diff sets the Agents tab's directory to that work tree (`tcd`, like opening a chat), so your own lazygit or picker keys work on it. Sessions in a linked worktree get a row per work tree (worktree icon, `<branch> · <folder>`) with its own Changes and Commits.
 
@@ -489,13 +505,17 @@ The right side is your own file, so the one-character keys `q`, `?` and `R` are 
 
 #### Full diff
 
-To read a whole branch top to bottom instead of file by file, open its **full diff**: one read-only buffer in the main window with every changed file, the way lazygit shows a branch. Each file starts with a header line (status, path, `+added −removed`), then only its hunks with three lines of context, in Neovim folds, a blank line between files. The `@@` lines are dim (`AgentIdeDiffHunk`). Binary files, submodules and files too large to read get a one-line note (`AgentIdeDiffNote`); untracked files show as added lines. A file whose patch is longer than 500 lines starts folded. The winbar names the scope and sums it up: `myapp · full diff · vs main · 12 files +340 −120`.
+To read a whole branch top to bottom instead of file by file, open its **full diff**: one read-only buffer in the main window with every changed file, the way lazygit shows a branch. Each file starts with a header line (status, path, `+added −removed`), then only its hunks with three lines of context, in Neovim folds, a blank line between files. The `@@` lines are dim (`AgentIdeDiffHunk`). Binary files, submodules and files too large to read get a one-line note (`AgentIdeDiffNote`); untracked files show as added lines. A file whose patch is longer than 500 lines starts folded. The winbar names the file under the cursor first, in bold green (`AgentIdeFullDiffFile`), then the scope and its sums: `lua/x.lua · myapp · full diff · vs main · 12 files +340 −120`; it follows the cursor, so a long diff never leaves you wondering which file you are in.
 
 **Colours.** With [delta](https://github.com/dandavison/delta) installed, the patch goes through `delta --color-only` and you get what delta gives you in lazygit: syntax colours, a background per changed line and the changed words stronger, in your delta configuration (`~/.gitconfig` `[delta]`), after Neovim's `background` (`--dark` or `--light`). Tabs and long lines pass through unchanged. Patches over 20 000 lines, and everything without delta, use the plugin's own colours: whole lines as Neovim's diff mode shows them (`AgentIdeFullDiffAdd` and `AgentIdeFullDiffDel`, linked to `DiffAdd` and `DiffDelete`) and the changed text inside a modified line marked like its `DiffText` (`AgentIdeFullDiffText`). `git = { delta = false }` turns delta off, a command list of your own (`delta = { 'delta', '--features', 'nvim' }`) replaces the plain `delta`; `'auto'` is the default. Colours are drawn for the lines on screen only, so a long patch opens as fast as a short one.
 
-Four scopes, one view: **branch** (the merge-base against your working tree, uncommitted and untracked included: what `Changes vs <base>` lists), **commits** (the merge-base against `HEAD`, committed changes only: what `Commits on branch` lists; under `Recent commits`, the recent commits it lists), **one commit** (against its first parent), and **uncommitted** (`HEAD` against the working tree). `gd` on any row of a git project in the drawer opens the scope the row stands for: the project row, a session or the `Changes` section give the branch; a file under `Changes` the same with the cursor on that file; the `Commits` section (its header, its `full diff` and `commit graph` rows) the uncommitted changes when there are any, else the commits; a commit row that commit (a file under it: with the cursor on the file); the `uncommitted` row that scope. Two dimmed `full diff · gd` rows sit at the top of an open `Changes` section and at the top of `Commits`, above the `commit graph · G` row. In the commit graph, `gd` on a commit opens its full diff and `q` returns to the graph. `:AgentsDiff` opens the branch scope for the current context, as `:AgentsGraph` finds it.
+Four scopes, one view: **branch** (the merge-base against your working tree, uncommitted and untracked included: what `Changes vs <base>` lists), **commits** (the merge-base against `HEAD`, committed changes only: what `Commits on branch` lists; under `Recent commits`, the recent commits it lists), **one commit** (against its first parent), and **uncommitted** (`HEAD` against the working tree). `gd` on any row of a git project in the drawer opens the scope the row stands for: the project row, a session or the `Changes` section give the branch; a file under `Changes` the same with the cursor on that file; the `Commits` section (its header, its `full diff` and `commit graph` rows) the uncommitted changes when there are any, else the commits; a commit row that commit (a file under it: with the cursor on the file); the `uncommitted` row that scope. Two dimmed `full diff · gd` rows sit at the top of an open `Changes` section and at the top of `Commits`, above the `commit graph · G` row; the one under `Commits` expands with `<CR>` to the files of the commits scope, and `<CR>` on a file opens that scope with the cursor on it. In the commit graph, `gd` on a commit opens its full diff and `q` returns to the graph. `:AgentsDiff` opens the branch scope for the current context, as `:AgentsGraph` finds it.
 
 `<CR>` on any line jumps into the side-by-side diff view of that file, the right side's cursor on the line under yours; `q` there comes back to the full diff where you were. (In the commits scope the side-by-side view shows the branch, with your working file on the right; on the default branch it shows the newest listed commit touching the file.) The view reloads when the project's git data does (a session's turn ends, `R` in the drawer or here), keeping the cursor on its file and hunk and your folds as you left them; a commit's full diff never reloads.
+
+**Review comments.** `c` on any line opens a small window under it for a comment to Claude: `BUG: swallows the error, notify instead`. The first word up to the colon is the kind (`NOTE`, `ISSUE`, `BUG`, `DESIGN`, `SUGGESTION`, `QUESTION`, any case; your own list under `review.kinds`), without one it is a `NOTE`; several lines are fine. `<CR>` in normal mode (or `:w`) saves it, `q` cancels (asks when the text changed). The comment shows under its line as `┃ BUG  swallows the error…`, coloured by kind (`AgentIdeReviewNote`, `AgentIdeReviewIssue`, `AgentIdeReviewBug`, `AgentIdeReviewDesign`, `AgentIdeReviewSuggestion`, `AgentIdeReviewQuestion`, a kind of your own `AgentIdeReviewKind`; the bar `AgentIdeReviewBar`, the text `AgentIdeReviewText`). A `-` line anchors the old side; a file header, a `@@` line or a note the file as a whole. `c` on a commented line edits it, `dd` deletes it (into the unnamed register), `]r` / `[r` step through commented lines; the winbar counts them. Comments are kept per work tree in the plugin's state folder (never in your repository, see [Privacy](#privacy)), across scopes, reloads and restarts; a comment on an uncommitted line shows in the branch and the uncommitted scopes alike, and one whose line left the diff sits under its file header with a note until you delete it. The first comment of a review asks which session it is for: the chat the diff was opened over (else the project's most recent session), a new session, or one from a list; the winbar names it (`· 3 comments → fix the git runner`). While comments are pending the drawer shows `review (n) · gs` at the top of the project's `Commits` section; `<CR>` on it, or `<leader>ar` from anywhere in the project, goes back to the review: the full diff of the newest comment's scope, the cursor on it; `<leader>ar` in the full diff goes the other way, to the chat of the review's session with the prompt focused, so one key jumps between the two (`keys.toggle_review`). `gs` in the full diff, `gs` on any row of the project in the drawer, or `:AgentsReview` from anywhere in the project finishes the review: every pending comment, grouped by where it was made (`commit 60523ec (update images)`, `uncommitted changes (working tree against HEAD 7f0f916)`), each with its path, line and the line's text, goes into the session's prompt above the draft or replacing it (the prompt opens below the diff, add remarks, send with `<C-CR>`), or to the clipboard; `Discard all comments` ends the review without sending (asks first). The comments stay in the diff, marked `↑ in prompt`, until that prompt is sent: add or edit some more and `gs` again rebuilds the whole text (`Replace the draft` is offered first then); a prompt rewritten by hand without the review's first line leaves them pending. Once a review has gone out (the prompt sent, or the text copied) its session is forgotten, so the next comment asks again. `<C-CR>` inside the comment window sends that one comment at once: queued behind a running turn, else the session starts as any first send does. The exact text, the workflow and how it compares with tuicr and others: [docs/review.md](docs/review.md).
+
+![The review placed in the prompt buffer below the full diff](docs/images/review-summary.png)
 
 | Key (full diff) | Action |
 |---|---|
@@ -508,10 +528,15 @@ Four scopes, one view: **branch** (the merge-base against your working tree, unc
 | `R` | Refresh (the drawer's lists reload too) |
 | `y` | Yank the file's path (unnamed and `+` registers) |
 | `glg` | lazygit for this repository |
+| `c` | Review comment on this line; on a commented line the same window opens with the comment, to edit it |
+| `dd` | Delete the comment on this line (unnamed register) |
+| `]r` / `[r` | Next / previous commented line |
+| `gs` (also in the drawer) | Finish the review: the comments into the prompt of its session, or to the clipboard (asks how) |
+| `<CR>`, `<C-CR>`, `q` (comment window) | Save the comment (also after editing it); save and send it now; cancel |
 | `q` | Close, back to what was shown before |
 | `g?` | Help |
 
-The keys are under `keys.full_diff` (`open`, `next_file`, `prev_file`, `next_hunk`, `prev_hunk`, `fold`, `collapse_all`, `expand_all`, `refresh`, `yank`, `lazygit`, `close`, `help`), the drawer's and the graph's key under `keys.drawer.full_diff` and `keys.graph.full_diff`; each a key, a list of keys, or `false`. The buffer is `agents://<project>/full diff`, filetype `agent-ide-fulldiff`.
+The keys are under `keys.full_diff` (`open`, `next_file`, `prev_file`, `next_hunk`, `prev_hunk`, `fold`, `collapse_all`, `expand_all`, `refresh`, `yank`, `lazygit`, `comment`, `delete_comment`, `next_comment`, `prev_comment`, `review`, `close`, `help`), the comment window's under `keys.review` (`save`, `send`, `cancel`), the drawer's and the graph's key under `keys.drawer.full_diff`, `keys.drawer.review` and `keys.graph.full_diff`; each a key, a list of keys, or `false`. The buffer is `agents://<project>/full diff`, filetype `agent-ide-fulldiff`; the comment window's buffer is a markdown buffer named `agents://review comment`.
 
 #### Commit graph
 
@@ -738,6 +763,7 @@ What it writes, all of it private (new files `0600`, folders it creates `0700`, 
 | `models.json` | `stdpath('state')/agent-ide/` | the models Claude Code last listed (value, name, description, full id), its version and when; nothing about your account |
 | `prefs.json` | `stdpath('state')/agent-ide/` | the model last used (new sessions start with it) and whether the legend is shown |
 | Drafts (`<session id>.md` per prompt buffer) | `stdpath('state')/agent-ide/drafts/` | the text of a prompt buffer as you type it, until it is sent or discarded (see Drafts under [Chat](#chat)) |
+| Reviews (`<folder>-<hash>.json` per work tree) | `stdpath('state')/agent-ide/reviews/` | the review comments you put on lines of the full diff (kind, text, path, line, the line's text, the scope's commit hash) and the session they go to, until they are sent, copied or deleted (see [Full diff](#full-diff)) |
 | Saved prompts (per project) | `stdpath('data')/agent-ide/prompts/<project folder>-<short hash>/`, or `prompts.saved_dir` | the prompts you save with `:w` |
 | Library prompts (templates) | `stdpath('data')/agent-ide/library`, or wherever you point `prompts.library_dir` | the prompts you save with `<leader>W`, rename or move |
 

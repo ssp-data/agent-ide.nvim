@@ -31,6 +31,7 @@ function M.setup(opts)
     next_waiting = { M.next_waiting, 'next session that needs you' },
     search = { function() M.search() end, 'search all sessions' },
     prompt_history = { function() M.prompt_history() end, 'prompt history' },
+    toggle_review = { function() M.toggle_review() end, 'jump between the review and its session' },
   }
   for name, g in pairs(globals) do
     local list = require('agent-ide.util.keys').list(keys[name])
@@ -97,6 +98,33 @@ function M.full_diff(opts)
     return fulldiff.open(vim.tbl_extend('keep', opts, { scope = { kind = 'branch' } }))
   end
   fulldiff.open_context()
+end
+
+-- The repository of the current context (the one `:AgentsDiff` would open); `cb(root, project)`.
+local function review_context(cb)
+  local graph = package.loaded['agent-ide.ui.graph']
+  local target = require('agent-ide.ui.graph_context').target(graph and graph.state() or nil)
+  local dir = target.root or target.dir
+  local function notify(msg) vim.notify('Agent-IDE: ' .. msg, vim.log.levels.INFO) end
+  if not dir or vim.fn.isdirectory(dir) ~= 1 then return notify('not a git repository: ' .. tostring(dir)) end
+  require('agent-ide.git').toplevel(dir, function(top)
+    if not top then return notify('not a git repository: ' .. vim.fn.fnamemodify(dir, ':~')) end
+    local root = target.root or top
+    cb(root, target.project or { key = root, root = root, name = vim.fs.basename(root), is_git = true, sessions = {} })
+  end)
+end
+
+---`:AgentsReview`: finish the review of the current context's repository: its pending comments
+---into the prompt of a session, asked how.
+function M.review()
+  review_context(function(root, project) require('agent-ide.ui.review_send').done(root, project) end)
+end
+
+---`<leader>ar`: from the full diff, to the chat of the review's session (the prompt focused);
+---from anywhere else, back to the review of the current context's repository: the full diff of
+---the scope of its newest comment, the cursor on it.
+function M.toggle_review()
+  review_context(function(root, project) require('agent-ide.ui.review_send').toggle(root, project) end)
 end
 
 ---@return string text for a statusline (percent signs doubled)

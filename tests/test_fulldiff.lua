@@ -77,12 +77,12 @@ T['render.build: headers with stats, hunks, notes, folds, nodes'] = function()
   eq(t.folds[1], { first = 1, last = 9, closed = false, path = 'lua/x.lua' })
   eq(t.nodes[1], { file = 1, header = true })
   eq(t.nodes[2], { file = 1 })                  -- @@
-  eq(t.nodes[3], { file = 1, new_line = 1 })    -- ' a'
-  eq(t.nodes[4], { file = 1 })                  -- '-b'
-  eq(t.nodes[5], { file = 1, new_line = 2 })    -- '+bb'
-  eq(t.nodes[6], { file = 1, new_line = 3 })    -- '+c'
-  eq(t.nodes[7], { file = 1 })                  -- '\ No newline'
-  eq(t.nodes[8], { file = 1, new_line = 4 })    -- ' d'
+  eq(t.nodes[3], { file = 1, new_line = 1, old_line = 1 })    -- ' a'
+  eq(t.nodes[4], { file = 1, old_line = 2 })                  -- '-b'
+  eq(t.nodes[5], { file = 1, new_line = 2 })                  -- '+bb'
+  eq(t.nodes[6], { file = 1, new_line = 3 })                  -- '+c'
+  eq(t.nodes[7], { file = 1 })                                -- '\ No newline'
+  eq(t.nodes[8], { file = 1, new_line = 4, old_line = 3 })    -- ' d'
   local g = t.line_group
   eq({ g[2], g[4], g[5], g[7], g[16] },
     { 'AgentIdeDiffHunk', 'AgentIdeFullDiffDel', 'AgentIdeFullDiffAdd', 'AgentIdeDiffHunk', 'AgentIdeDiffNote' })
@@ -115,7 +115,7 @@ T['render.build: a coloured block (delta): codes stripped, spans as ansi groups,
     ' ' .. E .. '38;2;249;38;114mlocal' .. E .. '0m y = 2' } } }
   local t = render.build(files, blocks, { icons = ICONS, width = 60, fold_over = 500 })
   eq({ t.lines[3], t.lines[4], t.lines[5] }, { '-local x = compute(1)', '+local x = compute(2)', ' local y = 2' })
-  eq({ t.nodes[3], t.nodes[4], t.nodes[5] }, { { file = 1 }, { file = 1, new_line = 1 }, { file = 1, new_line = 2 } })
+  eq({ t.nodes[3], t.nodes[4], t.nodes[5] }, { { file = 1, old_line = 1 }, { file = 1, new_line = 1 }, { file = 1, new_line = 2, old_line = 2 } })
   -- the coloured lines are kept raw for a decode on demand (the view decodes what it draws)
   eq({ t.raw[2], t.raw[3] == blocks['a.lua'].lines[2], t.raw[5] == blocks['a.lua'].lines[4] }, { nil, true, true })
   -- our own line colours stay out of a coloured block

@@ -122,4 +122,30 @@ T['parse, render and index 20 000 coloured (delta) patch lines under 100 ms'] = 
   MiniTest.add_note(('full diff, %d coloured lines, %d raw: %.2f ms (budget 100 ms)'):format(#cut, vim.tbl_count(t.raw), best))
 end
 
+-- Review comments are placed by walking the commented files only, never the whole patch.
+T['placing 200 comments on 50 000 lines under 20 ms'] = function()
+  local marks = require('agent-ide.ui.review_marks')
+  local text, files = synthetic()
+  local blocks = {}
+  for _, b in ipairs(parse.patch(text)) do blocks[b.path] = b end
+  local t = render.build(files, blocks, { icons = { open = '▾', closed = '▸' }, width = 120, fold_over = 500 })
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, t.lines)
+  local comments = {}
+  for i = 1, 200 do
+    comments[i] = { id = i, kind = 'NOTE', text = 'note ' .. i, path = files[i * 2].path, side = 'new', line = 2 + i % 20 }
+  end
+  local best = math.huge
+  local map
+  for _ = 1, RUNS do
+    local t0 = vim.uv.hrtime()
+    map = marks.place(buf, t, comments)
+    best = math.min(best, (vim.uv.hrtime() - t0) / 1e6)
+  end
+  eq(vim.tbl_count(map), 200)
+  vim.api.nvim_buf_delete(buf, { force = true })
+  if best >= 20 then error(('placing 200 comments: %.2f ms, budget < 20 ms'):format(best), 0) end
+  MiniTest.add_note(('placing 200 comments on 50 000 lines: %.2f ms (budget 20 ms)'):format(best))
+end
+
 return T

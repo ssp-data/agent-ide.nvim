@@ -13,10 +13,7 @@ local session = require('agent-ide.session')
 
 local M = {}
 
-local function elsewhere_msg()
-  return 'Agent-IDE: session is running in another Claude; use '
-    .. require('agent-ide.util.keys').first('drawer', 'tmux') .. ' in the drawer to jump to it'
-end
+local function elsewhere_msg() return require('agent-ide.ui.chat_send').elsewhere_msg() end
 
 ---@class agent_ide.Chat
 ---@field s table Session
@@ -27,6 +24,7 @@ end
 ---@field loading boolean a load runs: renderer updates wait for it
 ---@field dirty boolean events changed while loading (or the buffer is new): reset after the load
 ---@field send_after_load boolean the user sent while loading
+---@field pending { text: string, done?: fun(ok: boolean) }[]|nil texts given while loading (chat_send)
 ---@field stale table<string, integer> unloaded buffers ('tbuf'/'pbuf') whose wipe is pending
 local chats = {} -- session id -> Chat; never removed (buffers are recreated when wiped)
 local by_buf = {} -- buffer -> Chat
@@ -261,130 +259,16 @@ end
 
 local function notify(msg, level) vim.notify(msg, level or vim.log.levels.INFO) end
 
----End the pre-send live check of `c` (its answer, a timeout, a cancel): the timer is stopped and
----closed, a late answer finds `check_n` changed and does nothing.
-local function end_check(c)
-  c.check_n = (c.check_n or 0) + 1
-  c.checking = false
-  local t = c.check_timer
-  c.check_timer = nil
-  if t then
-    t:stop()
-    if not t:is_closing() then t:close() end
-  end
-end
+local chat_send = require('agent-ide.ui.chat_send')
 
----Cancel a running check; the prompt text stays, `why` says so when the chat is still open.
-local function cancel_check(c, why)
-  if not c.checking then return end
-  end_check(c)
-  if why and valid_buf(c.pbuf) then notify(why, vim.log.levels.WARN) end
-end
+---Send the prompt buffer's text (ui/chat_send.lua: every gate, then the Session).
+local function send(c) chat_send.send(c) end
 
----Hand the prompt buffer's text to the Session (queued behind a running turn) and clear it.
-local function deliver(c)
-  if not valid_buf(c.pbuf) then return end
-  local text = prompt.text_to_send(api.nvim_buf_get_lines(c.pbuf, 0, -1, false))
-  local ok, reason = c.s:send(text)
-  if ok then
-    prompt.clear(c.pbuf)
-  elseif reason == 'running elsewhere' then
-    notify(elsewhere_msg(), vim.log.levels.WARN)
-  elseif reason ~= 'empty' then
-    notify('Agent-IDE: ' .. tostring(reason), vim.log.levels.WARN)
-  end
-end
-
----Send the prompt buffer's text. Held while the history loads, so the prompt lands below it.
-local function send(c)
-  if not valid_buf(c.pbuf) then return end
-  local text = prompt.text_to_send(api.nvim_buf_get_lines(c.pbuf, 0, -1, false))
-  if not text:find('%S') then return end
-  -- `/model`, `/copy` alone: the plugin's own commands, nothing is sent to Claude
-  local own = prompt.plugin_command(text)
-  if own then
-    prompt.clear(c.pbuf)
-    return own(c.s)
-  end
-  if require('agent-ide.ui.handoff').away(c.s) then
-    return notify('Agent-IDE: this session is open in native Claude (tmux pane); quit it there to continue here',
-      vim.log.levels.WARN)
-  end
-  if c.loading then
-    c.send_after_load = true
-    return
-  end
-  -- A send that starts Claude for a session not alive here first asks `claude agents` afresh
-  -- (the cached map may be old): two Claudes must never drive one session. The text stays in
-  -- the prompt meanwhile (typing goes on); what the prompt holds when the answer comes is sent.
-  -- (A session the polled map lists as elsewhere is refused at once, below.)
-  if not c.live_checked and c.s:needs_start() and not c.s:_elsewhere() then
-    if c.checking then return end -- one question at a time; the answer sends the prompt
-    c.checking = true
-    local tick = api.nvim_buf_get_changedtick(c.pbuf)
-    local pbuf = c.pbuf
-    c.check_n = (c.check_n or 0) + 1
-    local n = c.check_n
-    local cfg = require('agent-ide.config').get()
-    -- One timer: after 300 ms a check still running says so; then it waits out the live command
-    -- (killed after max(interval, 2 s)) plus 2 s, so a callback that never comes cannot leave the
-    -- chat stuck.
-    local limit = math.max(cfg.live.interval_ms, 2000) + 2000
-    local guard = vim.uv.new_timer()
-    c.check_timer = guard
-    guard:start(300, 0, vim.schedule_wrap(function()
-      if c.check_n ~= n then return end
-      notify('Agent-IDE: checking where this session runs…')
-      guard:start(limit - 300, 0, vim.schedule_wrap(function()
-        if c.check_n ~= n then return end
-        cancel_check(c, 'Agent-IDE: could not tell where this session runs (no answer); send again')
-      end))
-    end))
-    require('agent-ide.live').query({ cmd = cfg.live.cmd, interval_ms = cfg.live.interval_ms }, function()
-      if c.check_n ~= n then return end -- cancelled or timed out meanwhile
-      local unchanged = c.pbuf == pbuf and valid_buf(pbuf) and api.nvim_buf_get_changedtick(pbuf) == tick
-      end_check(c)
-      -- the prompt moved on while the question ran: what it holds now was never meant to go
-      if not unchanged then
-        if not valid_buf(c.pbuf) then return end
-        if c.s:_elsewhere() then return notify(elsewhere_msg(), vim.log.levels.WARN) end
-        notify('Agent-IDE: not sent: the prompt changed while checking; send again', vim.log.levels.WARN)
-        return
-      end
-      -- a failed question leaves the cached map to decide, as without the drawer
-      c.live_checked = true
-      local ok, err = pcall(send, c)
-      c.live_checked = false
-      if not ok then error(err, 0) end
-    end)
-    return
-  end
-  -- A send that resumes a session from its transcript reads the whole conversation again: from
-  -- `context.threshold` tokens on it asks first (Send / Compact first / Cancel). The text stays
-  -- in the prompt meanwhile; what changed under the question is not sent.
-  if c.s:needs_start() and (c.s.sent_before or c.s:_has_transcript()) then
-    if c.asking then return end
-    c.asking = true
-    local pbuf, tick = c.pbuf, api.nvim_buf_get_changedtick(c.pbuf)
-    require('agent-ide.ui.context_ask').before_resume(c.s, function(choice)
-      c.asking = false
-      if choice == 'cancel' or c.pbuf ~= pbuf or not valid_buf(pbuf) then return end
-      if api.nvim_buf_get_changedtick(pbuf) ~= tick then
-        return notify('Agent-IDE: not sent: the prompt changed while checking; send again', vim.log.levels.WARN)
-      end
-      if choice == 'compact' then
-        local ok, reason = c.s:send('/compact')
-        if not ok then return notify('Agent-IDE: ' .. tostring(reason), vim.log.levels.WARN) end
-      end
-      deliver(c)
-    end)
-    return
-  end
-  deliver(c)
-end
+local function cancel_check(c, why) chat_send.cancel_check(c, why) end
 
 local function interrupt(c)
   c.send_after_load = false -- a send held for a load is cancelled; its text stays in the prompt
+  chat_send.drop_pending(c)
   c.s.park_after_compact = nil -- a compaction that was to end in a park: not any more
   cancel_check(c, 'Agent-IDE: not sent: interrupted while checking; send again')
   local dropped = c.s:interrupt()
@@ -422,7 +306,7 @@ end
 local function forget_on_unload(c, buf, field)
   api.nvim_create_autocmd('BufUnload', { group = augroup, buffer = buf, once = true, callback = function()
     by_buf[buf] = nil
-    end_check(c) -- a pending live check (and its timer) goes with the chat
+    chat_send.end_check(c) -- a pending live check (and its timer) goes with the chat
     if c[field] == buf then
       c[field] = nil
       c.stale[field] = buf
@@ -497,6 +381,7 @@ local function load(c, fresh)
       c.send_after_load = false
       send(c)
     end
+    chat_send.flush_pending(c)
   end)
 end
 
@@ -541,6 +426,32 @@ function M.open(s, project)
   update_visible()
   local queue = package.loaded['agent-ide.ui.queue']
   if queue then queue.follow(s) end -- an open queue panel shows this session now
+end
+
+---The chat buffers of `s` without a window: created when it has none (a review put into its
+---prompt before the chat was ever opened). Returns them as `M.buffers` does.
+---@param s table Session
+---@param project? table Project
+---@return integer|nil tbuf, integer|nil pbuf
+function M.ensure(s, project)
+  subscribe()
+  local c, fresh = get_chat(s, project)
+  if fresh then load(c, fresh) end -- a send must not start a turn before the history is in
+  return M.buffers(s)
+end
+
+---Send `text` to `s` as a prompt of the plugin's own (a review comment), through every gate of
+---the chat's send (ui/chat_send.lua): queued behind a running turn, else started. The prompt
+---buffer is left alone; no window is opened. `done(ok)` once it went or could not.
+---@param s table Session
+---@param project? table Project
+---@param text string
+---@param done? fun(ok: boolean)
+function M.send_text(s, project, text, done)
+  subscribe()
+  local c, fresh = get_chat(s, project)
+  if fresh then load(c, fresh) end -- the text waits for the history (chat_send holds it)
+  chat_send.send(c, { text = text, done = done })
 end
 
 ---Focus the prompt of the chat of `s` (its window reopened when hidden), optionally in insert

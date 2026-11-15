@@ -90,7 +90,8 @@ end
 -- Rows -----------------------------------------------------------------------------------------
 
 -- File rows of `list` (at most 500, then `… n more`).
-local function files_rows(out, w, list, indent, parent, mode, commit)
+-- `open`: what <CR> on a file does (default: the side-by-side diff view).
+local function files_rows(out, w, list, indent, parent, mode, commit, open)
   for i, f in ipairs(list) do
     if i > MAX_ROWS then
       out[#out + 1] = hint(indent, ('… %d more'):format(#list - MAX_ROWS), w.project)
@@ -99,7 +100,7 @@ local function files_rows(out, w, list, indent, parent, mode, commit)
     local node = { type = 'git_file', project = w.project, root = w.root, id = parent.id .. ':' .. f.path, file = f,
       list = list, index = i, mode = mode, commit = commit,
       fold = { key = parent.fold.key, default = false, focus = parent.id } }
-    if not f.dir then node.open = open_diff end
+    if not f.dir then node.open = open or open_diff end
     out[#out + 1] = file_row(indent, f, node)
   end
 end
@@ -134,15 +135,48 @@ local function graph_row(out, w, ctx, parent)
   out[#out + 1] = { pieces = { { w.indent .. '    commit graph' .. (key and (' · ' .. key) or ''), 'AgentIdeAge' } }, node = node }
 end
 
+local function open_fulldiff(node) require('agent-ide.ui.fulldiff_open').from_node(node) end
+
 -- A dimmed `full diff · gd` row (named with the drawer's key): the whole diff of the section in
 -- one buffer (ui/fulldiff.lua), the branch against the working tree under Changes; under Commits
--- the uncommitted changes when there are any, else the commits (fulldiff_open.from_node).
-local function fulldiff_row(out, w, parent, kind)
+-- the uncommitted changes when there are any, else the commits (fulldiff_open.from_node). The
+-- Commits row is a fold: open, it lists the files of the commits scope (the branch's committed
+-- changes, which no other row lists), <CR> on one opening the full diff of that scope on the file.
+local function fulldiff_row(out, w, ctx, parent, kind)
   local key = require('agent-ide.util.keys').get('drawer', 'full_diff')[1]
+  local text = 'full diff' .. (key and (' · ' .. key) or '')
   local node = { type = 'git_fulldiff', kind = kind, project = w.project, root = w.root, id = w.root .. '#fulldiff:' .. kind,
+    fold = { key = parent.fold.key, default = false, focus = parent.id }, open = open_fulldiff }
+  if kind ~= 'commits' then
+    out[#out + 1] = { pieces = { { w.indent .. '    ' .. text, 'AgentIdeAge' } }, node = node }
+    return
+  end
+  local fkey = w.root .. '/git/fulldiff'
+  local open = is_open(ctx.expanded, fkey)
+  node.fold, node.open = { key = fkey, default = false, focus = node.id }, nil -- <CR> toggles; gd opens
+  out[#out + 1] = { pieces = { { w.indent .. '    ' .. (open and ctx.icons.open or ctx.icons.closed) .. ' ' }, { text, 'AgentIdeAge' } },
+    node = node }
+  if not open then return end
+  local files = cache.committed(w.root)
+  if not files then
+    out[#out + 1] = hint(w.indent .. '        ', 'loading…', w.project)
+  else
+    files_rows(out, w, files, w.indent .. '        ', node, 'commits', nil, open_fulldiff)
+  end
+end
+
+-- A `review (n) · gs` row while review comments are pending for the work tree
+-- (lua/agent-ide/review.lua): <CR> resumes the review (the full diff on its newest comment),
+-- the drawer's review key (`gs`) finishes it (ui/review_send.lua).
+local function review_row(out, w, parent)
+  local n = require('agent-ide.review').count(w.root)
+  if n == 0 then return end
+  local key = require('agent-ide.util.keys').get('drawer', 'review')[1]
+  local node = { type = 'git_review', project = w.project, root = w.root, id = w.root .. '#review',
     fold = { key = parent.fold.key, default = false, focus = parent.id },
-    open = function(n) require('agent-ide.ui.fulldiff_open').from_node(n) end }
-  out[#out + 1] = { pieces = { { w.indent .. '    full diff' .. (key and (' · ' .. key) or ''), 'AgentIdeAge' } }, node = node }
+    open = function(nd) require('agent-ide.ui.review_send').resume(nd.root, nd.project) end }
+  out[#out + 1] = { pieces = { { w.indent .. '    ' }, { 'review', 'AgentIdeSection' },
+    { ' (' .. n .. ')' .. (key and (' · ' .. key) or ''), 'AgentIdeAge' } }, node = node }
 end
 
 local function uncommitted_rows(out, w, ctx)
@@ -237,7 +271,7 @@ local function tree_rows(out, w, ctx)
   local label = base and ('Changes vs ' .. base.label) or 'Changes'
   local open, node = section(out, w, ctx, 'changes', label, changes and #changes)
   if open then
-    fulldiff_row(out, w, node, 'branch')
+    fulldiff_row(out, w, ctx, node, 'branch')
     if not changes then
       out[#out + 1] = hint(w.indent .. '    ', 'loading…', w.project)
     else
@@ -247,7 +281,8 @@ local function tree_rows(out, w, ctx)
   label = base and (require('agent-ide.git').branch_commits(base) and 'Commits on branch' or 'Recent commits') or 'Commits'
   open, node = section(out, w, ctx, 'commits', label, commits and #commits)
   if open then
-    fulldiff_row(out, w, node, 'commits')
+    review_row(out, w, node)
+    fulldiff_row(out, w, ctx, node, 'commits')
     graph_row(out, w, ctx, node)
     uncommitted_rows(out, w, ctx)
     if not commits then

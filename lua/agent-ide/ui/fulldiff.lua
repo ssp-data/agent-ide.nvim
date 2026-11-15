@@ -11,7 +11,9 @@ local cursor = require('agent-ide.ui.fulldiff_cursor')
 local git = require('agent-ide.git')
 local git_patch = require('agent-ide.git_patch')
 local keys_mod = require('agent-ide.ui.fulldiff_keys')
+local marks = require('agent-ide.ui.review_marks')
 local render = require('agent-ide.ui.fulldiff_render')
+local review = require('agent-ide.review')
 
 local M = {}
 
@@ -19,6 +21,7 @@ local ns = api.nvim_create_namespace('agent-ide.fulldiff')
 local augroup = api.nvim_create_augroup('agent-ide.fulldiff', { clear = true })
 
 local FOLD_OVER = 500 -- a file with a longer block starts folded
+local TARGET_CHARS = 26 -- the review's session name in the winbar is cut after this many characters
 
 local V -- the view, or nil (declared below with its fields)
 
@@ -72,6 +75,10 @@ api.nvim_set_decoration_provider(ns, {
 ---@field restore { path?: string, hunk?: string, offset?: integer, row?: integer }|nil where the cursor goes on the next draw
 ---@field closed table<string, boolean>|nil the user's fold state by path
 ---@field by_line table<integer, table[]>|nil the highlight ranges by line, for the decoration provider
+---@field comments table[]|nil the review comments of the scope (review.list) as last placed
+---@field marks table<integer, { comment: table, lost: boolean }[]>|nil the placed comments by buffer line
+---@field cur_file integer|nil the file under the cursor (index into `t.files`), named in the winbar
+---@field focus_comment integer|nil the review comment to put the cursor on at the next draw with content
 
 local function notify(msg) vim.notify('Agent-IDE: ' .. msg, vim.log.levels.INFO) end
 local function valid_win(w) return w ~= nil and api.nvim_win_is_valid(w) end
@@ -93,8 +100,15 @@ local function totals(files)
   return a, d
 end
 
+local function esc(text) return (text:gsub('%%', '%%%%')) end
+
+-- The file under the cursor first, bold (`AgentIdeFullDiffFile`), then the project, the scope
+-- and its sums, and the review comments.
 local function winbar()
   local parts = { V.project.name or vim.fs.basename(V.root), 'full diff' }
+  local f = V.t and V.cur_file and V.t.files[V.cur_file]
+  -- `%<`: a winbar wider than the window is cut there, after the file, not at its start
+  local file = f and ('%#AgentIdeFullDiffFile#' .. esc(f.path) .. '%*%< · ') or ''
   if V.res then
     parts[#parts + 1] = V.res.label
     local n = #V.res.files
@@ -103,10 +117,37 @@ local function winbar()
     if a > 0 then s = s .. ' +' .. a end
     if d > 0 then s = s .. ' −' .. d end
     parts[#parts + 1] = s
+    local n, k = 0, 0
+    for _, c in ipairs(V.comments or {}) do
+      n = n + 1
+      if c.in_prompt then k = k + 1 end
+    end
+    if n > 0 then
+      local target = require('agent-ide.ui.review_send').target_name(V.root, V.project)
+      if target and vim.fn.strchars(target) > TARGET_CHARS then target = vim.fn.strcharpart(target, 0, TARGET_CHARS) .. '…' end
+      parts[#parts + 1] = n .. (n == 1 and ' comment' or ' comments') .. (k > 0 and (', ' .. k .. ' in the prompt') or '')
+        .. (target and (' → ' .. target) or '')
+    end
   elseif V.loading then
     parts[#parts + 1] = 'loading…'
   end
-  return (table.concat(parts, ' · '):gsub('%%', '%%%%'))
+  return file .. esc(table.concat(parts, ' · '))
+end
+
+-- The file under the cursor of `w` (nil without a node there).
+local function file_at(w)
+  if not V.t then return nil end
+  local node = V.t.nodes[api.nvim_win_get_cursor(w)[1]]
+  return node and node.file or nil
+end
+
+---Set the winbar of `w` after a cursor move: only when the file under the cursor changed.
+local function follow_cursor(w)
+  if not (V and V.t) then return end
+  local f = file_at(w)
+  if f == V.cur_file then return end
+  V.cur_file = f
+  api.nvim_set_option_value('winbar', winbar(), { scope = 'local', win = w })
 end
 
 local WIN_OPTS = { wrap = false, cursorline = true, list = false, number = false, relativenumber = false, spell = false,
@@ -172,14 +213,25 @@ local function draw(fresh_win)
   V.by_line = t and render.index(t.hl) or {}
   V.raw = t and t.raw or {}
   V.t = t
+  V.comments = t and review.list(V.root, M.scope_of(V)) or {}
+  V.marks = t and marks.place(V.buf, t, V.comments) or {}
   for _, w in ipairs(ws) do
-    api.nvim_set_option_value('winbar', winbar(), { scope = 'local', win = w })
     cursor.apply_folds(w, t or { folds = {} })
     local key = keep[w]
     local target = t and cursor.find(t, key) or nil
     target = math.min(target or key.row or 1, #lines)
     pcall(api.nvim_win_set_cursor, w, { math.max(target, 1), 0 })
+    if V.focus_comment then -- a resumed review: the cursor on that comment's line
+      for row, list in pairs(V.marks or {}) do
+        for _, e in ipairs(list) do
+          if e.comment.id == V.focus_comment then pcall(api.nvim_win_set_cursor, w, { row, 0 }) end
+        end
+      end
+    end
+    V.cur_file = file_at(w)
+    api.nvim_set_option_value('winbar', winbar(), { scope = 'local', win = w })
   end
+  if t and #ws > 0 then V.focus_comment = nil end
 end
 
 local function load()
@@ -291,6 +343,94 @@ function A.lazygit() require('agent-ide.ui.lazygit').open(V.root) end
 
 function A.close() M.close() end
 
+-- Review comments ---------------------------------------------------------------------------------
+
+---The scope of view `v` as a comment records it: the kind, the commit's hashes and subject, HEAD's
+---short hash for the uncommitted changes, the base's label for the branch and its commits.
+---@param v table
+---@return { kind: string, hash?: string, short?: string, subject?: string, base?: string }
+function M.scope_of(v)
+  local k = v.scope.kind
+  if k == 'commit' then
+    local c = v.scope.commit
+    return { kind = k, hash = c.hash, short = c.short, subject = c.subject }
+  end
+  local out = { kind = k }
+  if k == 'head' then
+    local h = cache.head(v.root)
+    out.hash = h and h.head and h.head:sub(1, 7) or nil
+  else
+    local b = cache.base(v.root)
+    out.base = b and b.label or nil
+  end
+  return out
+end
+
+---Place the comments again (one was added, changed or removed) and refresh the winbar.
+function M.redraw_marks()
+  if not (V and V.t and api.nvim_buf_is_valid(V.buf)) then return end
+  V.comments = review.list(V.root, M.scope_of(V))
+  V.marks = marks.place(V.buf, V.t, V.comments)
+  for _, w in ipairs(wins()) do api.nvim_set_option_value('winbar', winbar(), { scope = 'local', win = w }) end
+  drawer().refresh() -- the `review (n)` row
+end
+
+function A.comment()
+  local node, _, row = current()
+  if not node then return end
+  local anchor = marks.anchor(V.t, row)
+  if not anchor then return end
+  local existing
+  for _, e in ipairs(V.marks[row] or {}) do
+    if not e.lost then
+      existing = e.comment
+      break
+    end
+  end
+  require('agent-ide.ui.review_edit').open({ root = V.root, scope = M.scope_of(V), anchor = anchor, existing = existing,
+    project = V.project, on_change = M.redraw_marks })
+end
+
+function A.delete_comment()
+  local node, _, row = current()
+  if not node then return end
+  local e = (V.marks[row] or {})[1]
+  if not e then return end
+  local c = review.remove(V.root, e.comment.id)
+  if c then vim.fn.setreg('"', c.text) end
+  M.redraw_marks()
+end
+
+-- The next (previous) commented line not inside a closed fold.
+local function jump_comment(delta)
+  local _, w, row = current()
+  if not w then return end
+  local rows = vim.tbl_keys(V.marks or {})
+  table.sort(rows)
+  api.nvim_win_call(w, function()
+    for _ = 1, vim.v.count1 do
+      local target
+      if delta > 0 then
+        for _, r in ipairs(rows) do
+          if r > row and vim.fn.foldclosed(r) == -1 then target = r break end
+        end
+      else
+        for i = #rows, 1, -1 do
+          if rows[i] < row and vim.fn.foldclosed(rows[i]) == -1 then target = rows[i] break end
+        end
+      end
+      if not target then break end
+      row = target
+    end
+  end)
+  api.nvim_win_set_cursor(w, { row, 0 })
+end
+
+function A.next_comment() jump_comment(1) end
+function A.prev_comment() jump_comment(-1) end
+
+function A.review() require('agent-ide.ui.review_send').done(V.root, V.project) end
+
 -- Buffer -----------------------------------------------------------------------------------------
 
 local resize_timer
@@ -310,6 +450,11 @@ local function make_buf(root)
     local w = api.nvim_get_current_win()
     if api.nvim_win_get_buf(w) == buf then apply_win(w) end
     draw(true)
+  end })
+  api.nvim_create_autocmd('CursorMoved', { group = augroup, buffer = buf, callback = function()
+    if not V or V.buf ~= buf then return end
+    local w = api.nvim_get_current_win()
+    if api.nvim_win_get_buf(w) == buf then follow_cursor(w) end
   end })
   api.nvim_create_autocmd('BufWipeout', { group = augroup, buffer = buf, callback = function()
     if V and V.buf == buf then
@@ -357,8 +502,9 @@ local function show(opts)
   local shown = api.nvim_win_get_buf(win)
   if V and V.buf == shown and V.root == root and same_scope(V.scope, opts.scope) then
     api.nvim_set_current_win(win)
-    if opts.focus_path then
-      V.restore = { path = opts.focus_path }
+    if opts.focus_path or opts.focus_comment then
+      V.restore = opts.focus_path and { path = opts.focus_path } or V.restore
+      V.focus_comment = opts.focus_comment
       draw()
     end
     return
@@ -382,7 +528,7 @@ local function show(opts)
   if p and p ~= win and api.nvim_win_get_tabpage(p) == tab then pcall(api.nvim_win_close, p, false) end
   local old = V
   V = { root = root, project = project_for(root, opts.project), scope = opts.scope, loading = true, seq = 0, prev = prev,
-    restore = opts.focus_path and { path = opts.focus_path } or nil }
+    restore = opts.focus_path and { path = opts.focus_path } or nil, focus_comment = opts.focus_comment }
   require('agent-ide.ui.git_hl').setup()
   V.buf = make_buf(root)
   cache.on_update(on_update)
@@ -404,7 +550,8 @@ end
 ---project's root) or of the work tree holding `opts.dir`. `focus_path` puts the cursor on that
 ---file; `keep_graph` leaves a showing commit graph underneath (`q` returns to it). Outside a
 ---repository: a notice, nothing opens.
----@param opts { root?: string, dir?: string, project?: table, scope: table, focus_path?: string, keep_graph?: boolean }
+---`focus_comment` puts it on the line of that review comment (its id) once the comments are placed.
+---@param opts { root?: string, dir?: string, project?: table, scope: table, focus_path?: string, focus_comment?: integer, keep_graph?: boolean }
 function M.open(opts)
   local dir = opts.root or opts.dir
   if not dir or vim.fn.isdirectory(dir) ~= 1 then return notify('not a git repository: ' .. tostring(dir)) end

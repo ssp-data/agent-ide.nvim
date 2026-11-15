@@ -66,16 +66,7 @@ end
 
 local function first_line(v) return (tostring(v or ''):match('^[^\r\n]*')) end
 
----One line that fits the space left for messages, so it never causes a hit-enter prompt.
-local function echo(msg)
-  local room = math.max(vim.v.echospace, 1)
-  if vim.fn.strdisplaywidth(msg) > room then
-    local n = vim.fn.strchars(msg)
-    while n > 0 and vim.fn.strdisplaywidth(vim.fn.strcharpart(msg, 0, n) .. '…') > room do n = n - 1 end
-    msg = vim.fn.strcharpart(msg, 0, n) .. '…'
-  end
-  api.nvim_echo({ { msg } }, true, {})
-end
+local function echo(msg) require('agent-ide.ui.ask_select').echo(msg) end
 
 -- Choices ----------------------------------------------------------------------------------
 
@@ -127,20 +118,8 @@ local function suggestion_items(s, p)
   return items
 end
 
----Open the choice: the plugin's ask window (`ask.rows`: the question on its own rows, `ask.title`
----on the border), or `vim.ui.select` with the one-line `prompt` when `chat.ask_picker` is
----`'select'`. `done(choice)` is scheduled.
-local function select(items, prompt, done, view)
-  local opts = { prompt = prompt, format_item = function(it) return it.label end }
-  local function cb(choice) vim.schedule(function() done(choice) end) end
-  local chat_cfg = config.get().chat
-  if type(chat_cfg) == 'table' and chat_cfg.ask_picker == 'select' then
-    if view and view.echo then echo(prompt) end
-    return vim.ui.select(items, opts, cb)
-  end
-  opts.rows, opts.title = view and view.rows, view and view.title
-  require('agent-ide.ui.ask_float').select(items, opts, cb)
-end
+-- The choice: the ask window, or `vim.ui.select` by `chat.ask_picker` (ui/ask_select.lua).
+local function select(items, prompt, done, view) require('agent-ide.ui.ask_select').select(items, prompt, done, view) end
 
 ---Ask the user about `p`; `finish(cancelled, choice)` once the select (chain) is over.
 local function ask_permission(s, p, finish)

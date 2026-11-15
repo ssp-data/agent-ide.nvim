@@ -139,7 +139,7 @@ T['open branch: buffer, winbar, headers with stats, hunks coloured, folds, read 
   local v = view()
   eq(v.lines[1]:sub(1, 9), 'v M a.txt')
   eq(v.lines[1]:match('%+2$') ~= nil, true)
-  wait_for(function() return view().winbar == 'r · full diff · vs main · 4 files +5 −1' end, 'winbar with the untracked counts')
+  wait_for(function() return view().winbar == '%#AgentIdeFullDiffFile#a.txt%*%< · r · full diff · vs main · 4 files +5 −1' end, 'winbar with the untracked counts')
   eq({ v.modifiable, v.name:match('/full diff$') ~= nil, v.shown, v.focused }, { false, true, true, true })
   eq(v.lines[2], '@@ -1 +1,3 @@')
   eq(v.lines[4], '+aa')
@@ -149,6 +149,28 @@ T['open branch: buffer, winbar, headers with stats, hunks coloured, folds, read 
   eq(view_line('binary file, not shown') ~= nil, true)
   eq(v.lines[view_line('v ? new.txt') + 1], '@@ -0,0 +1,2 @@')
   eq(child.lua_get('vim.fn.getcwd(-1, 0)'), repo)
+end
+
+T['the winbar names the file under the cursor, bold and first, and follows the cursor'] = function()
+  start()
+  open({ kind = 'branch' })
+  cursor_on('v M a.txt')
+  eq(view().winbar, '%#AgentIdeFullDiffFile#a.txt%*%< · r · full diff · vs main · 4 files +5 −1')
+  cursor_on('v A img.png')
+  eq(view().winbar:sub(1, 32), '%#AgentIdeFullDiffFile#img.png%*')
+  cursor_on('+n1')
+  eq(view().winbar:sub(1, 32), '%#AgentIdeFullDiffFile#new.txt%*')
+  local v = view()
+  child.lua('vim.api.nvim_win_set_cursor(0, { ..., 0 })', { v.cursor + 2 }) -- the blank line after the last hunk of new.txt
+  eq(view().lines[view().cursor], '')
+  eq(view().winbar:sub(1, 32), '%#AgentIdeFullDiffFile#new.txt%*')
+  child.type_keys('[f') -- to this file's header first
+  eq(view().lines[view().cursor]:sub(1, 11), 'v ? new.txt')
+  eq(view().winbar:sub(1, 32), '%#AgentIdeFullDiffFile#new.txt%*')
+  child.type_keys('[f')
+  eq(view().winbar:sub(1, 32), '%#AgentIdeFullDiffFile#img.png%*')
+  local hl = child.lua_get('vim.api.nvim_get_hl(0, { name = "AgentIdeFullDiffFile" })')
+  eq({ hl.bold, hl.fg }, { true, 0x9ece6a }) -- bold, green
 end
 
 T[']f / [f step files, ]c / [c step hunks, za / z0 / z9 fold, y yanks the path'] = function()
@@ -231,7 +253,7 @@ T['with delta (a stand-in): the text loses the codes, the colours become extmark
   start({ git = { delta = { script } } })
   open({ kind = 'branch' })
   -- the untracked counts redraw once more (and reset the per-line cache): wait for them
-  wait_for(function() return view().winbar == 'r · full diff · vs main · 4 files +5 −1' end, 'winbar with the untracked counts')
+  wait_for(function() return view().winbar == '%#AgentIdeFullDiffFile#a.txt%*%< · r · full diff · vs main · 4 files +5 −1' end, 'winbar with the untracked counts')
   local v = view()
   eq(v.lines[4], '+aa')
   -- the line is drawn (the view is on screen), so its colours were decoded and its group defined
@@ -260,11 +282,11 @@ T['commit scope and head scope: labels; an empty scope shows one line'] = functi
   local c2 = R.await(function(cb) require('agent-ide.git').commits(repo, cb) end)[1]
   open({ kind = 'commit', commit = { hash = c2.hash, short = c2.short, subject = c2.subject } })
   local v = view()
-  eq(v.winbar, 'r · full diff · ' .. c2.short .. ' feat two · 1 file')
+  eq(v.winbar, '%#AgentIdeFullDiffFile#img.png%*%< · r · full diff · ' .. c2.short .. ' feat two · 1 file')
   eq({ v.lines[1]:sub(1, 11), v.lines[2] }, { 'v A img.png', '  binary file, not shown' })
   open({ kind = 'head' })
   v = view()
-  eq(v.winbar, 'r · full diff · uncommitted · 2 files +3')
+  eq(v.winbar, '%#AgentIdeFullDiffFile#a.txt%*%< · r · full diff · uncommitted · 2 files +3')
   eq(v.lines[2], '@@ -1,2 +1,3 @@')
   R.git(repo, { 'checkout', '-q', '--', 'a.txt' })
   vim.fn.delete(repo .. '/new.txt')

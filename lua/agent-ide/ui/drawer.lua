@@ -134,6 +134,7 @@ local function rescan()
     hidden.refresh() -- another Neovim may have hidden or shown sessions
     names.refresh() -- or named one
     S.projects = project.group(sessions)
+    S.scanned = true
     render()
   end)
 end
@@ -523,6 +524,7 @@ local ACTIONS = {
   { 'help', 'this help (type to filter; <CR> presses the key)' },
   { 'graph', 'commit graph of the project (or the row\'s worktree)' },
   { 'full_diff', 'full diff of the row: its project, section, commit or file' },
+  { 'review', 'review: the pending comments of the row\'s repository into the prompt of a session (asks how)' },
   { 'scope', 'scope: only this project / all projects' },
   { 'legend', 'show or hide the legend of the state marks' },
   { 'next_session', 'open the next session of the project (from the row, else the chat shown)' },
@@ -606,6 +608,12 @@ end
 
 function actions.full_diff()
   if not require('agent-ide.ui.fulldiff_open').from_node(current_node()) then notify('not a git project') end
+end
+
+function actions.review()
+  local root, p = require('agent-ide.ui.graph').node_root(current_node())
+  if not root then return notify('not a git project') end
+  require('agent-ide.ui.review_send').done(root, p)
 end
 
 ---Help rows of the drawer: its own keys as configured, `/`, the row keys of the providers and
@@ -818,7 +826,7 @@ function M.live_policy() live_policy() end
 ---@return { tab: integer|nil, win: integer|nil, buf: integer|nil, projects: table[], nodes: table[] }
 function M.state()
   sync()
-  return { tab = S.tab, win = S.win, buf = S.buf, projects = S.projects, nodes = S.nodes }
+  return { tab = S.tab, win = S.win, buf = S.buf, projects = S.projects, nodes = S.nodes, scanned = S.scanned == true }
 end
 
 return M

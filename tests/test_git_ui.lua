@@ -930,11 +930,11 @@ T['drawer: full diff rows in Changes and Commits; <CR> opens the branch / uncomm
   press_on('full diff · gd')
   local v = wait_fd('branch')
   eq({ v.root, v.lines[1]:sub(1, 9) }, { repo, 'v M a.lua' })
-  local function open_commits_row()
+  local function open_commits_row() -- `gd` on it: <CR> expands its files (the row is a fold)
     local row = has_line(drawer_lines(), 'commit graph · G') - 1
     child.lua('local s = require("agent-ide.ui.drawer").state(); vim.api.nvim_set_current_win(s.win)')
     child.lua('vim.api.nvim_win_set_cursor(require("agent-ide.ui.drawer").state().win, { ..., 0 })', { row })
-    child.type_keys('<CR>')
+    child.type_keys('gd')
   end
   open_commits_row() -- uncommitted changes exist: they come first
   v = wait_fd('head')
@@ -948,6 +948,24 @@ T['drawer: full diff rows in Changes and Commits; <CR> opens the branch / uncomm
   open_commits_row()
   v = wait_fd('commits')
   eq(has_line(v.lines, 'v ? u.txt'), nil) -- committed only
+end
+
+T['drawer: the Commits full diff row expands to the files of the commits; <CR> on one opens that scope on the file'] = function()
+  start()
+  child.lua('require("agent-ide").toggle()')
+  press_on(' r  ')
+  press_on('Commits on branch (2)')
+  wait_for(function() return has_line(drawer_lines(), '> full diff · gd') ~= nil end, 'the fold row')
+  press_on('> full diff · gd')
+  wait_for(function() return has_line(drawer_lines(), 'v full diff · gd') ~= nil and has_line(drawer_lines(), 'A new.lua') ~= nil end, 'the files')
+  local l = drawer_lines()
+  eq(has_line(l, 'v full diff · gd') < has_line(l, 'A new.lua'), true)
+  eq(has_line(l, 'A new.lua') < has_line(l, 'commit graph · G'), true)
+  eq(has_line(l, 'u.txt'), nil) -- committed only: the untracked file is not listed here
+  press_on('A new.lua')
+  local v = wait_fd('commits')
+  eq(v.lines[v.cursor]:sub(1, 11), 'v A new.lua')
+  eq(has_line(v.lines, 'v ? u.txt'), nil)
 end
 
 T['gd on rows: Changes file focuses that file; a commit row its commit; uncommitted its scope; Prompts: a notice'] = function()
