@@ -31,6 +31,7 @@ defaults = function()
       next_waiting = '<leader>an', -- global: the next session that needs you
       search = '<leader>as', -- global: search all sessions (titles, prompts, answers)
       prompt_history = '<leader>aP', -- global: every prompt, newest first
+      toggle_review = '<leader>ar', -- global: between the review of the project (the full diff on its newest comment) and its session
       -- the search picker's query line; each a key, a list of keys, or false (close: normal mode)
       search_picker = { next = { '<C-n>', '<Down>' }, prev = { '<C-p>', '<Up>' }, open = '<CR>', copy = '<C-y>',
         reuse = '<C-e>', scope = '<Tab>', kinds = '<C-f>', close = { '<Esc>', 'q' },
@@ -63,6 +64,7 @@ defaults = function()
       -- the drawer's own keys; each a key, a list of keys, or false. On a row that has its own
       -- handler for a key (a prompt row's keys below) that handler runs instead
       drawer = { open = { '<CR>', 'o' }, fold = 'za', collapse_all = 'z0', expand_all = 'z9', refresh = 'R',
+        review = 'gs', -- finish the review of the row's repository: its comments into the prompt (asks how)
         tmux = { 'gT', '<leader>aT' }, -- jump to the session's tmux pane, or continue it in native Claude there
         search = { 'S', '<leader>ff', '<leader>S' }, park = 'sP', hide = 'H', delete = 'D', yank = 'y',
         rename = 'r', -- a name of your own for the session (prompt rows: keys.prompts.rename)
@@ -77,8 +79,18 @@ defaults = function()
       -- full diff view (every change of a branch in one buffer), buffer-local; each a key, a list
       -- of keys, or false
       full_diff = { open = '<CR>', next_file = ']f', prev_file = '[f', next_hunk = ']c', prev_hunk = '[c', fold = 'za',
-        collapse_all = 'z0', expand_all = 'z9', refresh = 'R', yank = 'y', lazygit = 'glg', close = 'q', help = 'g?' },
+        collapse_all = 'z0', expand_all = 'z9', refresh = 'R', yank = 'y', lazygit = 'glg', close = 'q', help = 'g?',
+        -- review comments: one on the line under the cursor (on a commented line: edit it), delete
+        -- it, step commented lines, and finish the review (the comments into the prompt, asks how)
+        comment = 'c', delete_comment = 'dd', next_comment = ']r', prev_comment = '[r', review = 'gs' },
+      -- the comment editor (a small window over the full diff), buffer-local; save and cancel in
+      -- normal mode, send (this one comment to Claude at once) in normal and insert mode
+      review = { save = '<CR>', send = '<C-CR>', cancel = { 'q', '<Esc><Esc>' } },
     },
+    -- review comments (`c` in the full diff): the kinds a comment can start with (`BUG: …`), each
+    -- with the description Claude is given; a comment without one is a NOTE. intro: the first
+    -- line of the text sent
+    review = { kinds = require('agent-ide.review').DEFAULT_KINDS, intro = require('agent-ide.review_text').DEFAULT_INTRO },
     -- graph_limit: commits the commit graph loads at first (and L loads more of). delta: the
     -- full diff's colours through delta (https://github.com/dandavison/delta): 'auto' when it is
     -- installed, false never, or a command list of your own

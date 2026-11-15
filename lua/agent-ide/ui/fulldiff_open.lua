@@ -9,7 +9,8 @@ local M = {}
 ---scope follows the row (its work tree as `G` picks it); a file row puts the cursor on that
 ---file. The Commits section as a whole (its header, its `full diff` and `commit graph` rows)
 ---opens the uncommitted changes when there are any, else the commits; a commit row opens that
----commit. false when the row is not in a git project.
+---commit; a file under the Commits `full diff` row the commits scope on that file. false when
+---the row is not in a git project.
 ---@param node table|nil
 ---@return boolean
 function M.from_node(node)
@@ -21,7 +22,8 @@ function M.from_node(node)
     require('agent-ide.ui.fulldiff').open({ root = root, project = project, scope = s, focus_path = focus })
   end
   if t == 'git_file' then
-    scope = { kind = node.mode == 'commit' and 'commit' or node.mode == 'head' and 'head' or 'branch', commit = node.commit }
+    local m = node.mode
+    scope = { kind = m == 'commit' and 'commit' or m == 'head' and 'head' or m == 'commits' and 'commits' or 'branch', commit = node.commit }
     focus = node.file.path
   elseif t == 'git_commit' then
     scope = { kind = 'commit', commit = node.commit }

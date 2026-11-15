@@ -68,7 +68,7 @@ T['expanded project: section labels with counts, collapsed by default; loading r
   eq(vim.list_slice(l, 4), { '  > Changes vs origin/main', '  > Commits on branch' })
   l = lines(p, { ['/x/r'] = true, ['/x/r/git/changes'] = true, ['/x/r/git/commits'] = true })
   eq(vim.list_slice(l, 4), { '  v Changes vs origin/main', '      full diff · gd', '      loading…', '  v Commits on branch',
-    '      full diff · gd', '      commit graph · G', '      > uncommitted', '      loading…' })
+    '      > full diff · gd', '      commit graph · G', '      > uncommitted', '      loading…' })
   cache._set('/x/r', 'changes', {
     { status = 'M', path = 'a b.lua', added = 3, removed = 1 },
     { status = 'R', path = 'new.lua', old_path = 'old.lua', added = 0, removed = 0 },
@@ -89,7 +89,7 @@ T['expanded project: section labels with counts, collapsed by default; loading r
     '      ? ü.txt  +2',
     '      ? nested/  dir',
     '  v Commits on branch (1)',
-    '      full diff · gd',
+    '      > full diff · gd',
     '      commit graph · G',
     '      > uncommitted',
     '      > aaaa two  now',
@@ -114,7 +114,7 @@ T['at the drawer width: stats and commit ages right-aligned, long paths cut, a s
     '      D imap/poll_legacy.go          −41',
     '      A a/very/long/path/to/some/d…  +74',
     '  v Commits on branch (1)',
-    '      full diff · gd',
+    '      > full diff · gd',
     '      commit graph · G',
     '      > uncommitted',
     '      > a1b2c3d feat: IMAP IDLE loop  8m',
@@ -157,6 +157,53 @@ T['a branch with no commit of its own: Changes vs its base, Recent commits'] = f
   eq(vim.list_slice(lines(p, { ['/x/r'] = true }), 4), { '  > Changes vs origin/main (0)', '  > Recent commits (0)' })
 end
 
+T['a pending review adds a review (n) · gs row above the full diff row of Commits'] = function()
+  local review = require('agent-ide.review')
+  vim.fn.delete(vim.fn.stdpath('state') .. '/agent-ide/reviews', 'rf')
+  review._reset()
+  local p = project('/x/r')
+  cache._set('/x/r', 'head', BRANCH)
+  cache._set('/x/r', 'base', BRANCH)
+  cache._set('/x/r', 'commits', {})
+  local exp = { ['/x/r'] = true, ['/x/r/git/commits'] = true }
+  eq(lines(p, exp)[6], '      > full diff · gd')
+  review.add('/x/r', { kind = 'NOTE', text = 'a', scope = { kind = 'head' }, path = 'f.lua' })
+  review.add('/x/r', { kind = 'BUG', text = 'b', scope = { kind = 'head' }, path = 'f.lua' })
+  local t = tree.build({ p }, parked, exp, 0, icons, nil, nil, gs.rows)
+  eq(t.lines[6], '      review (2) · gs')
+  eq(t.lines[7], '      > full diff · gd')
+  local node = t.nodes[6]
+  eq({ node.type, node.root, type(node.open), node.fold.key }, { 'git_review', '/x/r', 'function', '/x/r/git/commits' })
+  review.clear('/x/r', { 1, 2 })
+  eq(lines(p, exp)[6], '      > full diff · gd')
+  review._reset()
+end
+
+T['the Commits full diff row expands to the files of the commits scope; a file opens the full diff there'] = function()
+  local p = project('/x/r')
+  cache._set('/x/r', 'head', BRANCH)
+  cache._set('/x/r', 'base', BRANCH)
+  cache._set('/x/r', 'commits', {})
+  local exp = { ['/x/r'] = true, ['/x/r/git/commits'] = true, ['/x/r/git/fulldiff'] = true }
+  local t = tree.build({ p }, parked, exp, 0, icons, nil, nil, gs.rows)
+  eq(t.lines[6], '      v full diff · gd')
+  eq(t.lines[7], '          loading…')
+  eq({ t.nodes[6].type, t.nodes[6].kind, t.nodes[6].fold.key, t.nodes[6].open }, { 'git_fulldiff', 'commits', '/x/r/git/fulldiff', nil })
+  cache._set('/x/r', 'committed', { { status = 'M', path = 'f.lua', added = 1, removed = 0 }, { status = 'A', path = 'g.lua', added = 4, removed = 0 } })
+  t = tree.build({ p }, parked, exp, 0, icons, nil, nil, gs.rows)
+  eq(vim.list_slice(t.lines, 6, 9), { '      v full diff · gd', '          M f.lua  +1', '          A g.lua  +4', '      commit graph · G' })
+  local f = t.nodes[7]
+  eq({ f.type, f.mode, f.file.path, type(f.open), f.fold.key, f.fold.focus }, { 'git_file', 'commits', 'f.lua', 'function', '/x/r/git/fulldiff', t.nodes[6].id })
+  local opened
+  package.loaded['agent-ide.ui.fulldiff'] = { open = function(o) opened = o end }
+  f.open(f)
+  package.loaded['agent-ide.ui.fulldiff'] = nil
+  eq({ opened.root, opened.scope.kind, opened.focus_path }, { '/x/r', 'commits', 'f.lua' })
+  -- the Changes row stays a plain row
+  t = tree.build({ p }, parked, { ['/x/r'] = true, ['/x/r/git/changes'] = true }, 0, icons, nil, nil, gs.rows)
+  eq(t.lines[5], '      full diff · gd')
+end
+
 T['commit expands to its files; nodes carry ids, folds and open handlers'] = function()
   local p = project('/x/r')
   cache._set('/x/r', 'head', BRANCH)
@@ -168,12 +215,12 @@ T['commit expands to its files; nodes carry ids, folds and open handlers'] = fun
   cache._set('/x/r', 'files:aaaa', { { status = 'M', path = 'f.lua', added = 1, removed = 0 } })
   t = tree.build({ p }, parked, exp, 0, icons, nil, nil, gs.rows)
   -- the first rows of an open Commits section: the full diff of the commits, the commit graph
-  eq(t.lines[6], '      full diff · gd')
+  eq(t.lines[6], '      > full diff · gd')
   eq(t.lines[7], '      commit graph · G')
   eq(t.lines[8], '      > uncommitted')
   local fulldiff = t.nodes[6]
-  eq({ fulldiff.type, fulldiff.kind, fulldiff.root, type(fulldiff.open), fulldiff.fold.key },
-    { 'git_fulldiff', 'commits', '/x/r', 'function', '/x/r/git/commits' })
+  eq({ fulldiff.type, fulldiff.kind, fulldiff.root, fulldiff.open, fulldiff.fold.key }, -- a fold row: <CR> toggles, gd opens
+    { 'git_fulldiff', 'commits', '/x/r', nil, '/x/r/git/fulldiff' })
   local graph = t.nodes[7]
   eq({ graph.type, graph.root, type(graph.open), graph.fold.key }, { 'git_graph', '/x/r', 'function', '/x/r/git/commits' })
   local opened
