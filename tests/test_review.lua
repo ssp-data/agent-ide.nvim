@@ -3,6 +3,7 @@
 -- without a window. Synthetic roots in a temporary folder; the runner's temporary state dir.
 local eq = MiniTest.expect.equality
 local review = require('agent-ide.review')
+local text = require('agent-ide.review_text')
 
 local tmp, root, notes
 
@@ -106,6 +107,64 @@ T['refresh: another writer\'s change is seen by stamp'] = function()
   vim.uv.fs_utime(path, os.time() + 5, os.time() + 5) -- a stamp that differs for sure
   eq(review.count(root), 2)
   eq(review.add(root, { kind = 'NOTE', text = 'c', scope = { kind = 'head' }, path = 'c' }).id, 3)
+end
+
+-- The text --------------------------------------------------------------------------------------
+
+local OPTS = { project = 'myapp', root = '/r', kinds = review.DEFAULT_KINDS, intro = text.DEFAULT_INTRO }
+
+T['build: the spec example, grouped by scope in first-appearance order, numbered through'] = function()
+  local lines = text.build({
+    { id = 1, kind = 'BUG', text = 'swallows the error, notify instead', scope = { kind = 'head', hash = '7f0f916' },
+      path = 'lua/agent-ide/git.lua', side = 'new', line = 42, code = '  if not ok then return cb(nil) end' },
+    { id = 2, kind = 'NOTE', text = 'this is fine, but move the guard above the pcall', scope = { kind = 'head', hash = '7f0f916' },
+      path = 'lua/agent-ide/git.lua', side = 'new', line = 43, code = '  if not cb then return end' },
+    { id = 3, kind = 'DESIGN', text = 'the screenshots belong under docs/images, not the root',
+      scope = { kind = 'commit', hash = '60523ec0', short = '60523ec', subject = 'update images' }, path = 'README.md' },
+  }, OPTS)
+  eq(lines, {
+    'I reviewed your changes and have the following comments. Please address them.', '',
+    'Comment kinds: NOTE (an observation), BUG (wrong behaviour), DESIGN (structure or approach)', '',
+    '## uncommitted changes (working tree against HEAD 7f0f916)', '',
+    '1. **[BUG]** `lua/agent-ide/git.lua:42` — `  if not ok then return cb(nil) end`',
+    '   swallows the error, notify instead',
+    '2. **[NOTE]** `lua/agent-ide/git.lua:43` — `  if not cb then return end`',
+    '   this is fine, but move the guard above the pcall', '',
+    '## commit 60523ec (update images)', '',
+    '3. **[DESIGN]** `README.md` (file)',
+    '   the screenshots belong under docs/images, not the root' })
+end
+
+T['build: old side, multi-line text, the Repository line, an unknown kind, interleaved scopes'] = function()
+  local lines = text.build({
+    { id = 1, kind = 'NIT', text = 'one\ntwo', scope = { kind = 'commit', hash = 'aaaa', short = 'aaa', subject = 'first' },
+      path = 'a.lua', side = 'old', line = 7, code = 'gone()' },
+    { id = 2, kind = 'ISSUE', text = 'x', scope = { kind = 'head', hash = 'bbbbbbb' }, path = 'b.lua', side = 'new', line = 1, code = '' },
+    { id = 3, kind = 'ISSUE', text = 'y', scope = { kind = 'commit', hash = 'aaaa', short = 'aaa', subject = 'first' }, path = 'c.lua' },
+  }, vim.tbl_extend('force', OPTS, { cwd = '/r/sub' }))
+  eq(lines, {
+    'I reviewed your changes and have the following comments. Please address them.',
+    'Repository: /r', '',
+    'Comment kinds: ISSUE (a problem to fix), NIT', '',
+    '## commit aaa (first)', '',
+    '1. **[NIT]** `a.lua:7 (old line)` — `gone()`', '   one', '   two',
+    '3. **[ISSUE]** `c.lua` (file)', '   y', '',
+    '## uncommitted changes (working tree against HEAD bbbbbbb)', '',
+    '2. **[ISSUE]** `b.lua:1`', '   x' })
+end
+
+T['heading: branch, commits on branch, recent commits, head without a hash'] = function()
+  eq(text.heading({ kind = 'branch', base = 'main' }), 'branch vs main (uncommitted included)')
+  eq(text.heading({ kind = 'commits', base = 'origin/main' }), 'commits on branch (origin/main..HEAD)')
+  eq(text.heading({ kind = 'commits', base = 'HEAD' }), 'recent commits')
+  eq(text.heading({ kind = 'commits' }), 'recent commits')
+  eq(text.heading({ kind = 'head' }), 'uncommitted changes (working tree against HEAD)')
+end
+
+T['reference'] = function()
+  eq(text.reference({ path = 'a b.lua', side = 'new', line = 3 }), '`a b.lua:3`')
+  eq(text.reference({ path = 'a.lua', side = 'old', line = 3 }), '`a.lua:3 (old line)`')
+  eq(text.reference({ path = 'a.lua' }), '`a.lua` (file)')
 end
 
 return T
