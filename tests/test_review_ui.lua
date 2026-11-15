@@ -1,6 +1,7 @@
 -- Review comments end to end: a child Neovim on a temporary repository, the full diff open,
 -- comments typed in the editor, shown as virtual lines, kept across reloads, sent on.
 local R = dofile(vim.fn.getcwd() .. '/tests/git_repo.lua')
+local fake = dofile(vim.fn.getcwd() .. '/tests/fake.lua')
 local eq = MiniTest.expect.equality
 local child = MiniTest.new_child_neovim()
 
@@ -53,11 +54,21 @@ local T = MiniTest.new_set({ hooks = {
 
 -- `vim.ui.select` answers with `_G.pick` (an index, default 1) and records every question in
 -- `_G.asks`; `vim.fn.confirm` answers `_G.confirm` (default 1).
+local log -- the fake Claude's log (start with `fake` steps)
+
 local function start(opts)
+  opts = opts or {}
+  local cmd
+  if opts.fake then
+    cmd, log = fake.cmd(opts.fake)
+    opts.fake = nil
+    opts.claude = { cmd = cmd }
+  end
   child.restart({ '-u', 'tests/minimal_init.lua' })
   child.lua([[
-    local env, opts = ...
+    local env, opts, log = ...
     for k, v in pairs(env) do vim.uv.os_setenv(k, v) end
+    if log then vim.uv.os_setenv('FAKE_CLAUDE_LOG', log) end
     vim.env.TMUX = nil
     vim.o.columns, vim.o.lines = 200, 50
     _G.notes, _G.asks, _G.pick, _G.confirm = {}, {}, 1, 1
@@ -77,7 +88,7 @@ local function start(opts)
     live = { interval_ms = 50, cmd = { 'echo', '[]' } },
     icons_style = 'plain', icons = ICONS, git = { delta = false },
     chat = { ask_picker = 'select' },
-  }, opts or {}) })
+  }, opts), log })
 end
 
 local function wait_for(cond, what, ms)
@@ -494,6 +505,91 @@ T[':AgentsReview from the chat of the repository runs the done step'] = function
   eq(asks()[2].prompt, 'Review of r: 1 comment, to "Work on it"')
   wait_for(function() return count() == 0 end, 'cleared')
   eq(prompt_lines()[1], 'I reviewed your changes and have the following comments. Please address them.')
+end
+
+-- The direct send ---------------------------------------------------------------------------------
+
+local function init_step()
+  return { emit = { type = 'system', subtype = 'init', session_id = 'x', model = 'claude-haiku-5-5-20261001',
+    permissionMode = 'default', slash_commands = {}, claude_code_version = '2.1.306' } }
+end
+local function result_step(t)
+  return { emit = { type = 'result', subtype = 'success', is_error = false, result = t } }
+end
+
+-- The prompts the fake received (the `initialize` request left out).
+local function fake_prompts()
+  local out = {}
+  for _, l in ipairs(fake.log(log)) do
+    if l['in'] and not fake.is_init(l['in']) then out[#out + 1] = vim.json.decode(l['in']).message.content end
+  end
+  return out
+end
+
+local function session_state()
+  return child.lua_get('(function(id) local s = require("agent-ide.session").get(id); return s and { state = s.state, queue = s.queue } or vim.NIL end)(...)', { ID })
+end
+
+T['<C-CR> in the editor sends that one comment: the fake sees the review text; the comment leaves the review'] = function()
+  start({ fake = { { expect = 'I reviewed your changes' }, init_step(), result_step('ok') } })
+  open({ kind = 'head' })
+  wait_drawer_sessions()
+  cursor_on('+aaa')
+  child.type_keys('c')
+  wait_for(editor_open, 'the editor')
+  child.type_keys('BUG: swallows it', '<C-CR>')
+  wait_for(function() return #fake_prompts() == 1 end, 'the fake to receive the prompt', 10000)
+  local text = fake_prompts()[1]
+  eq(text:sub(1, 76), 'I reviewed your changes and have the following comments. Please address them')
+  eq(text:find('Comment kinds: BUG (wrong behaviour)', 1, true) ~= nil, true)
+  eq(text:find('## uncommitted changes (working tree against HEAD ', 1, true) ~= nil, true)
+  eq(text:find('1. **[BUG]** `a.txt:3` — `aaa`\n   swallows it', 1, true) ~= nil, true)
+  wait_for(function() return count() == 0 end, 'the comment gone')
+  eq(virt_at('+aaa'), nil)
+  eq(view() ~= vim.NIL and view().shown, true)
+  eq(editor_open(), false)
+  eq(child.lua_get('_G.notes[#_G.notes]'), 'Agent-IDE: sent to "Work on it": [BUG] `a.txt:3`')
+  eq(prompt_lines(), { '' }) -- the prompt buffer was not used
+  wait_for(function() local st = session_state().state; return st == 'idle' or st == 'done' end, 'the turn to end')
+end
+
+T['<C-CR> while a turn runs queues the comment; it leaves the review once queued'] = function()
+  start({ fake = { { expect = 'first' }, init_step(), { emit = { type = 'system', subtype = 'status', status = 'requesting' } },
+    { sleep_ms = 2500 }, result_step('ok') } })
+  open({ kind = 'head' })
+  wait_drawer_sessions()
+  cursor_on('+aaa')
+  child.type_keys('c')
+  wait_for(editor_open, 'the editor')
+  child.type_keys('first', '<C-CR>')
+  wait_for(function() return session_state() ~= vim.NIL and session_state().state == 'busy' end, 'a running turn', 10000)
+  cursor_on('+n2')
+  child.type_keys('c')
+  wait_for(editor_open, 'the editor again')
+  child.type_keys('ISSUE: second', '<C-CR>')
+  wait_for(function() return session_state() ~= vim.NIL and #session_state().queue == 1 end, 'queued')
+  eq(session_state().queue[1]:find('ISSUE (a problem to fix)', 1, true) ~= nil, true)
+  wait_for(function() return count() == 0 end, 'both gone')
+  eq(child.lua_get('_G.notes[#_G.notes]'), 'Agent-IDE: sent to "Work on it": [ISSUE] `new.txt:2`')
+end
+
+T['<C-CR> on a session running elsewhere is refused; the comment stays'] = function()
+  start({ fake = { { expect = 'never' }, init_step(), result_step('no') },
+    live = { interval_ms = 50, cmd = { 'echo', '[{"sessionId":"' .. ID .. '","status":"idle","pid":1,"cwd":"/x"}]' } } })
+  open({ kind = 'head' })
+  wait_drawer_sessions()
+  cursor_on('+aaa')
+  child.type_keys('c')
+  wait_for(editor_open, 'the editor')
+  child.type_keys('never', '<C-CR>')
+  wait_for(function()
+    local notes = child.lua_get('_G.notes')
+    return notes[#notes] == 'Agent-IDE: session is running in another Claude; use gT in the drawer to jump to it'
+  end, 'the refusal')
+  vim.wait(200)
+  eq(count(), 1)
+  eq(fake.log(log), {})
+  eq(virt_at('+aaa'), '  ┃ NOTE  never')
 end
 
 return T
